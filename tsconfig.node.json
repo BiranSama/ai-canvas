@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": ["node", "electron-vite/node", "vitest/globals"]
+  },
+  "include": [
+    "electron.vite.config.ts",
+    "vitest*.config.ts",
+    "playwright*.config.ts",
+    "eslint.config.js",
+    "src/main/**/*.ts",
+    "src/preload/**/*.ts",
+    "src/shared/**/*.ts",
+    "tests/integration/**/*.ts",
+    "tests/e2e/**/*.ts",
+    "tests/visual/**/*.ts"
+  ]
+}
+

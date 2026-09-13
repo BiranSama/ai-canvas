@@ -1,0 +1,33 @@
+appId: local.aicanvas.desktop
+productName: AI Canvas
+copyright: Copyright © 2026
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**
+  - node_modules/sharp/**
+  - node_modules/@img/**
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+win:
+  executableName: AI Canvas
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+nsis:
+  artifactName: AI-Canvas-${version}-${arch}-Setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: AI Canvas
+portable:
+  artifactName: AI-Canvas-${version}-${arch}-Portable.${ext}
+publish: null
