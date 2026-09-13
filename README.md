@@ -1,233 +1,195 @@
 <div align="center">
 
-![AI Canvas — The canvas is the context.](assets/readme/hero.svg)
+![AI Canvas — one scene, multiple representations](assets/readme/hero.svg)
 
-# AI Canvas
+**让意图成为结构，让每一次生成都能继续创作。**
 
-**面向人机共创的结构化视觉运行时**
+A local-first visual instrument with a scene-native Agent.
 
-Natural language in. Editable scenes out. Your intent stays in control.
+<kbd>TypeScript</kbd> &nbsp; <kbd>Electron</kbd> &nbsp; <kbd>React</kbd> &nbsp; <kbd>Konva</kbd> &nbsp; <kbd>SQLite</kbd>
 
-`Scene-native Agent` · `Reference Compiler` · `Revision-aware Execution` · `Local-first`
-
-[创作体验](#创作体验) · [技术内核](#技术内核) · [系统架构](#系统架构) · [我们的愿景](#我们的愿景) · [快速开始](#快速开始)
+[创作现场](#创作现场) · [参考编译](#参考编译) · [执行契约](#执行契约) · [生成运行时](#生成运行时) · [开始构建](#开始构建) · [创作者](#创作者)
 
 </div>
 
-## 从一句话，到一件可以继续修改的作品
+## 创作现场
 
-**生成是一瞬间，创作是一连串决定。**
+“保留主体，把标题收小一点。沿用这个构图，再试一版清晨的光。”
 
-标题要再克制一点。主体往右。保留这束光。沿用刚才的构图，再试一个方向。
+一句话同时包含保留、排版、参考与生成。AI Canvas 将这些决定落在同一份可编辑的 **Scene** 中：Agent 与鼠标操作同一组对象，参考编译器组织生成上下文，结果回到画布成为下一次创作的起点。
 
-AI Canvas 把这些决定放进同一个可持续编辑的项目：自然语言表达意图，Agent 操作结构化 Scene，图像模型负责生成与编辑，你随时用鼠标接管最后一毫米。
+![AI Canvas 商品海报编辑界面：独立文字图层、画布与浮动工具](assets/readme/workspace-product.png)
 
-**我们的核心命题：让画布成为 AI 的上下文，让 AI 成为画布的操作能力。**
+<sub>实际应用截图，来自 2026-09-08 离线验证；画面使用自制合成测试素材，展示编辑交互，不代表真实模型画质。下方图解为架构示意。</sub>
 
-![AI Canvas 实际界面：商品海报、独立文字图层、属性检查器和浮动创作输入](assets/readme/workspace-product.png)
+| 对话 — 表达意图 | 画布 — 精确控制 | 生成 — 探索方向 |
+| :--- | :--- | :--- |
+| 说明目标、补充参考、检查实际动作 | 排版、移动、缩放、分组、裁剪 | 配置请求、比较结果、延续分支 |
+| Agent 修改结构化对象 | 人工接管同一份 Scene | 成图重新进入编辑循环 |
 
-<sub>实际应用截图，取自 2026-09-08 的离线场景验证；画面为自制合成测试素材，用于展示编辑能力，不作为真实模型画质示例。</sub>
-
-## 创作体验
-
-### 一个项目，三种创作焦点
-
-| 对话 / Intent | 画布 / Composition | 生成 / Exploration |
-|---|---|---|
-| 表达目标、补充参考、指定保留项 | 直接调整文字、图片、形状和图层 | 编译参考、执行任务、比较与延续结果 |
-| 观察 Agent 的实际动作与状态 | 选择、移动、缩放、分组、裁剪 | 将结果重新放回画布继续编辑 |
-
-三种焦点围绕共享项目状态展开，连接 Scene、素材、选择与生成结果。你可以用语言开始，用画布修正，再让模型继续。
-
-```text
-“做一张 4:5 的香氛海报，标题是晨雾。先搭构图。”
-     ↓
-明确意图 → 结构化构图 → 人工精修 → 带参考生成 → 比较版本
-                ↑                                ↓
-                └──────── 继续编辑同一件作品 ────────┘
-```
-
-### 创作空间，跟着你的手走
-
-工具栏、属性检查器与创作输入以 **Glass Islands** 组织：浮动、停靠、缩放、收起。界面将空间留给作品，同时保留桌面编辑所需的精确控制。
-
-文字排版、结构参考与图像像素拥有各自的职责。画布上的文字和形状可以继续编辑；生成图片作为图片元素参与后续创作，不承诺把任意成图自动拆成独立图层。
+工具栏、检查器与创作输入采用 **Glass Islands**：浮动、停靠、缩放、收起，将空间留给作品。文字与形状保持可编辑；模型返回的成图以图片元素继续参与创作。
 
 <details>
-<summary><strong>展开查看：封面创作与独立文字编辑</strong></summary>
+<summary><strong>另一种创作现场：封面与独立文字排版</strong></summary>
 
-![山海之间封面在 AI Canvas 中编辑，标题是独立的文字元素](assets/readme/workspace-cover.png)
+![AI Canvas 封面编辑：底图与文字分开承载](assets/readme/workspace-cover.png)
 
-同一批离线验证截图。底图与文字分开承载，排版调整保留在 Scene 中。
+同批离线验证截图。调整标题不需要重新生成整张底图。
 
 </details>
 
-## 技术内核
+## 参考编译
 
-### 01 / Scene-native Agent
+### The scene is a source language.
 
-**Agent 的动作，落在编辑器的数据模型里。**
+画布同时承载几何、语义与视觉证据。一次生成需要知道主体在哪里、哪些元素互相遮挡、哪些文字必须准确，以及哪些辅助对象不应该出现在成图里。
 
-画布由带 Schema 的元素构成：文字、图片、形状、草图、蒙版、光线与分组。Agent 通过受限工具创建和调整这些对象，用户也在操作同一份模型。
+**Reference Compiler 将这些信息编译为语义包与视觉参考，再按 Provider 能力组织请求上下文。**
 
-执行路径包含工具策略、作用域、元素锁定与 `expectedSceneRevision` 校验。模型依据旧画布提出的修改，可以在提交前被识别；画布实际执行的结果与模型文字描述分别记录。
+![Scene 到 Prompt IR、Prompt Package、视觉参考与 Provider 编译的管线](assets/readme/reference-pipeline.svg)
 
-`Typed Scene` → `Validated Tool Call` → `Command Batch` → `Committed Revision`
+| 中间表示 | 保留的信息 | 对创作的意义 |
+| :--- | :--- | :--- |
+| **Prompt IR** | bounds、zIndex、relations、occlusions、protectedElementIds | 布局、层次、遮挡与保护意图可以被继续处理 |
+| **Prompt Package** | compositionContract、textContract、styleBible、negativeConstraints | 将构图、文字、风格与禁止项分别表达 |
+| **Reference Manifest** | appearance-composite、semantic-sheet、source-image、sketch-underlay、mask | 区分参考素材的用途，并保留来源关系 |
+| **Provider Compiled Prompt** | prompt、negativePrompt、referenceMode、warnings | 在具体服务能力下形成提示内容与限制说明 |
 
-[Scene Schema](src/domain/scene/schema.ts) · [命令执行](src/domain/commands/apply-command.ts) · [Agent 执行器](src/main/agent/agent-tool-executor-shadow.ts)
+例如，`reference-only` 元素可成为语义引导；隐藏、排除、蒙版与分组元素的 presentation 可为 `omitted`。它们依然可以携带结构或保护信息，但不应被直接画成编辑器控件。
 
-### 02 / Visual Reference Compiler
+<details>
+<summary><strong>代码切面：Scene 如何投影为 Prompt IR</strong></summary>
 
-**把构图意图编译成模型可以消费的约束。**
+下面摘取 `compilePromptIr` 中的元素映射；省略了其他字段。这是内部编译实现，不是对外 SDK 示例。
 
-参考管线处理的不只有图片，还包括元素位置、遮挡、视觉权重、文字策略和参考角色。`Prompt IR` 保留中间语义，`Prompt Package` 组织请求上下文，Provider 编译层适配服务协议。
+```typescript
+elements: scene.elements.map((element) => ({
+  id: element.id,
+  type: element.type,
+  // … name, description, semanticRole, provenance
+  referencePolicy: element.referencePolicy,
+  presentation: presentationFor(element),
+  zIndex: element.zIndex,
+  opacity: element.opacity,
+  blendMode: resolveBlendMode(element),
+  bounds: { ...element.transform },
+  attributes: attributesFor(element)
+}))
+```
+
+编译结果同时携带 `sceneId` 与 `sceneRevision`。参考素材读取经过内容哈希核对；编译器输出合成参考、语义图、Prompt IR、Prompt Package、Provider prompt 与 warnings。
+
+**阅读实现：** [Reference Compiler](src/main/reference/reference-compiler.ts) · [Prompt IR](src/main/reference/prompt-ir.ts) · [Reference Contracts](src/shared/reference.ts) · [编译集成测试](tests/integration/reference-compiler.test.ts)
+
+</details>
+
+## 执行契约
+
+### A suggestion becomes a checked mutation.
+
+Agent 的修改先表达为有作用域的命令，再经过策略、锁定和版本校验。预览保存操作批次、结果摘要与反向补丁；提交时，Main 再次核对权威 Scene 与执行结果。
+
+![Agent 修改经过提议、预览、提交检查与持久化；旧版本提交会被拒绝](assets/readme/execution-contract.svg)
+
+| 校验点 | 实现约束 |
+| :--- | :--- |
+| **版本** | `expectedSceneRevision` 必须与当前权威 Scene 一致；预览后发生人工编辑，提交也会再次检查 |
+| **作用域与权限** | scope、元素锁定、保护与工具策略参与预览许可判断 |
+| **执行身份** | 幂等键绑定工具参数；提交令牌绑定会话、有效期与 prepared 状态 |
+| **结果一致性** | 对照预览核对 batch、patches、inversePatches 与 Scene digest |
+| **可撤销记录** | 本地已提交操作保留批次与反向补丁；外部请求及费用不随画布撤销而消失 |
+
+这条链路解决一个具体冲突：**模型规划之后，用户可能已经把画布改了。** 旧计划不能假装这些修改不存在。
+
+**阅读实现：** [Agent 执行器](src/main/agent/agent-tool-executor-shadow.ts) · [Scene Service](src/main/scene/scene-service.ts) · [命令执行](src/domain/commands/apply-command.ts) · [执行契约测试](tests/integration/agent-tool-executor-shadow.test.ts)
+
+## 生成运行时
+
+### A network timeout is not proof of non-submission.
+
+生成任务保留请求身份、提交状态、结果与来源关联。队列必须区分“确定未发送”和“可能已经发出”，因为一次普通的重试可能变成第二笔付费请求。
 
 ```text
-Scene + Assets + Reference Policy
-               │
-               ▼
-          Prompt IR
-               │
-               ▼
-        Prompt Package  +  Composite Reference
-               │
-               ▼
-      Provider-specific Request
+                        request outcome
+                               │
+              ┌────────────────┴─────────────────┐
+              ▼                                  ▼
+     confirmed not_sent                 possibly submitted
+              │                         or externalTaskId exists
+              ▼                                  │
+     retry safety checks                         ▼
+              │                               NO_REPOST
+              ▼                                  │
+     prepare a new attempt              reconcile the original job
 ```
 
-支持 **Structure / Visual / Hybrid** 三种参考模式，把“借用布局”和“借用观感”变成明确的数据选择。
+对于非 mock Provider，如果任务已有外部 ID、提交状态不是 `not_sent`，或请求身份不可用，重试保护会拒绝重新 POST。无法核对原请求配置、凭据版本或累计预算时，外部执行进入暂停处理路径。
 
-[Reference Compiler](src/main/reference/reference-compiler.ts) · [Prompt IR](src/main/reference/prompt-ir.ts) · [Provider 编译层](src/main/reference/provider-prompt-compiler.ts)
+请求数、图片数与费用上限由执行策略约束；恢复能力仍取决于具体 Provider 协议。UI 呈现实际动作、范围、结果与恢复状态。
 
-### 03 / Revision-aware, Reversible Operations
+**阅读实现：** [Generation Queue](src/main/generation/generation-queue.ts) · [Workflow Coordinator](src/main/generation/generation-workflow-coordinator.ts) · [Generation Policy](src/main/agent/generation-policy.ts) · [队列集成测试](tests/integration/generation-queue.test.ts)
 
-**一次修改有边界，也有来路。**
+## 运行边界
 
-Scene revision、操作批次与持久化记录构成修改链路。Agent 的修改会形成可检查的批次；已提交的画布操作可以追溯和撤销。预期版本与实际版本分开核对，避免把并发发生的人工编辑当成不存在。
-
-可撤销范围是应用支持的本地操作。已经发出的模型请求与产生的费用不会因为撤销画布而自动撤销。
-
-[Scene Service](src/main/scene/scene-service.ts) · [执行与提交校验](src/main/agent/agent-tool-executor-shadow.ts)
-
-### 04 / Stateful Agent Runtime
-
-**创作上下文，跨越单次回答。**
-
-Agent 运行时围绕 thread、turn、任务关系和执行状态组织创作；上下文构建与压缩连接近期对话、项目记忆、Directive 和当前 Scene。补充、修正与新的创作目标通过任务语义参与后续执行。
-
-界面呈现动作、范围、结果、等待与恢复状态，不展示或伪造模型的私有思维链。
-
-[Persistent Agent Loop](src/main/agent/persistent-agent-loop.ts) · [Context Builder](src/main/agent/context-builder.ts) · [任务契约](src/shared/agent-harness.ts)
-
-### 05 / Cost-aware Generation Jobs
-
-**把网络的不确定性，当作系统状态处理。**
-
-生成任务保留请求身份、状态、结果与来源关联。请求数、图片数和费用上限参与执行策略；当请求可能已经发送而结果未知时，队列有禁止重复 POST 的处理路径。
-
-这为取消、恢复、身份核对和结果回填提供了明确的位置。服务协议与真实响应仍决定哪些恢复能力可用。
-
-[Generation Queue](src/main/generation/generation-queue.ts) · [生成工作流](src/main/generation/generation-workflow-coordinator.ts) · [执行策略](src/main/agent/generation-policy.ts)
-
-### 06 / Local-first, Main-authoritative
-
-**作品留在本机，外部能力经过明确边界。**
-
-SQLite 与本地素材文件承载项目数据；Electron Main 管理持久化、凭据存取与模型请求。Renderer 通过 Preload 和窄 IPC 接口操作，窗口启用 sandbox、context isolation 并禁用 Node integration。
-
-本地优先不等于所有模型都在本机运行。在线推理与生成会把相应提示词、参考内容发送给用户配置的 Provider。
-
-[窗口隔离](src/main/window.ts) · [IPC 注册](src/main/ipc/register-desktop-ipc.ts) · [数据存储](src/main/storage/database.ts)
-
-## 系统架构
-
-```mermaid
-flowchart TB
-    subgraph Surface["CREATIVE SURFACE"]
-        Chat["Conversation"]
-        Canvas["Direct Canvas"]
-        Generate["Generation Studio"]
-    end
-    IPC["Typed IPC · Preload Boundary"]
-    Agent["Agent Runtime · Context / Policy / Recovery"]
-    Scene["Scene Authority · Revision / Commands / Undo"]
-    Compiler["Reference Compiler · IR / Package / Composite"]
-    Jobs["Job Runtime · Identity / Budget / Lineage"]
-    Store[("Local SQLite + Asset Files")]
-    Models["Configured LLM / Image Providers"]
-
-    Chat <--> IPC
-    Canvas <--> IPC
-    Generate <--> IPC
-    IPC <--> Agent
-    IPC <--> Scene
-    IPC <--> Jobs
-    Agent --> Scene
-    Agent <--> Models
-    Scene --> Compiler
-    Compiler --> Jobs
-    Jobs <--> Models
-    Agent --> Store
-    Scene --> Store
-    Jobs --> Store
-
-    style Surface fill:#f5f7fa,stroke:#d5deea,color:#172033
-    style Scene fill:#eaf0ff,stroke:#376bff,color:#172033
-    style Compiler fill:#f2eefb,stroke:#9276ff,color:#172033
-    style Store fill:#f4f1eb,stroke:#c7b895,color:#172033
+```text
+  RENDERER       Conversation ↔ Canvas ↔ Generate
+                              │
+  PRELOAD               typed, validated IPC
+                              │
+  MAIN           ┌────────────┼─────────────────────┐
+                 │            │                     │
+           Agent Runtime  Scene Authority      Generation Runtime
+           context/policy revision/commands     identity/budget
+                 │            │                     │
+                 │      Reference Compiler ─────────┘
+                 │            │                     │
+           configured LLM     │              configured image API
+                              │
+  LOCAL STORAGE          SQLite + asset files
 ```
 
-| 层 | 技术选择 |
-|---|---|
-| Desktop Runtime | Electron · electron-vite · electron-builder |
-| Typed UI & State | React · TypeScript · Zustand · Immer |
-| Canvas & Interaction | Konva · react-konva · 浮动工具岛 |
-| Contracts & Persistence | Zod · SQLite · better-sqlite3 · Kysely |
-| Image Pipeline | Sharp · 参考合成 · 蒙版编译 |
-| Verification | Vitest · Testing Library · Playwright |
+Main 负责 Scene、持久化、凭据与外部请求。Renderer 通过 Preload 与窄 IPC 接口操作，窗口开启 sandbox、context isolation 并关闭 Node integration。在线模型使用保存并验证过的 Provider 配置；本地优先指项目存储与控制边界，在线推理仍会发送所需提示词与参考内容。
 
-## 我们的愿景
+Agent 上下文围绕 thread、turn、任务关系与执行状态组织，连接近期对话、项目记忆、Directive 与当前 Scene。对话、画布与生成是同一个项目的三个工作焦点。
 
-### 创作的单位，是持续演进的作品。
+**阅读实现：** [窗口隔离](src/main/window.ts) · [IPC 注册](src/main/ipc/register-desktop-ipc.ts) · [持久化 Agent Loop](src/main/agent/persistent-agent-loop.ts) · [Context Builder](src/main/agent/context-builder.ts) · [数据库](src/main/storage/database.ts)
 
-我们希望 AI 创作工具能够理解一件作品的连续性：哪些部分已经确定，哪些还在探索，哪些值得保留，以及你为什么要改下一步。
+<details>
+<summary><strong>工程地图与技术栈</strong></summary>
 
-**AI Canvas 想成为一件可以每天使用的视觉创作仪器。**
+| 目录 | 职责 | 主要技术 |
+| :--- | :--- | :--- |
+| `src/domain/` | Scene、命令与领域规则 | TypeScript · Zod · Immer |
+| `src/main/` | Agent、参考编译、生成、存储 | Electron · Sharp · SQLite · Kysely |
+| `src/preload/` | 桌面 API 桥接 | Electron contextBridge |
+| `src/renderer/` | 创作界面、画布与交互状态 | React · Konva · Zustand |
+| `src/shared/` | 跨进程类型与运行时契约 | TypeScript · Zod |
+| `tests/` | 单元、集成与桌面行为验证 | Vitest · Testing Library · Playwright |
 
-- **让意图有结构。** 自然语言、参考图和手工编辑共同描述作品，减少反复解释。
-- **让自动化可接管。** AI 能推进工作，你能随时检查、修改、撤销和继续。
-- **让作品有记忆。** 连接素材、构图、生成与版本，让好的方向能够延续。
-- **让工具有分寸。** 作品占据舞台，界面与自动化在需要时出现。
+</details>
 
-这是我们的长期方向。当前公开的是正在演进的产品实现；真实模型的理解、画质和编辑效果取决于服务能力，尚未完成的愿景不会写成已经交付的承诺。
+## 开始构建
 
-**从“描述一张图”，走向“与 AI 一起完成一件作品”。**
-
-## 快速开始
-
-当前以 **Windows x64** 为主要开发与打包平台。准备 Node.js `>=22` 和 pnpm `11.9.0`，在项目根目录执行：
+主要开发与打包平台为 **Windows x64**。准备 Node.js **≥22** 与 pnpm **11.9.0**：
 
 ```powershell
 pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-打开应用，新建项目。在设置中分别配置语言模型与图片模型的协议、服务地址、模型标识和 API Key，并设置请求、图片与费用上限。本地画布可以先开始使用；在线能力使用你自己的模型服务与额度。
+新建项目后，在设置中分别配置语言模型与图片模型的协议、服务地址、模型标识及 API Key，并设置请求、图片与费用上限。本地画布可以先开始使用；在线能力使用你自己的模型服务与额度。
 
 <details>
-<summary><strong>Provider 协议与模型配置</strong></summary>
+<summary><strong>Provider 适配范围</strong></summary>
 
-语言模型适配路径：Ark Responses、OpenAI Responses、OpenAI Chat Completions。
+| 能力 | 已有协议适配路径 |
+| :--- | :--- |
+| 语言模型 | Ark Responses · OpenAI Responses · OpenAI Chat Completions |
+| 图片模型 | Ark Seedream · OpenAI Images · 任务式图片协议 |
 
-图片模型适配路径：Ark Seedream、OpenAI Images、任务式图片协议。
-
-相同协议名称不保证所有服务实现都兼容。参考图、蒙版、编辑与流式输出还取决于具体服务的能力声明和实际响应。
-
-配置定义见 [Provider Contracts](src/shared/provider-settings.ts)。仓库不提供可用密钥。
+协议名称相同不保证各服务实现都兼容。参考图、蒙版、编辑和流式输出取决于具体服务能力及实际响应。配置定义见 [Provider Contracts](src/shared/provider-settings.ts)。
 
 </details>
-
-### 开发与测试
 
 ```powershell
 pnpm typecheck
@@ -237,36 +199,35 @@ pnpm test:integration
 pnpm build
 ```
 
-桌面交互测试使用 `pnpm test:e2e`；Windows 安装包与便携版使用 `pnpm package:win`。首次安装可能需要下载 Electron 和构建原生模块；桌面测试需要图形环境，部分专项用例需要额外的合成测试数据。
+桌面交互：`pnpm test:e2e`。Windows 安装包与便携版：`pnpm package:win`。
 
-自动验证使用离线替身，不调用真实收费 Provider。macOS / Linux 尚未作为已验证的交付平台。当前代码状态不等于所有端到端场景都已重新验收。
+首次安装可能下载 Electron 并构建原生模块。桌面测试需要图形环境，部分专项用例需要额外合成测试数据。自动验证使用离线替身，不调用真实收费 Provider；macOS / Linux 尚未作为已验证交付平台。
 
-### 仓库结构
+## 创作的单位，是持续演进的作品
 
-```text
-src/
-  domain/       Scene schema、命令与领域逻辑
-  main/         Agent、生成、参考编译、存储与安全边界
-  preload/      桌面 API 桥接
-  renderer/     React 界面、Konva 画布与交互状态
-  shared/       跨进程类型与运行时契约
-tests/          单元、集成与桌面行为测试及必要素材
-build/          应用图标
-assets/readme/  本页使用的公开展示素材
-```
+我们希望 AI 能理解作品的连续性：哪些已确定，哪些还在探索，哪些需要保留，以及下一步为什么要改。
 
-## Build with us
+**意图有结构。自动化可接管。作品有记忆。工具有分寸。**
 
-如果你正在探索 **AI 原生编辑器、可撤销的 Agent 执行、视觉语义编译或本地创作工具**，这里有一套可以直接阅读和运行的实现。
+这些原则指向一件可以每天使用的视觉创作仪器。当前仓库是持续演进中的产品实现；任意成图自动拆层、真实模型效果保证与跨平台全面验收，都不属于当前交付承诺。
 
-欢迎用一个真实的创作问题开始交流：想保留什么、希望改变什么、在哪一步失去了控制。提交反馈时使用脱敏截图与最小复现，不附带私人项目或凭据。
+## 创作者
 
-当前尚未配置开源许可证，复用授权范围待明确。
+| 创作者 | 贡献 |
+| :--- | :--- |
+| **BiranSama** | 产品方向、设计判断与最终决策 |
+| **Codex · OpenAI** | AI 辅助代码实现、工程分析与文档设计 |
+
+这个项目由人与 AI 协作推进：人决定值得做什么，AI 参与把它实现出来，再一起审视结果。以上署名说明协作工具与贡献角色，不代表 OpenAI 官方出品或背书。
+
+欢迎围绕 AI 原生编辑器、视觉语义编译与可撤销 Agent 执行交流。反馈请提供脱敏截图与最小复现。当前尚未配置开源许可证，复用授权范围待明确。
+
+---
 
 <div align="center">
 
-**The canvas is the context. The next move is yours.**
+**The canvas is the context.**
 
-如果这也是你想看到的创作未来，留一颗 Star，一起把它做出来。
+Built with intention. Shaped through collaboration.
 
 </div>
