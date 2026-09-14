@@ -125,6 +125,18 @@ body { min-width: 0; min-height: 0; }
 .variation-receipt button { min-height: 42px; font-size: 12px; }
 .generation-status :is(strong, span, small) { font-size: 12px; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
 .generation-status button { min-height: 42px; font-size: 12px; }
+.generation-status.has-problem { flex: 0 0 auto; align-items: start; }
+.generation-status.has-problem > svg { margin-top: 4px; }
+.generation-status.has-problem strong,
+.generation-status .generation-status-summary { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.generation-failure-details { min-width: 0; color: var(--muted-slate); font-size: 12px; }
+.generation-failure-details > summary { display: list-item; width: fit-content; min-height: 40px; padding: 10px 2px; cursor: pointer; }
+.generation-failure-details > summary:focus-visible,
+.generation-failure-content:focus-visible { outline: 2px solid var(--cobalt); outline-offset: 2px; }
+.generation-failure-content { max-height: min(180px, 24vh); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 8px 10px; border-radius: 6px; background: var(--pearl, #F5F7FA); color: var(--ink, #172033); overflow-wrap: anywhere; white-space: pre-wrap; }
+.generation-failure-content p { margin: 0 0 8px; line-height: 1.6; }
+.generation-failure-content p:last-child { margin-bottom: 0; }
+.generation-failure-content .preserved-request { max-width: none; overflow: visible; white-space: pre-wrap; font-size: inherit; color: inherit; }
 .filmstrip-header { align-items: center; }
 .filmstrip-header > div { flex-direction: row; align-items: center; gap: 12px; }
 .filmstrip-header strong { font-size: 12px; }

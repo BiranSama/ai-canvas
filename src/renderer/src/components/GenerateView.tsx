@@ -739,13 +739,24 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
               {activeJob !== null ? <Clock3 size={15} /> : <AlertCircle size={15} />}
               <div>
                 <strong>{activeJob !== null ? stageLabels[activeJob.stage] : localError ?? stageLabels[latestProblem?.stage ?? 'failed']}</strong>
-                <span>{activeJob !== null
+                <span className="generation-status-summary">{activeJob !== null
                   ? engineLabel(providers, activeJob.providerId, activeJob.model)
                   : latestProblem === null
                     ? '请检查本地运行状态后重试。'
-                    : `${engineLabel(providers, latestProblem.providerId, latestProblem.model)} · ${stageLabels[latestProblem.stage]} · ${latestProblem.error?.message ?? '任务未完成'}`}</span>
-                {activeJob === null && latestProblem !== null && <small className="preserved-request">要求已保留：{latestProblem.request.prompt}</small>}
-                {(activeJob ?? latestProblem) !== null && <small className="generation-time-policy">{jobTimeCopy((activeJob ?? latestProblem)!)}</small>}
+                    : latestProblem.error?.code === 'PROVIDER_CONTENT_FILTERED' || latestProblem.error?.message?.startsWith('OutputImageSensitiveContentDetected:')
+                      ? '图片未通过服务审核。要求已保留，已有结果不受影响。'
+                      : '要求已保留，已有结果不受影响。可查看详情后重试。'}</span>
+                {activeJob !== null && <small className="generation-time-policy">{jobTimeCopy(activeJob)}</small>}
+                {activeJob === null && latestProblem !== null && (
+                  <details key={latestProblem.id} className="generation-failure-details">
+                    <summary>查看失败详情</summary>
+                    <div className="generation-failure-content" tabIndex={0} role="region" aria-label="失败详情">
+                      <p>{engineLabel(providers, latestProblem.providerId, latestProblem.model)} · {latestProblem.error?.message ?? '任务未完成'}</p>
+                      <p className="preserved-request">要求已保留：{latestProblem.request.prompt}</p>
+                      <p>{jobTimeCopy(latestProblem)}</p>
+                    </div>
+                  </details>
+                )}
               </div>
               {activeJob !== null && <button type="button" onClick={() => void window.desktop.cancelGeneration(activeJob.id).then(refreshJobs)}><Square size={11} />取消</button>}
               {activeJob === null && latestProblem !== null && (latestProblem.copiedFromProjectId
