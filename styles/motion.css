@@ -1,0 +1,135 @@
+/* AI Canvas marketing site — motion layer.
+   Scroll-driven animations where supported; IntersectionObserver fallback adds .is-in.
+   Every continuous animation stops under prefers-reduced-motion. */
+
+@keyframes spectrum-drift { to { --spectrum-angle: 240deg; } }
+
+/* Reveal: default hidden, shown by .is-in (JS) or by view timeline (CSS). */
+[data-reveal] {
+  opacity: 0;
+  translate: 0 18px;
+  filter: blur(6px);
+  transition: opacity 700ms var(--ease-standard), translate 700ms var(--ease-standard), filter 700ms var(--ease-standard);
+  transition-delay: calc(var(--i, 0) * 90ms);
+}
+[data-reveal].is-in { opacity: 1; translate: 0 0; filter: none; }
+
+/* Where the browser has view timelines, drive reveals from scroll position instead
+   (no JS needed, perfectly synchronised with scrolling). */
+@supports (animation-timeline: view()) {
+  [data-reveal]:not(.hero [data-reveal]) {
+    opacity: 1; translate: none; filter: none; transition: none;
+    animation: reveal-in linear both;
+    animation-timeline: view();
+    animation-range: entry 8% entry 42%;
+  }
+  @keyframes reveal-in {
+    from { opacity: 0; translate: 0 22px; filter: blur(6px); }
+    to { opacity: 1; translate: 0 0; filter: blur(0); }
+  }
+
+  .cap-grid li[data-reveal], .invariants li[data-reveal], .honest-list li[data-reveal], .rule-list li[data-reveal] {
+    animation-range: entry 0% entry 35%;
+  }
+
+  /* Poster parallax inside the islands playground */
+  .playground-art .poster {
+    animation: art-parallax linear both;
+    animation-timeline: view();
+    animation-range: entry 0% exit 100%;
+  }
+  @keyframes art-parallax { from { translate: 0 28px; } to { translate: 0 -28px; } }
+
+  /* Layers diagram slides in like a stack settling */
+  .layers .layer[data-reveal] { animation-name: layer-in; }
+  @keyframes layer-in {
+    from { opacity: 0; translate: 0 26px; scale: .985; filter: blur(4px); }
+    to { opacity: 1; translate: 0 0; scale: 1; filter: blur(0); }
+  }
+
+  /* Nav progress: a thin spectral line tied to document scroll */
+  .site-nav::after {
+    content: "";
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+    background: linear-gradient(90deg, var(--cobalt), var(--iris), var(--champagne));
+    transform-origin: 0 50%;
+    animation: nav-progress linear both;
+    animation-timeline: scroll(root);
+  }
+  @keyframes nav-progress { from { scale: 0 1; } to { scale: 1 1; } }
+}
+
+/* Hero: line-by-line entrance (time-based since it happens on load) */
+.hero [data-reveal] { transition-duration: 900ms; }
+
+/* Device tilt driven by JS (--tilt/--rise/--zoom). Scroll-timeline version when available. */
+@supports (animation-timeline: scroll()) {
+  .hero-stage .device {
+    transform: none;
+    animation: device-flatten linear both;
+    animation-timeline: scroll(root);
+    animation-range: 0px 60vh;
+  }
+  @keyframes device-flatten {
+    from { transform: rotateX(14deg) translateY(40px) scale(.96); }
+    to { transform: rotateX(0deg) translateY(0) scale(1); }
+  }
+}
+
+/* Manifesto lines light in sequence via IntersectionObserver (.is-lit) */
+
+/* Marquee and cue are the only continuous motions on the page; both stop under Reduced Motion. */
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] { opacity: 1; translate: none; filter: none; transition: none; animation: none !important; }
+  .statement-line { opacity: 1; translate: none; transition: none; }
+  .marquee-track { animation: none; flex-wrap: wrap; width: auto; }
+  .scroll-cue span { animation: none; }
+  .hero-title em { animation: none; }
+  .hero-stage .device { animation: none !important; transform: none !important; }
+  .playground-art .poster { animation: none !important; }
+  .island, .mini-space > [data-el], .poster-title, .poster-foot, .poster-light { transition-duration: 100ms !important; }
+  .trace-path { animation: trace-static 1ms forwards, trace-fade 200ms ease forwards; animation-delay: 0ms, 1600ms; }
+  .trace-endpoint { animation: trace-dot 1ms forwards, trace-fade 200ms ease forwards; animation-delay: 0ms, 1600ms; }
+  @keyframes trace-static { to { stroke-dashoffset: 0; opacity: .6; } }
+  .tree-links path.is-lit { animation: none; stroke-dashoffset: 0; }
+  .orb { animation: none; }
+  .trace-composer-meta b.is-running { animation: none; }
+  .stage, .stage-fields code, .cnode, .focus-step { transition-duration: 1ms; }
+  .site-nav::after { animation: none; scale: 0 1; }
+  .pipeline-track { transition: none; }
+}
+
+/* Reduced transparency: solid instruments, identical layout */
+@media (prefers-reduced-transparency: reduce) {
+  .glass, .site-nav.is-scrolled, .mini-toolbar, .mini-inspector, .mini-composer, .orb, .trace-composer {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    background: var(--solid-surface);
+  }
+  .glass::before { opacity: 0; }
+}
+
+/* Optical quality gate: the SVG displacement refraction is only applied on the
+   stage demos, on hover/idle, and only where the browser can afford it. */
+@supports (backdrop-filter: url("#liquid-glass-fine") blur(1px)) {
+  [data-optical="fine"] .island.glass:not(.is-dragging) {
+    -webkit-backdrop-filter: url("#liquid-glass-fine") blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+    backdrop-filter: url("#liquid-glass-fine") blur(var(--glass-blur)) saturate(var(--glass-saturate)) brightness(var(--glass-brightness));
+  }
+  [data-optical="fine"][data-material="satin"] .island.glass:not(.is-dragging) {
+    -webkit-backdrop-filter: url("#liquid-glass-satin") blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: url("#liquid-glass-satin") blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+}
+
+/* View transitions for the whole-page theme switch */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 520ms; animation-timing-function: var(--ease-standard); }
+::view-transition-old(root) { animation-name: vt-out; }
+::view-transition-new(root) { animation-name: vt-in; }
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { clip-path: circle(0% at var(--vt-x, 50%) var(--vt-y, 0%)); } to { clip-path: circle(150% at var(--vt-x, 50%) var(--vt-y, 0%)); } }
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none; }
+}
+
+/* Sections are light enough that content-visibility is not worth its scroll-height jumps
+   next to the pinned compiler track; nothing is skipped. */

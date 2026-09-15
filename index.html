@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="pearl" data-material="crystal">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AI Canvas — The canvas is the context.</title>
+  <meta name="description" content="AI Canvas 是一件本地优先、LLM 驱动的桌面视觉创作仪器。Agent 与你修改同一份结构化 Scene：对话、画布、生成是同一件作品的三个工作焦点。">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f5f7fa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171a20" media="(prefers-color-scheme: dark)">
+  <meta property="og:title" content="AI Canvas — The canvas is the context.">
+  <meta property="og:description" content="让意图成为结构，让每一次生成都能继续创作。本地优先的 LLM 驱动视觉创作桌面软件。">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="assets/readme/workspace-product.png">
+  <link rel="icon" href="assets/icon.png" type="image/png">
+  <link rel="preload" as="image" href="assets/readme/workspace-product.png" fetchpriority="high">
+  <link rel="stylesheet" href="styles/tokens.css">
+  <link rel="stylesheet" href="styles/base.css">
+  <link rel="stylesheet" href="styles/sections.css">
+  <link rel="stylesheet" href="styles/motion.css">
+  <link rel="stylesheet" href="styles/cinema.css">
+  <script defer src="scripts/theme.js"></script>
+  <script defer src="scripts/hero-gl.js"></script>
+  <script defer src="scripts/focus-morph.js"></script>
+  <script defer src="scripts/islands.js"></script>
+  <script defer src="scripts/trace.js"></script>
+  <script defer src="scripts/compiler.js"></script>
+  <script defer src="scripts/contract.js"></script>
+  <script defer src="scripts/runtime.js"></script>
+  <script defer src="scripts/optical-lens.js"></script>
+  <script defer src="scripts/cinema.js"></script>
+  <script defer src="scripts/main.js"></script>
+  <noscript><style>[data-reveal]{opacity:1;translate:none;filter:none}.statement-line{opacity:1;translate:none}.focus-step{opacity:1}.stage{opacity:1;scale:1}.stage-fields code{opacity:1;translate:none}</style></noscript>
+  <noscript><style>.cinema{height:100svh}.cinema-steps,.cinema-lens{display:none}.cinema-controls{justify-content:flex-end}</style></noscript>
+</head>
+<body class="cinema-edition">
+  <a class="skip-link" href="#main">跳到内容</a>
+
+  <!-- Shared SVG definitions: the product's liquid-glass refraction filter, the spectrum gradient, and icon symbols. -->
+  <svg class="svg-defs" width="0" height="0" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="liquid-glass-fine" x="-12%" y="-12%" width="124%" height="124%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.008 0.024" numOctaves="2" seed="17" result="glassNoise"/>
+        <feGaussianBlur in="glassNoise" stdDeviation="0.42" result="softNoise"/>
+        <feDisplacementMap in="SourceGraphic" in2="softNoise" scale="10" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <filter id="liquid-glass-satin" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.012 0.035" numOctaves="1" seed="29" result="satinNoise"/>
+        <feGaussianBlur in="satinNoise" stdDeviation="0.65" result="softSatinNoise"/>
+        <feDisplacementMap in="SourceGraphic" in2="softSatinNoise" scale="4" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+      <linearGradient id="spectrum" x1="0" y1="1" x2="0.35" y2="0">
+        <stop offset="0" stop-color="#376BFF"/>
+        <stop offset="0.55" stop-color="#9276FF"/>
+        <stop offset="1" stop-color="#EAD9B8"/>
+      </linearGradient>
+      <linearGradient id="spectrum-h" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#376BFF"/>
+        <stop offset="0.55" stop-color="#9276FF"/>
+        <stop offset="1" stop-color="#EAD9B8"/>
+      </linearGradient>
+
+      <symbol id="i-pointer" viewBox="0 0 24 24"><path d="M5 3l14 8-6.5 1.5L9 19z"/></symbol>
+      <symbol id="i-hand" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 5a1.5 1.5 0 0 1 3 0v7M14 6.5a1.5 1.5 0 0 1 3 0V13M8 12.5a1.5 1.5 0 0 0-3 0v2.5c0 3.5 2.5 6 6 6h1c3.3 0 5-2 5-5.5V8"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-9 9"/></symbol>
+      <symbol id="i-type" viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></symbol>
+      <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20l4-1L19 8l-3-3L5 16zM14 7l3 3"/></symbol>
+      <symbol id="i-shapes" viewBox="0 0 24 24"><path d="M8.5 3.5L13 11H4z"/><circle cx="17" cy="17" r="4"/><rect x="3" y="13" width="7" height="7" rx="1.5"/></symbol>
+      <symbol id="i-box" viewBox="0 0 24 24"><path d="M5 3h3M16 3h3M5 21h3M16 21h3M3 5v3M3 16v3M21 5v3M21 16v3"/><rect x="8" y="8" width="8" height="8" rx="1"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></symbol>
+      <symbol id="i-mask" viewBox="0 0 24 24"><path d="M5 4h2M10 4h4M17 4h2M4 7v2M4 12v2M4 17v2M20 7v2M20 12v2M20 17v2M5 20h2M10 20h4M17 20h2"/></symbol>
+      <symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 4l8 4-8 4-8-4zM4 12l8 4 8-4M4 16l8 4 8-4"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+      <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="8" cy="8" r="1.2"/><circle cx="12" cy="8" r="1.2"/><circle cx="16" cy="8" r="1.2"/><circle cx="8" cy="16" r="1.2"/><circle cx="12" cy="16" r="1.2"/><circle cx="16" cy="16" r="1.2"/></symbol>
+      <symbol id="i-orb" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 5v3M12 16v3"/></symbol>
+      <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+      <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></symbol>
+      <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M15 8l3 3M18 5l2 2"/></symbol>
+      <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12M6 12l6 6 6-6M4 20h16"/></symbol>
+      <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4.5 1.5-4.5-2.5-6-3m12 5v-3.5c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1.1-.3-3.5 1.3a12.3 12.3 0 0 0-6.2 0C6.5 2.8 5.4 3.1 5.4 3.1a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 4 9.5c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V21"/></symbol>
+      <symbol id="i-sparkle-none" viewBox="0 0 24 24"><path d="M4 4l16 16M20 4L4 20"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="site-nav" data-nav>
+    <a class="brand" href="#hero" aria-label="AI Canvas 回到顶部">
+      <img class="brand-mark" src="assets/icon.png" alt="" width="28" height="28" decoding="async">
+      <span class="brand-name">AI Canvas</span>
+      <span class="brand-version">0.3 预发布</span>
+    </a>
+    <nav class="nav-links" aria-label="页面导航">
+      <a href="#scenes">创作现场</a>
+      <a href="#focus">三个焦点</a>
+      <a href="#islands">工具岛</a>
+      <a href="#trace">动作光迹</a>
+      <a href="#compiler">参考编译</a>
+      <a href="#contract">执行契约</a>
+      <a href="#runtime">生成运行时</a>
+      <a href="#themes">主题</a>
+      <a href="#boundary">边界</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="theme-cycle" type="button" data-theme-cycle aria-label="切换工作室主题" title="切换工作室主题">
+        <span class="theme-dot" aria-hidden="true"></span>
+        <span data-theme-label>月白</span>
+      </button>
+      <a class="btn btn-primary btn-sm" href="#download">下载</a>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ============ HERO ============ -->
+
+    <section class="cinema" id="hero" data-cinema aria-labelledby="cinema-title">
+      <div class="cinema-sticky">
+        <div class="cinema-light" aria-hidden="true"></div>
+        <div class="cinema-grain" aria-hidden="true"></div>
+        <div class="cinema-heading">
+          <p class="cinema-eyebrow"><span></span> AI CANVAS · 让创作，超越一次生成</p>
+          <h1 id="cinema-title">你的画布，<br>就是 <em>AI 的上下文。</em></h1>
+          <div class="cinema-intro"><p>说出意图。精修细节。延续每一种可能。<br>你与 Agent，在同一份作品里继续创作。</p><a class="cinema-cta" href="#download">开始创作 <span>↗</span></a></div>
+        </div>
+        <div class="cinema-chapter" aria-live="polite"><span data-chapter-kicker>同一份 Scene</span><h2 data-chapter-title>让整个工作台，围绕作品展开。</h2><p data-chapter-description>对话、画布与生成，共用同一份创作上下文。</p></div>
+        <div class="cinema-perspective">
+          <div class="cinema-rig" data-cinema-rig>
+            <div class="screen-core" data-screen-core><img class="screen-fallback" src="assets/readme/workspace-product.png" width="1440" height="900" alt="AI Canvas 实际工作台：晨雾商品海报、独立标题图层、浮动工具与 Agent 创作输入"><canvas data-optical-canvas aria-hidden="true"></canvas></div>
+            <div class="cinema-fragment fragment-tools" data-fragment="tools" style="--fx:1.18%;--fy:27.1%;--fw:4.2%;--fh:52.7%"><div class="fragment-image"><img src="assets/readme/workspace-product.png" alt="" style="width:2380.9523809523807%;height:189.75332068311195%;left:-28.095238095238095%;top:-51.423149905123346%"></div><span class="fragment-label">工具岛 / 精确操作</span></div>
+            <div class="cinema-fragment fragment-inspector" data-fragment="inspector" style="--fx:75.8%;--fy:10.45%;--fw:23%;--fh:72.5%"><div class="fragment-image"><img src="assets/readme/workspace-product.png" alt="" style="width:434.7826086956522%;height:137.93103448275863%;left:-329.5652173913044%;top:-14.413793103448274%"></div><span class="fragment-label">检查器 / 细节可控</span></div>
+            <div class="cinema-fragment fragment-composer" data-fragment="composer" style="--fx:24.5%;--fy:74.1%;--fw:50.2%;--fh:23.9%"><div class="fragment-image"><img src="assets/readme/workspace-product.png" alt="" style="width:199.203187250996%;height:418.4100418410042%;left:-48.80478087649402%;top:-310.0418410041841%"></div><span class="fragment-label">创作输入 / 描述意图</span></div>
+            <div class="cinema-fragment fragment-artwork" data-fragment="artwork" style="--fx:24.16%;--fy:11.55%;--fw:30.69%;--fh:61.34%"><div class="fragment-image"><img src="assets/readme/workspace-product.png" alt="" style="width:325.8390355164549%;height:163.025758069775%;left:-78.72271098077549%;top:-18.829475057059014%"></div><span class="fragment-label">作品 / 始终在中央</span></div>
+            <div class="cinema-screen-edge" aria-hidden="true"></div>
+          </div>
+        </div>
+        <div class="cinema-reticle" aria-hidden="true"><span>SCENE / CONTEXT</span><i></i><b>+</b></div>
+        <div class="cinema-controls">
+          <div class="cinema-steps" role="group" aria-label="开场演示进度"><button data-cinema-step="0" aria-current="step"><span>01</span> 进入工作台</button><button data-cinema-step="1"><span>02</span> 展开工具</button><button data-cinema-step="2"><span>03</span> 聚焦作品</button></div>
+          <button class="cinema-lens" data-lens-toggle aria-pressed="false"><span>⌕</span> 光学检视</button>
+          <a class="cinema-skip" href="#scenes">跳到创作现场 ↓</a>
+        </div>
+        <p class="cinema-disclosure">实际应用截图 · 网页空间分解演示；示例素材不代表模型画质</p>
+        <div class="cinema-progress" aria-hidden="true"><i></i></div>
+      </div>
+    </section>
+
+
+    <!-- ============ MANIFESTO ============ -->
+    <section class="manifesto" id="manifesto" aria-label="产品原则">
+      <p class="statement">
+        <span class="statement-line" data-word>意图有结构。</span>
+        <span class="statement-line" data-word>自动化可接管。</span>
+        <span class="statement-line" data-word>作品有记忆。</span>
+        <span class="statement-line" data-word>工具有分寸。</span>
+      </p>
+      <p class="statement-sub" data-reveal>它不是给图片模型套了一层表单，也不是聊天网页加右侧预览。<br>它是一间安静、精密、有流动光学器件的数字工作室：作品是光源，工具围绕作品出现、移动、停靠和收起。</p>
+    </section>
+
+    <!-- ============ SCENES (real screenshots) ============ -->
+    <section class="scenes" id="scenes" aria-labelledby="scenes-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>创作现场</p>
+        <h2 class="h2" id="scenes-title" data-reveal>一句话同时包含保留、排版、参考与生成。</h2>
+        <p class="lede" data-reveal>“保留主体，把标题收小一点。沿用这个构图，再试一版清晨的光。”——AI Canvas 将这些决定落在同一份可编辑的 Scene 中：Agent 与鼠标操作同一组对象，参考编译器组织生成上下文，结果回到画布成为下一次创作的起点。</p>
+      </div>
+      <div class="gallery" data-gallery>
+        <div class="gallery-track" data-gallery-track tabindex="0" aria-label="产品截图，可横向滚动">
+          <figure class="slide is-active">
+            <div class="slide-frame">
+              <img src="assets/readme/workspace-product.png" alt="AI Canvas 画布视图：商品海报“晨雾”，标题为独立文字图层并处于选中状态，右侧属性检查器显示文字内容、视觉权重、字号与对齐。" width="1440" height="900" loading="lazy" decoding="async">
+            </div>
+            <figcaption>
+              <b>商品主视觉</b>
+              <span>独立文字图层、画布与浮动工具。调整标题不需要重新生成整张底图。</span>
+            </figcaption>
+          </figure>
+          <figure class="slide">
+            <div class="slide-frame">
+              <img src="assets/readme/workspace-cover.png" alt="AI Canvas 画布视图：封面“山海之间”，底图与文字分开承载，标题处于选中状态。" width="1440" height="900" loading="lazy" decoding="async">
+            </div>
+            <figcaption>
+              <b>封面与独立文字排版</b>
+              <span>底图与文字分开承载。文字与形状保持可编辑；模型返回的成图以图片元素继续参与创作。</span>
+            </figcaption>
+          </figure>
+        </div>
+        <div class="gallery-nav">
+          <button type="button" class="gallery-arrow" data-gallery-prev aria-label="上一张">←</button>
+          <div class="gallery-dots" role="group" aria-label="切换截图">
+            <button type="button" data-gallery-dot aria-current="true" aria-label="第 1 张"></button>
+            <button type="button" data-gallery-dot aria-current="false" aria-label="第 2 张"></button>
+          </div>
+          <button type="button" class="gallery-arrow" data-gallery-next aria-label="下一张">→</button>
+        </div>
+        <p class="fine-print">实际应用截图，来自 2026-09-08 离线验证；画面使用自制合成测试素材，展示编辑交互，不代表真实模型画质。</p>
+      </div>
+    </section>
+
+    <!-- ============ THREE FOCUSES ============ -->
+    <section class="focus" id="focus" aria-labelledby="focus-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>同一份 Scene · 网页交互示意</p>
+        <h2 class="h2" id="focus-title" data-reveal>对话、画布、生成。<br>不是三个页面，是三个工作焦点。</h2>
+        <p class="lede" data-reveal>它们共享同一个项目、对话、Scene 版本、选择、素材、生成任务、结果、血缘、已提交的撤销历史与项目记忆。切换视图不会复制状态、不会丢失选择、不会重置草稿、不会打断正在运行的任务。</p>
+      </div>
+
+      <div class="focus-layout">
+        <div class="focus-sticky">
+          <div class="focus-stage glass-frame" data-focus-stage data-view="conversation">
+            <div class="mini-titlebar">
+              <span class="mini-brand"><img src="assets/icon.png" alt="" width="18" height="18"> 晨雾 · 商品主视觉</span>
+              <div class="mini-switcher" role="tablist" aria-label="工作焦点">
+                <button type="button" role="tab" data-focus-tab="conversation" aria-selected="true">对话</button>
+                <button type="button" role="tab" data-focus-tab="canvas" aria-selected="false">画布</button>
+                <button type="button" role="tab" data-focus-tab="generate" aria-selected="false">生成</button>
+              </div>
+              <span class="mini-export">导出 PNG</span>
+            </div>
+
+            <div class="mini-space">
+              <!-- The one shared artwork. It persists across all three focuses. -->
+              <div class="poster" data-el="artwork">
+                <span class="poster-light"></span>
+                <span class="poster-leaf"></span>
+                <span class="poster-subject"><i></i></span>
+                <span class="poster-kicker">AUREL / MORNING MIST</span>
+                <span class="poster-title">晨雾</span>
+                <span class="poster-foot">晨雾香氛 · 淡香精 · 50 mL</span>
+              </div>
+
+              <div class="mini-record" data-el="record">
+                <p class="mini-record-head">当前作品 <strong>4:5 画布 · 7 个元素</strong></p>
+                <p class="mini-you">你</p>
+                <p class="mini-msg">保留主体，把标题收小一点。沿用这个构图，再试一版清晨的光。</p>
+                <p class="mini-you">助手 <svg class="icon icon-xs"><use href="#i-check"/></svg></p>
+                <p class="mini-msg">标题已缩小到 72，主体与构图保留。清晨光线方向已记录为本轮偏好。</p>
+                <ul class="mini-activity">
+                  <li><b>更新画布结构</b><span>当前选区 · 准确主标题 · 已完成</span><em>定位 · 撤销</em></li>
+                  <li><b>记录本轮偏好</b><span>项目记忆 · 待确认</span><em>确认</em></li>
+                </ul>
+              </div>
+
+              <div class="mini-toolbar" data-el="toolbar">
+                <svg class="icon"><use href="#i-pointer"/></svg>
+                <svg class="icon"><use href="#i-hand"/></svg>
+                <svg class="icon"><use href="#i-image"/></svg>
+                <svg class="icon"><use href="#i-type"/></svg>
+                <svg class="icon"><use href="#i-pencil"/></svg>
+                <svg class="icon"><use href="#i-shapes"/></svg>
+                <svg class="icon"><use href="#i-box"/></svg>
+                <svg class="icon"><use href="#i-sun"/></svg>
+                <svg class="icon"><use href="#i-mask"/></svg>
+              </div>
+
+              <div class="mini-inspector" data-el="inspector">
+                <p class="mini-inspector-tabs"><b>图层</b><span>属性</span></p>
+                <ul>
+                  <li><i>文</i>准确主标题</li>
+                  <li><i>主</i>香氛瓶身</li>
+                  <li><i>光</i>清晨侧光</li>
+                  <li><i>形</i>展台</li>
+                  <li><i>草</i>叶片 · 仅参考</li>
+                </ul>
+              </div>
+
+              <div class="mini-results" data-el="results">
+                <div class="mini-result is-current"><span class="poster-mini v1"></span><b>当前 · v1.2</b></div>
+                <div class="mini-result"><span class="poster-mini v2"></span><b>变体 01</b></div>
+                <div class="mini-result"><span class="poster-mini v3"></span><b>变体 02</b></div>
+                <p class="mini-result-actions"><span>放入画布</span><span>继续变化</span><span>比较</span><span>导出</span></p>
+              </div>
+
+              <div class="mini-composer" data-el="composer">
+                <span class="mini-composer-text" data-composer-text>描述你想调整的画面…</span>
+                <span class="mini-composer-meta"><b data-composer-state>待命</b> 当前画布 · 仅调整画布</span>
+                <span class="mini-composer-send"><svg class="icon"><use href="#i-arrow-up"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <ol class="focus-steps">
+          <li class="focus-step" data-focus-step="conversation">
+            <p class="step-index">01 · 对话</p>
+            <h3>表达意图，检查真实动作。</h3>
+            <p>文档式创作记录，不是聊天气泡墙。你说清目标，Agent 回执它实际做了什么：动作、范围、对象、结果、费用与外发摘要，以及可用的撤销、定位、继续。右侧是同一份 Scene 的实时画布，不是静态副本。</p>
+            <ul class="chips">
+              <li>审阅 · 每步确认</li><li>协作 · 低风险自动</li><li>自动 · 边界内连续</li>
+            </ul>
+            <ul class="chips chips-muted">
+              <li>修正本轮</li><li>补充本轮</li><li>排到下一轮</li><li>立即停止</li>
+            </ul>
+          </li>
+          <li class="focus-step" data-focus-step="canvas">
+            <p class="step-index">02 · 画布</p>
+            <h3>精确控制，人工接管同一份作品。</h3>
+            <p>选择、移动、缩放、分组、排序、裁剪、编辑文字、绘制草图与蒙版、放置光影。文字与形状保持可编辑；模型返回的成图以图片元素继续参与创作。工具栏、检查器与创作输入是三座独立的光学工具岛。</p>
+            <ul class="chips">
+              <li>选择 V</li><li>抓手 H</li><li>导入图片</li><li>文字 T</li><li>草图 B</li><li>形状</li><li>主体占位</li><li>光影</li><li>蒙版</li>
+            </ul>
+          </li>
+          <li class="focus-step" data-focus-step="generate">
+            <p class="step-index">03 · 生成</p>
+            <h3>探索方向，延续分支。</h3>
+            <p>配置一次请求，观察一个真实任务，比较结果，继续变化，把结果放回画布并导出。结果进入「结果家族」：参考、当前、父子变化与恢复形成可理解的血缘。失败时保留原 Prompt、参考与参数，说明真实失败阶段。</p>
+            <ul class="chips">
+              <li>仅文字</li><li>当前画布</li><li>选中结果</li><li>指定图片</li>
+            </ul>
+            <ul class="chips chips-muted">
+              <li>首次生成</li><li>局部修改</li><li>相似延展</li><li>画布参考</li><li>文字效果</li>
+            </ul>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============ GLASS ISLANDS ============ -->
+    <section class="islands" id="islands" aria-labelledby="islands-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>Glass Islands</p>
+        <h2 class="h2" id="islands-title" data-reveal>工具围绕作品出现、<br>移动、停靠、收起。</h2>
+        <p class="lede" data-reveal>没有固定的左右侧栏。画布工具栏、检查器和 Agent 创作输入都是独立的浮动仪器：可拖动、可缩放、可停靠四边、内容随方向重排、可收成一颗实用的圆球再恢复，并记住你的布局。下面是可以真正操作的演示。</p>
+      </div>
+
+      <div class="playground-wrap">
+        <div class="playground" data-island-playground tabindex="-1">
+          <div class="playground-art">
+            <div class="poster poster-lg">
+              <span class="poster-light"></span>
+              <span class="poster-leaf"></span>
+              <span class="poster-subject"><i></i></span>
+              <span class="poster-kicker">AUREL / MORNING MIST</span>
+              <span class="poster-title">晨雾</span>
+              <span class="poster-foot">晨雾香氛 · 淡香精 · 50 mL</span>
+            </div>
+          </div>
+
+          <div class="dock-preview" data-dock-preview hidden></div>
+
+          <div class="island glass" data-island="toolbar" data-mode="floating" style="--x:24px;--y:120px">
+            <div class="island-grip" data-grip tabindex="0" role="button" aria-label="工具栏：拖动或用方向键移动，Enter 收成圆球">
+              <svg class="icon"><use href="#i-grip"/></svg>
+              <span>工具</span>
+              <button class="island-collapse" type="button" data-collapse aria-label="收成圆球" title="收成圆球"><svg class="icon"><use href="#i-orb"/></svg></button>
+            </div>
+            <div class="island-body">
+              <div class="tool-list" role="toolbar" aria-label="画布工具">
+                <button type="button" class="is-active" aria-label="选择 V" title="选择 V" data-tool="pointer"><svg class="icon"><use href="#i-pointer"/></svg></button>
+                <button type="button" aria-label="抓手 H" title="抓手 H" data-tool="hand"><svg class="icon"><use href="#i-hand"/></svg></button>
+                <button type="button" aria-label="导入图片" title="导入图片" data-tool="image"><svg class="icon"><use href="#i-image"/></svg></button>
+                <button type="button" aria-label="文字 T" title="文字 T" data-tool="type"><svg class="icon"><use href="#i-type"/></svg></button>
+                <button type="button" aria-label="草图 B" title="草图 B" data-tool="pencil"><svg class="icon"><use href="#i-pencil"/></svg></button>
+                <button type="button" aria-label="形状" title="形状" data-tool="shapes"><svg class="icon"><use href="#i-shapes"/></svg></button>
+                <button type="button" aria-label="主体占位" title="主体占位" data-tool="box"><svg class="icon"><use href="#i-box"/></svg></button>
+                <button type="button" aria-label="光影" title="光影" data-tool="sun"><svg class="icon"><use href="#i-sun"/></svg></button>
+                <button type="button" aria-label="蒙版" title="蒙版" data-tool="mask"><svg class="icon"><use href="#i-mask"/></svg></button>
+              </div>
+            </div>
+            <span class="island-resize" data-resize aria-hidden="true"></span>
+          </div>
+
+          <div class="island glass" data-island="inspector" data-mode="floating" style="--x:calc(100% - 300px);--y:96px;--w:268px;--h:auto">
+            <div class="island-grip" data-grip tabindex="0" role="button" aria-label="检查器：拖动或用方向键移动，Enter 收成圆球">
+              <svg class="icon"><use href="#i-grip"/></svg>
+              <span>图层 · 属性</span>
+              <button class="island-collapse" type="button" data-collapse aria-label="收成圆球" title="收成圆球"><svg class="icon"><use href="#i-orb"/></svg></button>
+            </div>
+            <div class="island-body">
+              <ul class="layer-list">
+                <li class="is-selected"><i>文</i><span>准确主标题<small>文字 · 96</small></span></li>
+                <li><i>主</i><span>香氛瓶身<small>主体</small></span></li>
+                <li><i>光</i><span>清晨侧光<small>光影</small></span></li>
+                <li><i>形</i><span>展台<small>形状</small></span></li>
+                <li><i>草</i><span>叶片<small>草图 · 仅参考</small></span></li>
+              </ul>
+            </div>
+            <span class="island-resize" data-resize aria-hidden="true"></span>
+          </div>
+
+          <div class="island glass island-composer" data-island="composer" data-mode="floating" style="--x:calc(50% - 250px);--y:calc(100% - 132px);--w:500px">
+            <div class="island-grip" data-grip tabindex="0" role="button" aria-label="创作输入：拖动或用方向键移动，Enter 收成圆球">
+              <svg class="icon"><use href="#i-grip"/></svg>
+              <span>Agent 创作输入</span>
+              <button class="island-collapse" type="button" data-collapse aria-label="收成圆球" title="收成圆球"><svg class="icon"><use href="#i-orb"/></svg></button>
+            </div>
+            <div class="island-body">
+              <label class="composer-field">
+                <span class="visually-hidden">描述你想调整的画面</span>
+                <input type="text" placeholder="描述你想调整的画面…" autocomplete="off">
+              </label>
+              <p class="composer-meta"><b>待命</b> 当前画布 · 仅调整画布 <span class="composer-mode">协作</span></p>
+            </div>
+            <span class="island-resize" data-resize aria-hidden="true"></span>
+          </div>
+
+          <div class="orb-shelf" data-orb-shelf aria-label="已收起的工具岛"></div>
+
+          <button class="playground-reset" type="button" data-reset-islands>重置布局</button>
+          <p class="playground-hint" data-playground-hint>拖动顶部把手移动；拖到边缘停靠；点圆球图标收起。布局保存在本地。</p>
+        </div>
+      </div>
+
+      <ul class="cap-grid">
+        <li data-reveal><b>拖动与缩放</b><span>只从明确的把手开始；输入、按钮、滑杆、滚动与缩放柄不会误触拖动。Pointer capture 在取消、失焦、卸载时可靠释放。</span></li>
+        <li data-reveal><b>四边停靠</b><span>顶部/底部停靠后是真正的横向信息架构，不是被压扁的竖表单。</span></li>
+        <li data-reveal><b>收成圆球</b><span>圆球代表一件被收起的具体工具，显示当前工具与最多一个状态点。它是仪器，不是吉祥物。</span></li>
+        <li data-reveal><b>降级仍完整</b><span>Reduced Motion 缩短形变；Reduced Transparency 换成可读实色，信息架构不变。拖动时先降低滤镜质量，不牺牲指针精度。</span></li>
+      </ul>
+    </section>
+
+    <!-- ============ PRISMATIC ACTION TRACE ============ -->
+    <section class="trace" id="trace" aria-labelledby="trace-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>唯一的标志性元素</p>
+        <h2 class="h2" id="trace-title" data-reveal>一条光迹，只在真实动作<br>与真实对象之间出现。</h2>
+        <p class="lede" data-reveal>大胆只花在一个地方。当 Agent 的操作触及画布对象时，一条极细、低饱和的光谱轨迹从创作输入延伸到被影响的对象，然后自行收束。它从不无中生有：没有真实活动、没有真实受影响的元素，就没有光迹。</p>
+      </div>
+
+      <div class="trace-stage glass-frame" data-trace-stage>
+        <div class="trace-canvas">
+          <div class="poster poster-lg" data-trace-poster>
+            <span class="poster-light" data-trace-el="light"></span>
+            <span class="poster-leaf"></span>
+            <span class="poster-subject" data-trace-el="subject"><i></i></span>
+            <span class="poster-kicker">AUREL / MORNING MIST</span>
+            <span class="poster-title" data-trace-el="title" style="--size:1">晨雾</span>
+            <span class="poster-foot" data-trace-el="foot">晨雾香氛 · 淡香精 · 50 mL</span>
+          </div>
+          <svg class="trace-overlay" data-trace-overlay aria-hidden="true"></svg>
+
+          <div class="trace-composer glass" data-trace-composer>
+            <div class="trace-presets" role="group" aria-label="示例指令">
+              <button type="button" class="is-active" data-trace-cmd="shrink-title">把标题收小一点，保留主体。</button>
+              <button type="button" data-trace-cmd="morning-light">沿用构图，光线改成清晨侧光。</button>
+              <button type="button" data-trace-cmd="foot-right">把底部说明移到右侧。</button>
+            </div>
+            <div class="trace-composer-row">
+              <span class="trace-composer-text" data-trace-text>把标题收小一点，保留主体。</span>
+              <button class="trace-run" type="button" data-trace-run aria-label="执行">
+                <svg class="icon"><use href="#i-arrow-up"/></svg>
+              </button>
+            </div>
+            <p class="trace-composer-meta"><b data-trace-state>待命</b> <span data-trace-scope>当前画布 · 仅调整画布</span></p>
+          </div>
+        </div>
+
+        <aside class="trace-record" aria-live="polite">
+          <p class="trace-record-head">活动 <span data-trace-count>0 条真实记录</span></p>
+          <ol class="trace-activities" data-trace-activities></ol>
+          <p class="trace-empty" data-trace-empty>还没有动作。执行一次指令，观察光迹与记录同时出现。</p>
+        </aside>
+      </div>
+
+      <ul class="rule-list">
+        <li data-reveal>只在存在真实对象关系时出现；起点与终点都有明确语义。</li>
+        <li data-reveal>不代替选择框、焦点环或错误状态。</li>
+        <li data-reveal>不持续漂浮，不扫描全屏；没有粒子、闪光雨、呼吸光或节点网络。</li>
+        <li data-reveal>Reduce Motion 下退化为静态细线或完全移除。</li>
+        <li data-reveal>操作结束后收束或淡出，不成为永久装饰。</li>
+      </ul>
+    </section>
+
+    <!-- ============ REFERENCE COMPILER ============ -->
+    <section class="compiler" id="compiler" aria-labelledby="compiler-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>Reference Compiler</p>
+        <h2 class="h2 h2-en" id="compiler-title" data-reveal>The scene is a source language.</h2>
+        <p class="lede" data-reveal>画布同时承载几何、语义与视觉证据。一次生成需要知道主体在哪里、哪些元素互相遮挡、哪些文字必须准确、哪些辅助对象不应出现在成图里。参考编译器把这些信息编译为语义包与视觉参考，再按 Provider 能力组织请求上下文。</p>
+      </div>
+
+      <div class="pipeline-pin" data-pipeline>
+        <div class="pipeline-sticky">
+          <div class="pipeline-progress" aria-hidden="true"><i data-pipeline-bar></i></div>
+          <ol class="pipeline-track" data-pipeline-track>
+            <li class="stage" data-stage="scene">
+              <p class="stage-index">00</p>
+              <h3>Scene</h3>
+              <p class="stage-desc">可编辑的结构化作品：元素、变换、层级、语义角色、参考策略与来源。</p>
+              <div class="stage-fields">
+                <code>id</code><code>type</code><code>semanticRole</code><code>referencePolicy</code><code>transform</code><code>zIndex</code><code>opacity</code><code>blendMode</code><code>provenance</code>
+              </div>
+            </li>
+            <li class="stage" data-stage="ir">
+              <p class="stage-index">01</p>
+              <h3>Prompt IR</h3>
+              <p class="stage-desc">布局、层次、遮挡与保护意图可以被继续处理的中间表示。</p>
+              <div class="stage-fields">
+                <code>bounds</code><code>zIndex</code><code>relations</code><code>occlusions</code><code>protectedElementIds</code><code>presentation</code>
+              </div>
+            </li>
+            <li class="stage" data-stage="package">
+              <p class="stage-index">02</p>
+              <h3>Prompt Package</h3>
+              <p class="stage-desc">构图、文字、风格与禁止项分别表达，而不是揉成一段提示词。</p>
+              <div class="stage-fields">
+                <code>compositionContract</code><code>textContract</code><code>styleBible</code><code>negativeConstraints</code>
+              </div>
+            </li>
+            <li class="stage" data-stage="manifest">
+              <p class="stage-index">03</p>
+              <h3>Reference Manifest</h3>
+              <p class="stage-desc">区分参考素材的用途，并保留来源关系；素材读取经过内容哈希核对。</p>
+              <div class="stage-fields">
+                <code>appearance-composite</code><code>semantic-sheet</code><code>source-image</code><code>sketch-underlay</code><code>mask</code>
+              </div>
+            </li>
+            <li class="stage" data-stage="compiled">
+              <p class="stage-index">04</p>
+              <h3>Provider Compiled Prompt</h3>
+              <p class="stage-desc">在具体服务能力下形成提示内容与限制说明；不支持的能力不会被假装支持。</p>
+              <div class="stage-fields">
+                <code>prompt</code><code>negativePrompt</code><code>referenceMode</code><code>warnings</code>
+              </div>
+            </li>
+          </ol>
+          <svg class="pipeline-links" data-pipeline-links aria-hidden="true"></svg>
+        </div>
+      </div>
+
+      <div class="compiler-detail">
+        <figure class="code-figure" data-reveal>
+          <figcaption>compilePromptIr · 元素映射（内部实现片段）</figcaption>
+<pre class="code"><code><span class="c-k">elements</span>: scene.elements.<span class="c-f">map</span>((element) =&gt; ({
+  id: element.id,
+  type: element.type,
+  <span class="c-c">// … name, description, semanticRole, provenance</span>
+  referencePolicy: element.referencePolicy,
+  presentation: <span class="c-f">presentationFor</span>(element),
+  zIndex: element.zIndex,
+  opacity: element.opacity,
+  blendMode: <span class="c-f">resolveBlendMode</span>(element),
+  bounds: { ...element.transform },
+  attributes: <span class="c-f">attributesFor</span>(element)
+}))</code></pre>
+        </figure>
+        <div class="compiler-notes">
+          <p data-reveal><b>reference-only 元素</b>可成为语义引导；隐藏、排除、蒙版与分组元素的 presentation 可为 <code>omitted</code>——它们仍可携带结构或保护信息，但不会被直接画成编辑器控件。</p>
+          <p data-reveal>编译结果同时携带 <code>sceneId</code> 与 <code>sceneRevision</code>。场景版本改变时请求随之更新，不能只更新说明而未更新请求。</p>
+          <p data-reveal>结构参考、视觉参考、同时参考、Prompt Package、历史结果与编辑范围共同约束生成；草图探索与高质量定稿职责明确。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ EXECUTION CONTRACT ============ -->
+    <section class="contract" id="contract" aria-labelledby="contract-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>执行契约</p>
+        <h2 class="h2 h2-en" id="contract-title" data-reveal>A suggestion becomes a checked mutation.</h2>
+        <p class="lede" data-reveal>Agent 的修改先表达为有作用域的命令，再经过策略、锁定和版本校验。预览保存操作批次、结果摘要与反向补丁；提交时，Main 再次核对权威 Scene 与执行结果。这条链路解决一个具体冲突：<b>模型规划之后，用户可能已经把画布改了。</b>旧计划不能假装这些修改不存在。</p>
+      </div>
+
+      <div class="contract-stage glass-frame" data-contract>
+        <div class="contract-nodes">
+          <div class="cnode" data-cnode="propose">
+            <p class="cnode-k">01 提议</p>
+            <h3>有作用域的命令</h3>
+            <p>scope · 元素锁定 · 保护 · 工具策略</p>
+          </div>
+          <div class="cnode" data-cnode="preview">
+            <p class="cnode-k">02 预览</p>
+            <h3>影子执行</h3>
+            <p>batch · patches · inversePatches · scene digest</p>
+            <p class="cnode-rev">expectedSceneRevision = <b data-expected-rev>12</b></p>
+          </div>
+          <div class="cnode" data-cnode="check">
+            <p class="cnode-k">03 提交检查</p>
+            <h3>Main 核对权威 Scene</h3>
+            <p>当前 revision = <b data-current-rev>12</b></p>
+            <p class="cnode-verdict" data-verdict>等待提交</p>
+          </div>
+          <div class="cnode" data-cnode="persist">
+            <p class="cnode-k">04 持久化</p>
+            <h3>可撤销批次</h3>
+            <p>本地已提交操作保留批次与反向补丁</p>
+          </div>
+          <div class="cnode cnode-reject" data-cnode="reject">
+            <p class="cnode-k">拒绝</p>
+            <h3>旧版本提交被拒绝</h3>
+            <p>重新读取权威 Scene，重新预览</p>
+          </div>
+        </div>
+        <svg class="contract-links" data-contract-links aria-hidden="true"></svg>
+        <span class="contract-packet" data-packet aria-hidden="true"></span>
+
+        <div class="contract-controls">
+          <label class="switch">
+            <input type="checkbox" data-manual-edit>
+            <span>预览之后，用户手动编辑了画布</span>
+          </label>
+          <button class="btn btn-primary btn-sm" type="button" data-run-commit>运行一次提交</button>
+          <p class="contract-log" data-contract-log aria-live="polite">Scene revision 12 · 尚未提交</p>
+        </div>
+      </div>
+
+      <table class="spec-table" data-reveal>
+        <thead><tr><th>校验点</th><th>实现约束</th></tr></thead>
+        <tbody>
+          <tr><th>版本</th><td><code>expectedSceneRevision</code> 必须与当前权威 Scene 一致；预览后发生人工编辑，提交也会再次检查。</td></tr>
+          <tr><th>作用域与权限</th><td>scope、元素锁定、保护与工具策略参与预览许可判断。</td></tr>
+          <tr><th>执行身份</th><td>幂等键绑定工具参数；提交令牌绑定会话、有效期与 prepared 状态。</td></tr>
+          <tr><th>结果一致性</th><td>对照预览核对 batch、patches、inversePatches 与 Scene digest。</td></tr>
+          <tr><th>可撤销记录</th><td>本地已提交操作保留批次与反向补丁；外部请求及费用不随画布撤销而消失。</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ============ GENERATION RUNTIME ============ -->
+    <section class="runtime" id="runtime" aria-labelledby="runtime-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>生成运行时</p>
+        <h2 class="h2 h2-en" id="runtime-title" data-reveal>A network timeout is not proof of non-submission.</h2>
+        <p class="lede" data-reveal>生成任务保留请求身份、提交状态、结果与来源关联。队列必须区分「确定未发送」和「可能已经发出」，因为一次普通的重试可能变成第二笔付费请求。</p>
+      </div>
+
+      <div class="runtime-layout">
+        <figure class="runtime-tree glass-frame" data-runtime>
+          <svg viewBox="0 0 720 420" class="tree-svg" data-tree-svg aria-labelledby="tree-title" role="img">
+            <title id="tree-title">请求结果决策树：确定未发送则进入重试保护并准备新尝试；可能已提交或已有外部任务 ID 则禁止重发并对账原任务。</title>
+            <g class="tree-links" fill="none" stroke-linecap="round">
+              <path data-link="root-left" d="M360 70 C360 120 200 110 200 160"/>
+              <path data-link="root-right" d="M360 70 C360 120 520 110 520 160"/>
+              <path data-link="left-1" d="M200 200 L200 250"/>
+              <path data-link="left-2" d="M200 290 L200 340"/>
+              <path data-link="right-1" d="M520 200 L520 250"/>
+              <path data-link="right-2" d="M520 290 L520 340"/>
+            </g>
+            <g class="tree-nodes">
+              <g data-node="root" transform="translate(360 50)"><rect x="-90" y="-20" width="180" height="40" rx="12"/><text>request outcome</text></g>
+              <g data-node="left-0" transform="translate(200 180)"><rect x="-96" y="-20" width="192" height="40" rx="12"/><text>confirmed not_sent</text></g>
+              <g data-node="left-1" transform="translate(200 270)"><rect x="-96" y="-20" width="192" height="40" rx="12"/><text>retry safety checks</text></g>
+              <g data-node="left-2" transform="translate(200 360)"><rect x="-96" y="-20" width="192" height="40" rx="12"/><text>prepare a new attempt</text></g>
+              <g data-node="right-0" transform="translate(520 180)"><rect x="-104" y="-26" width="208" height="52" rx="12"/><text dy="-7">possibly submitted</text><text dy="11" class="t-small">or externalTaskId exists</text></g>
+              <g data-node="right-1" class="node-stop" transform="translate(520 270)"><rect x="-70" y="-20" width="140" height="40" rx="12"/><text>NO_REPOST</text></g>
+              <g data-node="right-2" transform="translate(520 360)"><rect x="-104" y="-20" width="208" height="40" rx="12"/><text>reconcile the original job</text></g>
+            </g>
+          </svg>
+          <figcaption>
+            <div class="seg" role="group" aria-label="模拟请求结果">
+              <button type="button" class="is-active" data-outcome="not_sent">确定未发送</button>
+              <button type="button" data-outcome="unknown">超时 · 状态未知</button>
+              <button type="button" data-outcome="task_id">已有外部任务 ID</button>
+            </div>
+            <p data-runtime-log aria-live="polite">连接在发送前失败，请求身份可核对：允许准备新的尝试。</p>
+          </figcaption>
+        </figure>
+
+        <div class="runtime-notes">
+          <div class="note" data-reveal>
+            <h3>有界付费</h3>
+            <p>请求数、图片数与费用上限由执行策略约束。自动模式达到任一限制后停止并请求决定。未知费用必须明确标记，不伪造精确金额。</p>
+            <ul class="chips"><li>请求数</li><li>图片数</li><li>费用上限</li><li>持久累计预算</li></ul>
+          </div>
+          <div class="note" data-reveal>
+            <h3>真实状态，不是好看的进度条</h3>
+            <p>每个状态都真实且可操作，可用性不能只在已成功三张美图时成立。</p>
+            <ul class="chips chips-muted">
+              <li>排队</li><li>真实进度</li><li>部分结果</li><li>成功</li><li>取消</li><li>失败</li><li>超时</li><li>外部未知</li><li>费用未知</li><li>原身份不可用</li>
+            </ul>
+          </div>
+          <div class="note" data-reveal>
+            <h3>错误可区分</h3>
+            <p>凭据、模型、协议、参数、预算、网络与服务端问题分别呈现。未支持的能力不会显示成可用入口；未知协议不猜测兼容。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ THEMES & MATERIALS ============ -->
+    <section class="themes" id="themes" aria-labelledby="themes-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>光学工作室</p>
+        <h2 class="h2" id="themes-title" data-reveal>三种工作室主题，<br>三种玻璃质感。</h2>
+        <p class="lede" data-reveal>作品保持实体，主题与玻璃只改变功能层。精致来自局部而非全圈高亮：少量折射边缘、局部环境染色、层叠接触影、清晰的文本中心与适度透过。高质量折射会在拖动和低能力设备上自动降级。</p>
+      </div>
+
+      <div class="themes-layout">
+        <div class="themes-controls">
+          <fieldset class="control-group">
+            <legend>工作室主题</legend>
+            <label class="radio-card"><input type="radio" name="theme" value="pearl" checked data-theme-pick><span><b>月白</b><small>明亮的珍珠色工作室</small></span></label>
+            <label class="radio-card"><input type="radio" name="theme" value="obsidian" data-theme-pick><span><b>夜墨</b><small>克制的深墨蓝工作室</small></span></label>
+            <label class="radio-card"><input type="radio" name="theme" value="dusk" data-theme-pick><span><b>暮蓝</b><small>低亮度蓝灰创作环境</small></span></label>
+            <label class="radio-card"><input type="radio" name="theme" value="system" data-theme-pick><span><b>跟随系统</b><small>随 Windows 自动切换</small></span></label>
+          </fieldset>
+          <fieldset class="control-group">
+            <legend>玻璃质感</legend>
+            <label class="radio-card"><input type="radio" name="material" value="crystal" checked data-material-pick><span><b>晶澈</b><small>高透明，折射边缘与镜面</small></span></label>
+            <label class="radio-card"><input type="radio" name="material" value="satin" data-material-pick><span><b>雾绸</b><small>柔和雾化，适合长时间使用</small></span></label>
+            <label class="radio-card"><input type="radio" name="material" value="solid" data-material-pick><span><b>实色</b><small>最高可读性，不使用透明滤镜</small></span></label>
+          </fieldset>
+          <label class="switch">
+            <input type="checkbox" data-apply-page>
+            <span>把主题应用到整个页面（View Transition）</span>
+          </label>
+          <dl class="token-readout" data-token-readout aria-live="polite">
+            <div><dt>--pearl</dt><dd data-token="--pearl"></dd></div>
+            <div><dt>--ink</dt><dd data-token="--ink"></dd></div>
+            <div><dt>--cobalt</dt><dd data-token="--cobalt"></dd></div>
+            <div><dt>--iris</dt><dd data-token="--iris"></dd></div>
+            <div><dt>--champagne</dt><dd data-token="--champagne"></dd></div>
+            <div><dt>--glass-blur</dt><dd data-token="--glass-blur"></dd></div>
+          </dl>
+        </div>
+
+        <div class="theme-frame studio" data-theme-frame data-theme="pearl" data-material="crystal">
+          <div class="studio-bg"></div>
+          <div class="poster" data-theme-poster>
+            <span class="poster-light"></span>
+            <span class="poster-leaf"></span>
+            <span class="poster-subject"><i></i></span>
+            <span class="poster-kicker">AUREL / MORNING MIST</span>
+            <span class="poster-title">晨雾</span>
+            <span class="poster-foot">晨雾香氛 · 淡香精 · 50 mL</span>
+          </div>
+          <div class="island glass island-static island-static-toolbar">
+            <div class="island-grip"><svg class="icon"><use href="#i-grip"/></svg><span>工具</span></div>
+            <div class="island-body"><div class="tool-list">
+              <button type="button" class="is-active" tabindex="-1" aria-hidden="true"><svg class="icon"><use href="#i-pointer"/></svg></button>
+              <button type="button" tabindex="-1" aria-hidden="true"><svg class="icon"><use href="#i-type"/></svg></button>
+              <button type="button" tabindex="-1" aria-hidden="true"><svg class="icon"><use href="#i-pencil"/></svg></button>
+              <button type="button" tabindex="-1" aria-hidden="true"><svg class="icon"><use href="#i-sun"/></svg></button>
+            </div></div>
+          </div>
+          <div class="island glass island-static island-static-inspector">
+            <div class="island-grip"><svg class="icon"><use href="#i-grip"/></svg><span>图层</span></div>
+            <div class="island-body"><ul class="layer-list">
+              <li class="is-selected"><i>文</i><span>准确主标题<small>文字 · 96</small></span></li>
+              <li><i>主</i><span>香氛瓶身<small>主体</small></span></li>
+              <li><i>光</i><span>清晨侧光<small>光影</small></span></li>
+            </ul></div>
+          </div>
+          <div class="island glass island-static island-static-composer">
+            <div class="island-body">
+              <p class="composer-static">描述你想调整的画面…</p>
+              <p class="composer-meta"><b>待命</b> 当前画布 · 仅调整画布</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="cap-grid cap-grid-3">
+        <li data-reveal><b>Clear · Regular · Thick · Solid</b><span>材质按信息任务分层：短暂微工具、工具岛与输入、检查器与设置、降级与长文本。</span></li>
+        <li data-reveal><b>九项光学检查</b><span>本体透明度、背景模糊与饱和度、顶缘高光、内暗边、局部色差折射、接触影与空间影、邻近作品的环境色、复杂背景对比保护、Solid 降级。</span></li>
+        <li data-reveal><b>不做的事</b><span>整圈高饱和描边、黑紫赛博、霓虹渐变、扫描线、粒子与呼吸光。局部色差视觉宽度不超过约 2px。</span></li>
+      </ul>
+    </section>
+
+    <!-- ============ BOUNDARY ============ -->
+    <section class="boundary" id="boundary" aria-labelledby="boundary-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>运行边界</p>
+        <h2 class="h2" id="boundary-title" data-reveal>Main 是权威。<br>Renderer 看不到密钥。</h2>
+        <p class="lede" data-reveal>Main 负责 Scene、持久化、凭据与外部请求。Renderer 通过 Preload 与窄 IPC 接口操作，窗口开启 sandbox、context isolation 并关闭 Node integration。本地优先指项目存储与控制边界；在线推理仍会发送所需提示词与参考内容到你自己配置的服务。</p>
+      </div>
+
+      <div class="layers" data-layers>
+        <div class="layer layer-renderer" data-reveal>
+          <p class="layer-k">RENDERER</p>
+          <div class="layer-row"><span>对话</span><i>↔</i><span>画布</span><i>↔</i><span>生成</span></div>
+          <p class="layer-note">React · Konva · Zustand · 无 Node、无任意网络、无明文凭据</p>
+        </div>
+        <div class="layer layer-preload" data-reveal>
+          <p class="layer-k">PRELOAD</p>
+          <div class="layer-row"><span class="ipc-chip">typed, validated IPC</span></div>
+          <p class="layer-note">contextBridge · 所有输入经 Schema 校验</p>
+        </div>
+        <div class="layer layer-main" data-reveal>
+          <p class="layer-k">MAIN</p>
+          <div class="layer-row layer-row-3">
+            <span>Agent Runtime<small>context · policy</small></span>
+            <span>Scene Authority<small>revision · commands</small></span>
+            <span>Generation Runtime<small>identity · budget</small></span>
+          </div>
+          <div class="layer-row"><span class="compiler-chip">Reference Compiler</span></div>
+          <p class="layer-note"><svg class="icon icon-xs"><use href="#i-key"/></svg> 已保存的 Key 只在请求瞬间由 Main 读取 · 模型输出不能选择任意端点</p>
+        </div>
+        <div class="layer layer-external" data-reveal>
+          <div class="layer-row"><span>configured LLM</span><span>configured image API</span></div>
+          <p class="layer-note">只能访问用户保存并验证过的 Base URL 与响应中经校验的任务/内容地址</p>
+        </div>
+        <div class="layer layer-storage" data-reveal>
+          <p class="layer-k">LOCAL STORAGE</p>
+          <div class="layer-row"><span>SQLite</span><span>asset files</span></div>
+          <p class="layer-note">项目、Scene、素材、Prompt、参考、任务、结果、版本与记忆具有可恢复的完整血缘</p>
+        </div>
+      </div>
+
+      <ul class="invariants">
+        <li data-reveal><svg class="icon"><use href="#i-lock"/></svg><span>Main 对 Scene、Provider、凭据、外部网络、项目文件与持久写入保持权威。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-lock"/></svg><span>文件访问停留在当前项目/库与明确的导入导出目标内。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-lock"/></svg><span>不确定的外部 POST 不会被自动重复；付费工作受请求、图片数与费用上限约束。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-lock"/></svg><span>自动化测试与视觉 QA 永远不调用真实 LLM 或图片 Provider。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-lock"/></svg><span>项目删除默认进入系统回收站；项目库外文件不因最近项目操作被静默删除。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-lock"/></svg><span>Owner Full 是当前项目内的完整产品能力，不是操作系统管理员权限。</span></li>
+      </ul>
+    </section>
+
+    <!-- ============ PROVIDERS ============ -->
+    <section class="providers" id="providers" aria-labelledby="providers-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>Provider</p>
+        <h2 class="h2" id="providers-title" data-reveal>两个可替换的配置槽，<br>不是产品的中心。</h2>
+        <p class="lede" data-reveal>产品保持一个语言模型模块和一个图片模型模块。你配置名称、协议、Base URL、模型、超时、并发、能力与凭据；Runtime 根据已保存配置注册对应实现。在线能力使用你自己的模型服务与额度。</p>
+      </div>
+      <div class="provider-grid">
+        <div class="provider-card glass-frame" data-reveal>
+          <p class="provider-k">语言模型</p>
+          <ul>
+            <li><code>ark-responses</code><span>火山方舟 Responses</span></li>
+            <li><code>openai-responses</code><span>OpenAI Responses 兼容</span></li>
+            <li><code>openai-chat-completions</code><span>OpenAI Chat Completions 兼容</span></li>
+          </ul>
+          <p class="provider-note">推理强度 auto → max · 图片细节 auto / low / original · 流式或缓冲传输，连接、首事件、空闲超时可配置。</p>
+        </div>
+        <div class="provider-card glass-frame" data-reveal>
+          <p class="provider-k">图片模型</p>
+          <ul>
+            <li><code>ark-seedream</code><span>火山方舟 Seedream</span></li>
+            <li><code>openai-images</code><span>OpenAI Images 兼容</span></li>
+            <li><code>task-images</code><span>异步任务式图片协议</span></li>
+          </ul>
+          <p class="provider-note">文生图、参考图、编辑、组图分别进行能力门禁；无 Key 时项目、画布与离线 Agent 仍可用，状态诚实。</p>
+        </div>
+      </div>
+      <p class="fine-print" data-reveal>协议名称相同不保证各服务实现都兼容。参考图、蒙版、编辑和流式输出取决于具体服务能力及实际响应。真实连接验证只使用已保存配置，经用户二次确认后最多发送一个极小请求，失败不自动重试。</p>
+    </section>
+
+    <!-- ============ STACK ============ -->
+    <section class="stack" id="stack" aria-labelledby="stack-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>工程地图</p>
+        <h2 class="h2" id="stack-title" data-reveal>用可验证的方式构建。</h2>
+      </div>
+      <div class="marquee" aria-hidden="true">
+        <div class="marquee-track">
+          <span>TypeScript</span><span>Electron</span><span>React 19</span><span>Konva</span><span>Zustand</span><span>Immer</span><span>Zod</span><span>SQLite</span><span>Kysely</span><span>Sharp</span><span>Vitest</span><span>Playwright</span><span>Testing Library</span><span>electron-vite</span>
+          <span>TypeScript</span><span>Electron</span><span>React 19</span><span>Konva</span><span>Zustand</span><span>Immer</span><span>Zod</span><span>SQLite</span><span>Kysely</span><span>Sharp</span><span>Vitest</span><span>Playwright</span><span>Testing Library</span><span>electron-vite</span>
+        </div>
+      </div>
+      <table class="spec-table" data-reveal>
+        <thead><tr><th>目录</th><th>职责</th><th>主要技术</th></tr></thead>
+        <tbody>
+          <tr><th><code>src/domain/</code></th><td>Scene、命令与领域规则</td><td>TypeScript · Zod · Immer</td></tr>
+          <tr><th><code>src/main/</code></th><td>Agent、参考编译、生成、存储</td><td>Electron · Sharp · SQLite · Kysely</td></tr>
+          <tr><th><code>src/preload/</code></th><td>桌面 API 桥接</td><td>Electron contextBridge</td></tr>
+          <tr><th><code>src/renderer/</code></th><td>创作界面、画布与交互状态</td><td>React · Konva · Zustand</td></tr>
+          <tr><th><code>src/shared/</code></th><td>跨进程类型与运行时契约</td><td>TypeScript · Zod</td></tr>
+          <tr><th><code>tests/</code></th><td>单元、集成与桌面行为验证</td><td>Vitest · Testing Library · Playwright</td></tr>
+        </tbody>
+      </table>
+      <div class="gates" data-reveal>
+        <p class="gates-k">验收矩阵</p>
+        <ul class="chips"><li>1024 × 700</li><li>1280 × 800</li><li>1440 × 900</li><li>1920 × 1080</li><li>2560 × 1440</li><li>100% / 125% / 150%</li></ul>
+        <ul class="chips chips-muted"><li>浅色 · 暗色</li><li>Reduced Motion</li><li>Reduced Transparency</li><li>键盘</li><li>IME</li><li>核心命中区 ≥ 40–44px</li></ul>
+      </div>
+    </section>
+
+    <!-- ============ HONEST ============ -->
+    <section class="honest" id="honest" aria-labelledby="honest-title">
+      <div class="section-head">
+        <p class="eyebrow" data-reveal>工具有分寸</p>
+        <h2 class="h2" id="honest-title" data-reveal>我们不承诺的事。</h2>
+        <p class="lede" data-reveal>Product 1.0 表示个人日用产品成熟度，不自动表示公开发布、商业化或多人协作。当前仓库是持续演进中的产品实现。</p>
+      </div>
+      <ul class="honest-list">
+        <li data-reveal><svg class="icon"><use href="#i-sparkle-none"/></svg><span>不保证真实模型的画质或商品身份保留；离线生成结果是 Fixture，不是真实 Provider 质量证据。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-sparkle-none"/></svg><span>不在模型不支持时冒充自动拆层或透明逐元素生成。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-sparkle-none"/></svg><span>没有账号、云同步、多人协作、素材社区、模板商城、插件或模型市场。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-sparkle-none"/></svg><span>没有视频、3D、完整矢量套件或完整 Photoshop 功能。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-sparkle-none"/></svg><span>没有不受预算和停止条件约束的长期自主 Agent；不展示或伪造思维链。</span></li>
+        <li data-reveal><svg class="icon"><use href="#i-sparkle-none"/></svg><span>macOS / Linux 尚未作为已验证交付平台；当前尚未配置开源许可证。</span></li>
+      </ul>
+    </section>
+
+    <!-- ============ DOWNLOAD ============ -->
+    <section class="download" id="download" aria-labelledby="download-title">
+      <div class="download-card glass-frame" data-reveal>
+        <div class="download-copy">
+          <p class="eyebrow">v0.3.0 · Pre-release</p>
+          <h2 class="h2" id="download-title">从一句话开始，<br>在同一件作品里继续。</h2>
+          <p class="lede">Windows x64 便携版与安装版，未签名测试候选。源码 ZIP 与 SHA256SUMS 一并提供。新建项目后，在设置中分别配置语言模型与图片模型；本地画布可以先开始使用。</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="https://github.com/BiranSama/ai-canvas/releases/tag/v0.3.0" rel="noopener"><svg class="icon"><use href="#i-download"/></svg>前往 Release 下载</a>
+            <a class="btn btn-ghost" href="https://github.com/BiranSama/ai-canvas" rel="noopener"><svg class="icon"><use href="#i-github"/></svg>BiranSama/ai-canvas</a>
+          </div>
+        </div>
+        <div class="download-build">
+          <p class="build-k">从源码构建 · Node ≥ 22 · pnpm 11.9.0</p>
+<pre class="code"><code>pnpm install --frozen-lockfile
+pnpm dev
+
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm test:integration
+pnpm build
+pnpm package:win</code></pre>
+          <p class="fine-print">首次安装可能下载 Electron 并构建原生模块。自动验证使用离线替身，不调用真实收费 Provider。</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-grid">
+      <div>
+        <p class="footer-brand"><img src="assets/icon.png" alt="" width="22" height="22"> AI Canvas</p>
+        <p class="footer-tag">The canvas is the context.</p>
+      </div>
+      <div>
+        <p class="footer-k">创作者</p>
+        <p><b>BiranSama</b> — 产品方向、设计判断与最终决策</p>
+        <p><b>Codex · OpenAI</b> — AI 辅助代码实现、工程分析与文档设计</p>
+        <p class="footer-fine">署名说明协作工具与贡献角色，不代表 OpenAI 官方出品或背书。</p>
+      </div>
+      <div>
+        <p class="footer-k">本页</p>
+        <p class="footer-fine">零依赖静态页面。使用 CSS 滚动驱动动画、@property、color-mix、容器查询、View Transitions、WebGL2 着色器、SVG 位移滤镜、Pointer Events 与 Web Animations API 构建；尊重 prefers-reduced-motion 与 prefers-reduced-transparency。</p>
+      </div>
+    </div>
+    <p class="footer-line">Built with intention. Shaped through collaboration.</p>
+  </footer>
+</body>
+</html>

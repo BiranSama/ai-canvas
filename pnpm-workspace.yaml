@@ -1,7 +1,0 @@
-allowBuilds:
-  '@electron/get': true
-  better-sqlite3: true
-  electron: true
-  electron-winstaller: false
-  esbuild: true
-  sharp: true

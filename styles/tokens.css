@@ -1,0 +1,205 @@
+/* AI Canvas — marketing site tokens.
+   Mirrors the product's Prismatic Atelier palette and optical material recipe
+   (src/renderer/src/styles.css). Values are kept verbatim where the product
+   defines them so the site reads as the same instrument. */
+
+@property --spectrum-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 120deg;
+}
+
+@property --trace-progress {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --glow-x {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 50%;
+}
+
+@property --glow-y {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 30%;
+}
+
+:root, [data-theme="pearl"] {
+  color-scheme: light;
+
+  /* Core palette (AGENTS §7.1) */
+  --pearl: #f5f7fa;
+  --mist: #e9eef5;
+  --ink: #172033;
+  --cobalt: #376bff;
+  --iris: #9276ff;
+  --champagne: #ead9b8;
+
+  /* Derived product tokens (styles.css :root) */
+  --pale-ivory: #f8f9fb;
+  --muted-slate: #526176;
+  --faint-slate: #637188;
+  --quiet-blue: #315ed7;
+  --hairline: rgba(66, 76, 88, 0.13);
+  --regular-glass: rgba(248, 250, 252, 0.52);
+  --thick-glass: rgba(250, 251, 253, 0.94);
+  --clear-glass: rgba(250, 251, 253, 0.38);
+  --solid-surface: #f7f8fa;
+  --field: rgba(255, 255, 255, 0.53);
+  --glass-top: rgba(255, 255, 255, 0.72);
+  --glass-bottom: rgba(228, 236, 246, 0.34);
+  --glass-specular: rgba(255, 255, 255, 0.92);
+  --glass-refract: rgba(146, 118, 255, 0.12);
+  --shadow-soft: 0 22px 58px rgba(23, 32, 51, 0.12), 0 4px 14px rgba(23, 32, 51, 0.065);
+  --shadow-float: 0 16px 44px rgba(23, 32, 51, 0.16), 0 3px 10px rgba(23, 32, 51, 0.085);
+  --shadow-thick: 0 32px 90px rgba(23, 32, 51, 0.22), 0 6px 18px rgba(23, 32, 51, 0.1);
+  --focus-ring: rgba(55, 107, 255, 0.78);
+
+  /* Studio background (product .app-shell) */
+  --studio-a: #f5f7fa;
+  --studio-b: #e9eef5;
+  --studio-c: #eef2f7;
+  --ambient: rgba(126, 151, 180, 0.075);
+  --warm: rgba(255, 255, 255, 0.58);
+
+  /* Motion (product :root) */
+  --dur-micro: 160ms;
+  --dur-morph: 320ms;
+  --dur-overlay: 480ms;
+  --ease-standard: cubic-bezier(.22, .72, .25, 1);
+  --ease-morph: cubic-bezier(.22, .8, .2, 1);
+  --ease-spring: linear(
+    0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.281 6.7%, 0.723 12.9%, 0.938 16.7%,
+    1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%,
+    1.129 32.8%, 1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%,
+    0.975 57.1%, 0.997 69.8%, 1.003 76.9%, 1.004 83.8%, 1
+  );
+
+  /* Site typography scale */
+  --font-ui: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, "SF Mono", ui-monospace, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: clamp(1.25rem, 1.05rem + 0.8vw, 1.6rem);
+  --text-2xl: clamp(1.6rem, 1.2rem + 1.6vw, 2.4rem);
+  --text-3xl: clamp(2.2rem, 1.5rem + 3vw, 4rem);
+  --text-hero: clamp(2.6rem, 1.4rem + 5.4vw, 6.6rem);
+
+  --measure: 62ch;
+  --gutter: clamp(20px, 5vw, 96px);
+  --section-gap: clamp(96px, 14vh, 200px);
+  --radius-lg: 24px;
+  --radius-md: 18px;
+  --radius-sm: 12px;
+}
+
+/* Product theme contracts (styles.css [data-appearance-theme]) */
+[data-theme="obsidian"] {
+  color-scheme: dark;
+  --pearl: #171a20;
+  --mist: #202630;
+  --ink: #f2f4f7;
+  --cobalt: #89a8ff;
+  --iris: #aa98ff;
+  --champagne: #d9c6a0;
+  --pale-ivory: #242a33;
+  --muted-slate: #aab3c0;
+  --faint-slate: #7f8998;
+  --quiet-blue: var(--cobalt);
+  --hairline: rgba(225, 233, 244, .13);
+  --solid-surface: #242a33;
+  --field: rgba(255, 255, 255, .055);
+  --regular-glass: rgba(36, 42, 51, 0.62);
+  --thick-glass: rgba(36, 42, 51, 0.94);
+  --clear-glass: rgba(36, 42, 51, 0.42);
+  --glass-top: rgba(188, 208, 234, .065);
+  --glass-bottom: rgba(103, 123, 165, .045);
+  --glass-specular: rgba(255, 255, 255, .16);
+  --glass-refract: rgba(139, 153, 255, .22);
+  --studio-a: #10141b;
+  --studio-b: #1a202a;
+  --studio-c: #222c38;
+  --ambient: rgba(72, 111, 168, .22);
+  --warm: rgba(198, 163, 111, .10);
+  --shadow-soft: 0 22px 62px rgba(0, 0, 0, .36), 0 4px 14px rgba(0, 0, 0, .22);
+  --shadow-float: 0 20px 58px rgba(0, 0, 0, .42), 0 4px 14px rgba(0, 0, 0, .25);
+  --shadow-thick: 0 32px 90px rgba(0, 0, 0, .5), 0 6px 18px rgba(0, 0, 0, .3);
+}
+
+[data-theme="dusk"] {
+  color-scheme: dark;
+  --pearl: #202a35;
+  --mist: #2a3745;
+  --ink: #eef4f9;
+  --cobalt: #8eb8ff;
+  --iris: #b4a3ff;
+  --champagne: #e0c99f;
+  --pale-ivory: #303c49;
+  --muted-slate: #b2bdc9;
+  --faint-slate: #8996a4;
+  --quiet-blue: var(--cobalt);
+  --hairline: rgba(228, 239, 249, .14);
+  --solid-surface: #303c49;
+  --field: rgba(255, 255, 255, .065);
+  --regular-glass: rgba(48, 60, 73, 0.62);
+  --thick-glass: rgba(48, 60, 73, 0.94);
+  --clear-glass: rgba(48, 60, 73, 0.42);
+  --glass-top: rgba(188, 208, 234, .085);
+  --glass-bottom: rgba(103, 123, 165, .05);
+  --glass-specular: rgba(255, 255, 255, .2);
+  --glass-refract: rgba(151, 132, 255, .2);
+  --studio-a: #1b2632;
+  --studio-b: #2c3b49;
+  --studio-c: #35495b;
+  --ambient: rgba(90, 143, 197, .22);
+  --warm: rgba(224, 201, 159, .12);
+  --shadow-soft: 0 22px 58px rgba(8, 18, 29, .3), 0 4px 14px rgba(8, 18, 29, .2);
+  --shadow-float: 0 18px 52px rgba(8, 18, 29, .38), 0 3px 12px rgba(8, 18, 29, .22);
+  --shadow-thick: 0 32px 90px rgba(8, 18, 29, .48), 0 6px 18px rgba(8, 18, 29, .28);
+}
+
+/* Glass material contracts (crystal / satin / solid). Defaults first so the
+   attribute selectors below win on the same element. */
+:root {
+  --glass-blur: 32px;
+  --glass-saturate: 1.34;
+  --glass-brightness: 1.02;
+  --glass-alpha-boost: 0;
+}
+
+[data-material="crystal"] {
+  --glass-blur: 32px;
+  --glass-saturate: 1.34;
+  --glass-brightness: 1.02;
+  --glass-alpha-boost: 0;
+}
+
+[data-material="satin"] {
+  --glass-blur: 22px;
+  --glass-saturate: 1.12;
+  --glass-brightness: 1;
+  --glass-alpha-boost: 0.18;
+}
+
+[data-material="solid"] {
+  --glass-blur: 0px;
+  --glass-saturate: 1;
+  --glass-brightness: 1;
+  --glass-alpha-boost: 1;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root, [data-material] {
+    --glass-blur: 0px;
+    --glass-saturate: 1;
+    --glass-brightness: 1;
+    --glass-alpha-boost: 1;
+  }
+}
