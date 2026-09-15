@@ -1,10 +1,14 @@
 <div align="center">
 
-![AI Canvas — one scene, multiple representations](assets/readme/hero.svg)
+[![AI Canvas — one scene, multiple representations](assets/readme/hero.svg)](https://biransama.github.io/ai-canvas/)
 
 **让意图成为结构，让每一次生成都能继续创作。**
 
 A local-first visual instrument with a scene-native Agent.
+
+### [进入交互官网 · 观看三维工作台演示 ↗](https://biransama.github.io/ai-canvas/)
+
+[下载 Windows 预发布版](https://github.com/BiranSama/ai-canvas/releases/tag/v0.3.0) · 滚动展开工作台，体验工具岛与创作流程。
 
 <kbd>TypeScript</kbd> &nbsp; <kbd>Electron</kbd> &nbsp; <kbd>React</kbd> &nbsp; <kbd>Konva</kbd> &nbsp; <kbd>SQLite</kbd>
 
