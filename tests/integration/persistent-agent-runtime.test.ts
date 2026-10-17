@@ -131,7 +131,6 @@ describe('AH1 S4 compatibility projection', () => {
 
     const conversation = await runtime.snapshot()
     expect(conversation.messages.at(-1)).toMatchObject({ role: 'assistant', kind: 'receipt', content: '本地构图已完成。' })
-    expect(await runtime.claimPlan(run.id)).toBeNull()
     const harness = await runtime.harnessSnapshot()
     expect(harness.turns[0]).toMatchObject({ inputMessageId: run.id, status: 'completed', toolCallsUsed: 1 })
     expect((await runtime.replayHarnessEvents(0)).map((event) => event.type)).toEqual(expect.arrayContaining([

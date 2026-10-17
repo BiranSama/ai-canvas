@@ -302,11 +302,6 @@ export const agentToolOutcomeSchema = z.object({
   data: z.unknown().optional()
 })
 
-export const completeAgentRunSchema = z.object({
-  runId: z.string().uuid(),
-  outcomes: z.array(agentToolOutcomeSchema).max(12)
-})
-
 export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>
 export type AgentActivityState = z.infer<typeof agentActivityStateSchema>
 export type AgentActivityKind = z.infer<typeof agentActivityKindSchema>

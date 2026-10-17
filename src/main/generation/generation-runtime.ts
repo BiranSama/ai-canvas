@@ -8,7 +8,6 @@ import { basename, extname, isAbsolute, join, relative, resolve } from 'node:pat
 import type { AgentPlan, AgentRequest, AgentRun, AgentToolOutcome, AgentToolPlan, ConversationSnapshot, SceneSummary } from '../../shared/agent'
 import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../shared/agent'
 import { ELEMENT_SCHEMA_VERSION, type Scene, type SceneElement } from '../../domain'
-import type { AgentSceneToolCommitReceipt } from '../../shared/agent-tools'
 import type { AgentEvent, AgentHarnessSnapshot, AgentMode, AgentTaskDispatch, TaskRelation, TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
@@ -2464,29 +2463,8 @@ export class GenerationRuntime {
     return this.#agent.resolveTemporaryTry(turnId, resolution)
   }
 
-  claimAgentPlan(runId: string): Promise<AgentPlan | null> {
-    return this.#agent.claimPlan(runId)
-  }
-
   confirmAgentRun(runId: string, optionId?: string): Promise<AgentRun> {
     return this.#agent.confirm(runId, optionId)
-  }
-
-  reportAgentToolStarted(runId: string, toolIndex: number): Promise<void> {
-    return this.#agent.reportToolStarted(runId, toolIndex)
-  }
-
-  executeAgentSceneTool(runId: string, toolIndex: number): Promise<AgentSceneToolCommitReceipt> {
-    return this.#agent.executeMainSceneTool(
-      runId,
-      toolIndex,
-      this.#sceneService.state().scene,
-      (batch, expectedSceneRevision) => this.#sceneService.execute({ expectedSceneRevision, batch })
-    )
-  }
-
-  completeAgentRun(input: { readonly runId: string; readonly outcomes: readonly AgentToolOutcome[] }): Promise<AgentRun> {
-    return this.#agent.complete(input)
   }
 
   cancelAgentRun(runId: string): Promise<AgentRun> {
