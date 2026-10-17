@@ -2292,7 +2292,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           {transformHud.rotation !== null && <span>{Math.round(transformHud.rotation)}°</span>}
         </div>
       )}
-      {!preview && emptyGuide !== undefined && emptyGuide !== null && (
+      {!preview && emptyGuide !== undefined && emptyGuide !== null && emptyGuide !== false && (
         <div
           className="canvas-empty-guide"
           style={{

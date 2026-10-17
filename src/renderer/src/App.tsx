@@ -635,13 +635,13 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
             ref={stageRef}
             onScaleChange={setViewportPercentage}
             focusMode={focusMode}
-            emptyGuide={scene.elements.length === 0 && (
+            emptyGuide={scene.elements.length === 0 ? (
               <div aria-label="空白画布">
                 <span className="empty-frame" aria-hidden="true"><ImagePlus size={20} /></span>
                 <strong>空白画布</strong>
                 <p>拖入图片、添加元素，或在下方描述你想创建的画面。</p>
               </div>
-            )}
+            ) : null}
           />
           <ActionTrace />
           {editingGroup?.type === 'group' && (
