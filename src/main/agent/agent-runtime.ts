@@ -11,7 +11,6 @@ import {
 import {
   adaptLegacyTurnInputMode,
   agentTaskInputSchema,
-  type AgentDecisionProposal,
   type AgentEvent,
   type AgentHarnessSnapshot,
   type AgentMode,
@@ -35,6 +34,7 @@ import { GenerationPolicy } from './generation-policy'
 import type { AgentPlanner } from './planner'
 import { DeterministicCreativePlannerAdapter, type PlannerAdapter } from './planner-adapter'
 import {
+  decisionFor,
   PersistentAgentLoop,
   type AgentLoopProjection,
   type AgentLoopToolContext
@@ -411,7 +411,7 @@ export class AgentRuntime {
         })
       },
       onPlanReady: async ({ legacyRunId, request, plan }) => {
-        const requiresDecision = this.#persistentPlanDecision(request, plan) !== null
+        const requiresDecision = decisionFor(request, plan, this.#generationPolicy) !== null
         await this.#repository.savePlan(legacyRunId, plan, requiresDecision)
         await this.#activityLedger?.transitionRunActivity(legacyRunId, 'plan', 'plan.completed', 'completed', {
           progress: 1,
@@ -584,39 +584,6 @@ export class AgentRuntime {
         }, legacyRunId)
       }
     }
-  }
-
-  #persistentPlanDecision(request: AgentRequest, plan: AgentPlan): AgentDecisionProposal | null {
-    const hasExplicitAspect = /\d{1,3}\s*[:：]\s*\d{1,3}/.test(request.text)
-    const plannedAspect = plan.tools.flatMap((tool) => tool.kind === 'scene_batch'
-      ? tool.commands.filter((command) => command.kind === 'scene.set-canvas')
-      : [])[0]
-    if (plannedAspect !== undefined && !hasExplicitAspect) {
-      const defaultRatio = `${plannedAspect.canvas.aspectWidth}:${plannedAspect.canvas.aspectHeight}`
-      return {
-        kind: 'aspect_ratio',
-        title: '这张作品使用什么比例？',
-        consequence: '比例会决定画布尺寸和所有语义元素的构图基准；确认前不会改动作品。',
-        options: [
-          { id: defaultRatio, label: `${defaultRatio} · 推荐`, consequence: '采用规划器建议比例' },
-          { id: '1:1', label: '1:1 · 方形', consequence: '采用方形构图' }
-        ].filter((option, index, candidates) => candidates.findIndex((candidate) => candidate.id === option.id) === index),
-        defaultOptionId: defaultRatio
-      }
-    }
-    if (this.#generationPolicy.requiresConfirmation(request, plan)) {
-      return {
-        kind: 'generation_confirmation',
-        title: '要现在生成图片吗？',
-        consequence: '确认后创建受当前 Provider 与费用策略约束的图片任务。',
-        options: [
-          { id: 'generate', label: '开始生成', consequence: '创建图片生成任务' },
-          { id: 'keep_canvas', label: '先保留画布', consequence: '不创建生成任务' }
-        ],
-        defaultOptionId: 'generate'
-      }
-    }
-    return null
   }
 
   #assertOpen(): void {

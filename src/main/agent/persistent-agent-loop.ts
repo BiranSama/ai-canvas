@@ -434,12 +434,17 @@ function mergeInputs(items: readonly AgentItem[]): {
   }
 }
 
-function decisionFor(request: AgentRequest, plan: AgentPlan, generationPolicy: GenerationPolicy): AgentDecisionProposal | null {
+export function decisionFor(request: AgentRequest, plan: AgentPlan, generationPolicy: GenerationPolicy): AgentDecisionProposal | null {
   const hasExplicitAspect = /\d{1,3}\s*[:：]\s*\d{1,3}/.test(request.text)
   const plannedAspect = plan.tools.flatMap((tool) => tool.kind === 'scene_batch'
     ? tool.commands.filter((command) => command.kind === 'scene.set-canvas')
     : tool.kind === 'scene.set_canvas' ? [{ kind: 'scene.set-canvas' as const, canvas: tool.canvas }] : [])[0]
-  if (plannedAspect !== undefined && !hasExplicitAspect) {
+  const current = request.sceneSummary.canvas
+  // Ask only when the ratio is being chosen: a new composition, or a plan that
+  // changes it. Restyling an existing canvas keeps its ratio without a question.
+  const choosesAspect = plannedAspect !== undefined && (request.sceneSummary.elementCount === 0
+    || plannedAspect.canvas.aspectWidth * current.aspectHeight !== plannedAspect.canvas.aspectHeight * current.aspectWidth)
+  if (plannedAspect !== undefined && choosesAspect && !hasExplicitAspect) {
     const defaultRatio = `${plannedAspect.canvas.aspectWidth}:${plannedAspect.canvas.aspectHeight}`
     const options = [
       { id: defaultRatio, label: `${defaultRatio} · 推荐`, consequence: '采用规划器为当前内容选择的纵横方向' },
