@@ -681,6 +681,8 @@ export interface CanvasStageProps {
   readonly onEphemeralAnnotationComplete?: (region: EphemeralAnnotationRegion) => void
   readonly onEphemeralAnnotationErase?: (regionId: string) => void
   readonly focusMode?: boolean
+  /** Shown centred on the artboard, wherever fit and pan have placed it. */
+  readonly emptyGuide?: React.ReactNode
 }
 
 const ANNOTATION_COLORS: Readonly<Record<EphemeralAnnotationRegion['mode'], { readonly fill: string; readonly stroke: string }>> = {
@@ -766,7 +768,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   ephemeralAnnotationMode = 'edit',
   onEphemeralAnnotationComplete,
   onEphemeralAnnotationErase,
-  focusMode = false
+  focusMode = false,
+  emptyGuide
 }, forwardedRef) {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
@@ -2287,6 +2290,18 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           <span>W {Math.round(transformHud.width / zoom)}</span>
           <span>H {Math.round(transformHud.height / zoom)}</span>
           {transformHud.rotation !== null && <span>{Math.round(transformHud.rotation)}°</span>}
+        </div>
+      )}
+      {!preview && emptyGuide !== undefined && emptyGuide !== null && (
+        <div
+          className="canvas-empty-guide"
+          style={{
+            left: displayedArtboard.x + displayedArtboard.width / 2,
+            top: displayedArtboard.y + displayedArtboard.height / 2,
+            width: Math.min(260, Math.max(180, displayedArtboard.width - 40))
+          }}
+        >
+          {emptyGuide}
         </div>
       )}
       {!preview && shapeEditId === null && selectionBounds !== null && selectedElements.length > 0 && marquee === null && (

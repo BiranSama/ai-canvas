@@ -1,5 +1,4 @@
 import {
-  Check,
   ChevronDown,
   CloudOff,
   Download,
@@ -632,7 +631,18 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
           aria-label="画布工作区"
           style={{ '--scene-reflection': scene.canvas.backgroundColor } as CSSProperties}
         >
-          <CanvasStage ref={stageRef} onScaleChange={setViewportPercentage} focusMode={focusMode} />
+          <CanvasStage
+            ref={stageRef}
+            onScaleChange={setViewportPercentage}
+            focusMode={focusMode}
+            emptyGuide={scene.elements.length === 0 && (
+              <div aria-label="空白画布">
+                <span className="empty-frame" aria-hidden="true"><ImagePlus size={20} /></span>
+                <strong>空白画布</strong>
+                <p>拖入图片、添加元素，或在下方描述你想创建的画面。</p>
+              </div>
+            )}
+          />
           <ActionTrace />
           {editingGroup?.type === 'group' && (
             <div className="group-editing-path glass-surface" role="status" aria-label="组内编辑">
@@ -641,14 +651,6 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
               <button type="button" aria-label="退出组内编辑" onClick={exitGroupEditing}>完成</button>
             </div>
           )}
-          {scene.elements.length === 0 && (
-            <div className="canvas-empty-guide" aria-label="空白画布">
-              <span className="empty-frame" aria-hidden="true"><ImagePlus size={20} /></span>
-              <strong>空白画布</strong>
-              <p>拖入图片、添加元素，或在下方描述你想创建的画面。</p>
-            </div>
-          )}
-          <div className={`runtime-pill${runtime.ready ? ' is-ready' : ''}`} title={runtime.detail}><Check size={11} />本地</div>
         </section>
           <div ref={canvasSizeRef} className="canvas-size-float glass-surface" style={canvasUtilityStyles?.size}><CanvasSizeControl /></div>
           <div ref={canvasStatusRef} className="canvas-status glass-surface" style={canvasUtilityStyles?.status}>
@@ -672,6 +674,9 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
             <div className="canvas-status-meta">
             <button type="button" className="actual-size" data-testid="viewport-scale" title="点击回到 100%（Ctrl+1）" onClick={() => stageRef.current?.viewActualSize()}>{Math.round(viewportPercentage)}%</button>
             <span>{scene.elements.length} 个元素</span>
+            <span className={`runtime-indicator${runtime.ready ? ' is-ready' : ''}`} role="status" title={runtime.detail}>
+              <i aria-hidden="true" />{runtime.ready ? '本地' : '本地未就绪'}
+            </span>
             <button type="button" className="focus-mode-toggle" aria-pressed={focusMode} onClick={() => setFocusMode((current) => !current)}>{focusMode ? '退出专注' : '进入专注'}</button>
             <button type="button" className="reset-islands-button" title="还原工具布局" aria-label="还原工具布局" onClick={resetAllGlassIslands}><LayoutDashboard size={14} /></button>
             </div>
