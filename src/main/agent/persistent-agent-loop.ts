@@ -28,6 +28,7 @@ import {
 import type { ContextCompaction, ContextManifest } from '../../shared/agent-context'
 import { isTerminalGenerationJobStatus, type GenerationJob } from '../../shared/generation'
 import { isAutomaticAgentRecovery, normalizeAgentFailureEnvelope, type AgentFailureEnvelope } from '../../shared/agent-recovery'
+import { activeTurnElapsedMs } from '../../shared/execution-timing'
 import { ownerFullPermissionProfile } from './agent-tool-policy'
 import { GenerationPolicy } from './generation-policy'
 import type { AgentContextRepository } from './agent-context-repository'
@@ -1009,13 +1010,20 @@ export class PersistentAgentLoop {
 
   async #ensureTurnDeadline(turn: AgentTurn): Promise<boolean> {
     if (isTerminalAgentTurnStatus(turn.status) || this.#closed) return false
-    const remaining = turn.timeLimitMs == null ? null : Date.parse(turn.createdAt) + turn.timeLimitMs - Date.parse(this.#now())
+    const remaining = turn.timeLimitMs == null
+      ? null
+      : turn.timeLimitMs - activeTurnElapsedMs(turn, await this.#repository.listTurnItems(turn.id), Date.parse(this.#now()))
     if (remaining === null || !Number.isFinite(remaining) || remaining <= 0) {
       this.#controllers.get(turn.id)?.abort(new AgentLoopControlError('interrupt'))
       await this.#terminal(turn, turn.inputMessageId ?? '', 'budget_limited', remaining === null ? 'TURN_TIME_UNVERIFIED' : 'BUDGET_WALL_TIME',
         remaining === null ? '旧任务没有可核对的本轮时限，后续操作已停止。现有作品和图片任务仍可查看。'
           : '本轮总时限已到，后续操作已停止。已提交的图片任务保留原有任务时限，可在生成页查看或停止。')
       return false
+    }
+    // The clock stops while the person decides; resolving the decision re-arms it.
+    if (turn.status === 'waiting_decision') {
+      this.#clearTurnDeadline(turn.id)
+      return true
     }
     if (this.#turnTimers.has(turn.id)) return true
     const timer = setTimeout(() => {
@@ -1151,7 +1159,7 @@ export class PersistentAgentLoop {
       const stepCount = items.filter((item) => item.type === 'plan'
         && item.ordinal > merged.barrierOrdinal && !reviewGatedPlanItemIds.has(item.id)).length
 
-      const budgetFailure = this.#budgetFailure(turn, null, results, turnBudget)
+      const budgetFailure = this.#budgetFailure(turn, items, null, results, turnBudget)
       if (budgetFailure !== null) {
         await this.#terminal(turn, legacyRunId, 'budget_limited', budgetFailure.code, budgetFailure.message)
         return
@@ -1167,7 +1175,7 @@ export class PersistentAgentLoop {
       // repairs, tool execution and diagnostics stay attributable end to end.
       const requestCorrelationId = turn.id
       const attemptNumber = recoveryCount(items, 'model_can_repair') + 1
-      const elapsedTurnTimeMs = Math.max(0, Date.parse(this.#now()) - Date.parse(turn.createdAt))
+      const elapsedTurnTimeMs = activeTurnElapsedMs(turn, items, Date.parse(this.#now()))
       const remainingPlannerTimeMs = turnBudget.maxWallTimeMs - elapsedTurnTimeMs - 1_000
       const harnessDeadlineAt = Date.now() + remainingPlannerTimeMs
       if (remainingPlannerTimeMs < 1_000) {
@@ -1260,7 +1268,7 @@ export class PersistentAgentLoop {
         const wallTimeExpired = surfacedFailureCode(error, 'AGENT_PLANNING_FAILED') === 'BUDGET_WALL_TIME'
         const attempt = attemptNumber
         const failedTurnBeforeAccounting = await this.#repository.getTurn(turnId)
-        const elapsed = Math.max(0, Date.parse(this.#now()) - Date.parse(turn.createdAt))
+        const elapsed = activeTurnElapsedMs(turn, items, Date.parse(this.#now()))
         const previousPlanningFailure = [...items].reverse().flatMap((item): AgentFailureEnvelope[] => {
           if (item.type !== 'recovery') return []
           const value = payload<StoredRecovery>(item).failure
@@ -1395,7 +1403,7 @@ export class PersistentAgentLoop {
             return
           }
         }
-        const toolBudgetFailure = this.#budgetFailure(await this.#repository.getTurn(turnId), step.call, cumulativeGenerationResults, effectiveBudget)
+        const toolBudgetFailure = this.#budgetFailure(await this.#repository.getTurn(turnId), items, step.call, cumulativeGenerationResults, effectiveBudget)
         if (toolBudgetFailure !== null) {
           await this.#terminal(turn, legacyRunId, 'budget_limited', toolBudgetFailure.code, toolBudgetFailure.message)
           return
@@ -1507,7 +1515,7 @@ export class PersistentAgentLoop {
             } catch (error) {
               if (!isTransientLocalReadFailure(step.call, error)) throw error
               const currentUsage = await this.#repository.getTurn(turnId)
-              const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - (Date.parse(this.#now()) - Date.parse(turn.createdAt)))
+              const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - activeTurnElapsedMs(turn, items, Date.parse(this.#now())))
               if (localReadRetries >= 2 || currentUsage.recoveryAttemptsUsed >= turnBudget.maxRecoveryAttempts || remainingWallTimeMs < 1_000) {
                 const exhaustedError = Object.assign(new Error('读取作品状态在两次本地重试后仍未恢复。'), { code: 'TOOL_READ_RETRY_EXHAUSTED' })
                 const exhausted = createAgentFailureEnvelope({
@@ -1585,7 +1593,7 @@ export class PersistentAgentLoop {
         const remainingIndexes = (activePlan ?? step.plan)?.tools.map((_tool, index) => index)
           .filter((index) => index > step.toolIndex) ?? []
         const currentTurnUsage = await this.#repository.getTurn(turnId)
-        const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - (Date.parse(this.#now()) - Date.parse(turn.createdAt)))
+        const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - activeTurnElapsedMs(turn, items, Date.parse(this.#now())))
         const initialFailure = createAgentFailureEnvelope({
           error,
           fallbackCode: 'TOOL_EXECUTION_FAILED',
@@ -1780,11 +1788,12 @@ export class PersistentAgentLoop {
 
   #budgetFailure(
     turn: AgentTurn,
+    items: readonly AgentItem[],
     nextTool: AgentToolPlan | null,
     results: readonly StoredToolResult[],
     budget: AgentRunBudget
   ): { readonly code: string; readonly message: string } | null {
-    if (Date.parse(this.#now()) - Date.parse(turn.createdAt) >= budget.maxWallTimeMs) {
+    if (activeTurnElapsedMs(turn, items, Date.parse(this.#now())) >= budget.maxWallTimeMs) {
       return { code: 'BUDGET_WALL_TIME', message: 'Agent turn reached its wall-time budget before the next action.' }
     }
     if (turn.modelTurnsUsed >= budget.maxModelTurns) {

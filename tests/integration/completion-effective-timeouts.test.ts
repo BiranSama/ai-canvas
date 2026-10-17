@@ -11,7 +11,6 @@ import { MockImageProvider } from '../../src/main/generation/mock-image-provider
 import { generationProfileRequestSchema, type GenerationJob } from '../../src/shared/generation'
 import type { AgentPlan } from '../../src/shared/agent'
 import { formatTimeLimit, generationTiming } from '../../src/shared/execution-timing'
-import { projectAgentExecutionFlow } from '../../src/renderer/src/agent/agent-execution-flow'
 import { SceneService } from '../../src/main/scene'
 import { createNightVeilScene, NIGHT_VEIL_IDS } from '../../src/renderer/src/fixtures/night-veil'
 
@@ -43,45 +42,55 @@ function scenePlan(runtime: GenerationRuntime): AgentPlan {
   return { summary: '需要审阅的修改', response: '调整画布风格', nextAction: null,
     tools: [{ kind: 'scene_batch', summary: '调整背景', commands: [{ kind: 'scene.set-canvas', canvas: { ...runtime.getWorkspaceBootstrap().scene.canvas, globalStyle: 'reviewed-style' } }] }] }
 }
+/** Answers each decision the turn raises: the default choice, and "apply" for a Review-mode step. */
+async function approveWaitingDecisions(runtime: GenerationRuntime, runId: string, done: () => boolean) {
+  for (let round = 0; round < 6 && !done(); round++) {
+    const waiting = (await runtime.getAgentHarnessSnapshot()).items.find((item) => item.type === 'decision' && item.status === 'waiting')
+    if (waiting !== undefined) {
+      const { proposal } = waiting.payload as { readonly proposal: { readonly kind: string; readonly defaultOptionId: string } }
+      await runtime.confirmAgentRun(runId, proposal.kind === 'clarification' ? 'apply_once' : proposal.defaultOptionId)
+    }
+    await realDelay(50)
+  }
+}
 async function waitingDecision(runtime: GenerationRuntime) {
   await runtime.startAgentRun(input(runtime, '将画布背景调整为安静的灰蓝色，先不要生成图片'), 'review')
   await until(async () => (await runtime.getAgentHarnessSnapshot()).turns[0]?.status === 'waiting_decision', 'waiting_decision')
   return (await runtime.getAgentHarnessSnapshot()).turns[0]!
 }
 
-it('enforces the persisted Turn deadline while waiting for a decision and never executes a late approval', async () => {
+it('pauses the persisted Turn deadline while waiting for a decision and runs the approved step afterwards', async () => {
   const h = await fixture()
   vi.spyOn(ConfiguredAgentPlanner.prototype, 'plan').mockResolvedValue(scenePlan(h.runtime))
   const before = h.runtime.getWorkspaceBootstrap().scene
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
   const turn = await waitingDecision(h.runtime)
   expect(turn.timeLimitMs).toBe(10_000)
-  await vi.advanceTimersByTimeAsync(9_999)
+  // Far past the 10 s limit: time spent deciding is not Agent work time.
+  await vi.advanceTimersByTimeAsync(60_000)
   expect((await h.runtime.getAgentHarnessSnapshot()).turns[0]?.status).toBe('waiting_decision')
-  await vi.advanceTimersByTimeAsync(1)
-  await until(async () => (await h.runtime.getAgentHarnessSnapshot()).turns[0]?.status === 'budget_limited', 'Turn deadline')
-  const snapshot = await h.runtime.getAgentHarnessSnapshot()
-  expect(snapshot.turns[0]).toMatchObject({ createdAt: turn.createdAt, timeLimitMs: 10_000, errorCode: 'BUDGET_WALL_TIME' })
-  await expect(h.runtime.confirmAgentRun(turn.inputMessageId!)).rejects.toThrow()
   expect(h.runtime.getWorkspaceBootstrap().scene).toEqual(before)
-  expect(projectAgentExecutionFlow(snapshot, turn.id)?.headline).toBe('本轮时限已到')
+  await approveWaitingDecisions(h.runtime, turn.inputMessageId!, () => h.runtime.getWorkspaceBootstrap().scene.canvas.globalStyle === 'reviewed-style')
+  await until(async () => h.runtime.getWorkspaceBootstrap().scene.canvas.globalStyle === 'reviewed-style', 'approved step')
+  expect((await h.runtime.getAgentHarnessSnapshot()).turns[0]).toMatchObject({ createdAt: turn.createdAt, timeLimitMs: 10_000 })
+  expect((await h.runtime.getAgentHarnessSnapshot()).turns[0]?.errorCode).not.toBe('BUDGET_WALL_TIME')
   expect(h.network).not.toHaveBeenCalled()
 })
 
-it('restores only the remaining decision time after restart, including when a new runtime has other defaults', async () => {
+it('keeps a waiting decision open across restart, including when a new runtime has other defaults', async () => {
   const h = await fixture()
   vi.spyOn(ConfiguredAgentPlanner.prototype, 'plan').mockResolvedValue(scenePlan(h.runtime))
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
   const turn = await waitingDecision(h.runtime)
   vi.useRealTimers(); await h.runtime.close()
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
-  vi.setSystemTime(Date.parse(turn.createdAt) + 8_000)
+  vi.setSystemTime(Date.parse(turn.createdAt) + 60_000)
   const reopened = await GenerationRuntime.create(h.root); runtimes.push(reopened)
   expect((await reopened.getAgentHarnessSnapshot()).turns[0]).toMatchObject({ timeLimitMs: 10_000, createdAt: turn.createdAt, status: 'waiting_decision' })
-  await vi.advanceTimersByTimeAsync(1_999)
+  await vi.advanceTimersByTimeAsync(60_000)
   expect((await reopened.getAgentHarnessSnapshot()).turns[0]?.status).toBe('waiting_decision')
-  await vi.advanceTimersByTimeAsync(1)
-  await until(async () => (await reopened.getAgentHarnessSnapshot()).turns[0]?.status === 'budget_limited', 'restored deadline')
+  await approveWaitingDecisions(reopened, turn.inputMessageId!, () => reopened.getWorkspaceBootstrap().scene.canvas.globalStyle === 'reviewed-style')
+  await until(async () => reopened.getWorkspaceBootstrap().scene.canvas.globalStyle === 'reviewed-style', 'approved step after restart')
   expect(h.network).not.toHaveBeenCalled()
 })
 

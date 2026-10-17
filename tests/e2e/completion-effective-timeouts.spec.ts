@@ -36,7 +36,7 @@ test('uses seconds in settings, reads back the saved policy, and shows the persi
     await page.getByLabel('对话输入').fill('调整画布为一张安静的封面，先不要生成图片')
     await page.getByRole('button', { name: '发送要求', exact: true }).click()
     await expect(page.locator('.execution-time-policy').last()).toContainText('本轮总时限 5 分钟')
-    await expect(page.locator('.execution-time-policy').last()).toContainText('包含等待决定和图片')
+    await expect(page.locator('.execution-time-policy').last()).toContainText('等你做决定的时间不计入')
     const harness = await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getAgentHarnessSnapshot())
     expect(harness.turns[0]?.timeLimitMs).toBe(300_000)
     await page.screenshot({ path: test.info().outputPath('turn-limit-main-readback.png') })

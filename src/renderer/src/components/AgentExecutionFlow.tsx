@@ -102,7 +102,7 @@ export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onR
         {flow.providerSummary !== null && <span className="execution-provider-fact"><small>文字模型</small><strong>{flow.providerSummary}</strong></span>}
       </div>
       <p className="execution-time-policy">{flow.timeLimitMs == null ? '旧任务未记录可核对的整轮时限。'
-        : `本轮总时限 ${formatTimeLimit(flow.timeLimitMs)}；自开始计时，包含等待决定和图片。修改配置或重启不会延长本轮。`}</p>
+        : `本轮总时限 ${formatTimeLimit(flow.timeLimitMs)}；等你做决定的时间不计入，生成图片的时间计入。修改配置或重启不会延长本轮。`}</p>
       <div className="execution-stall-announcement" aria-live="polite">{stallAnnouncement}</div>
       {flow.hiddenStageCount > 0 && <p className="execution-hidden-note">此前还有 {flow.hiddenStageCount} 个已记录阶段</p>}
       <ol className="agent-execution-stages">
