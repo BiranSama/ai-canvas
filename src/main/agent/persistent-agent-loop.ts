@@ -1088,7 +1088,8 @@ export class PersistentAgentLoop {
       let contextManifest: ContextManifest | null = null
 
       if (turn.status === 'queued' || turn.status === 'building_context') {
-        await this.#repository.transitionTurn(turnId, 'building_context', { errorCode: null, errorMessage: null })
+        const building = await this.#repository.transitionTurn(turnId, 'building_context', { errorCode: null, errorMessage: null })
+        if (isTerminalAgentTurnStatus(building.status)) return
         await this.#projection.onPlanningStarted?.({ turn, legacyRunId, request: plannerRequest })
       }
       if (this.#contextRepository !== null) {
@@ -1165,10 +1166,13 @@ export class PersistentAgentLoop {
         return
       }
 
-      await this.#repository.transitionTurn(turnId, 'planning', { errorCode: null, errorMessage: null })
-      await this.#publish(turn.threadId)
+      // Register the planner's controller before re-checking the turn, so a
+      // Stop either finds the turn finished here or aborts this controller.
       controller = new AbortController()
       this.#controllers.set(turnId, controller)
+      const planning = await this.#repository.transitionTurn(turnId, 'planning', { errorCode: null, errorMessage: null })
+      if (isTerminalAgentTurnStatus(planning.status)) return
+      await this.#publish(turn.threadId)
       let step
       // The turn owns one stable correlation chain. Individual Provider calls
       // remain distinguishable by attemptId while request/cost reservations,

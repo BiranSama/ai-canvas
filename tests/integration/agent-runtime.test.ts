@@ -406,6 +406,7 @@ describe('agent runtime and shared CommandBus boundary', () => {
   })
 
   it.each([
+    ['as soon as the request is sent', async () => undefined],
     ['while the planner is working', async (runtime: AgentRuntime, runId: string) => { await waitForStatus(runtime, runId, ['planning']) }]
   ] as const)('stops the turn when cancelled %s without a plan or scene mutation', async (_moment, beforeCancel) => {
     const value = await harness({ planner: new DeterministicMockPlanner({ delayMs: 200 }) })
