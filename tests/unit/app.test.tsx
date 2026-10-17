@@ -109,8 +109,10 @@ describe('canvas workspace shell', () => {
     render(<App />)
     await screen.findByRole('listbox', { name: '图层' })
     fireEvent.click(screen.getByRole('tab', { name: /属性/ }))
-    fireEvent.click(screen.getByRole('button', { name: '1:1' }))
-    fireEvent.click(screen.getByRole('button', { name: '应用画布尺寸' }))
+    // The properties panel mounts after the tab switch; under parallel load it
+    // can land a frame later, so wait for the controls instead of assuming them.
+    fireEvent.click(await screen.findByRole('button', { name: '1:1' }))
+    fireEvent.click(await screen.findByRole('button', { name: '应用画布尺寸' }))
 
     await waitFor(() => {
       expect(useWorkspaceStore.getState().scene.canvas).toMatchObject({
