@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   AgentContextRepository,
   AgentHarnessRepository,
+  DeterministicCreativePlannerAdapter,
   PersistentAgentLoop,
   ScriptedPlannerAdapter
 } from '../../src/main/agent'
+import type { AgentPlanner, AgentPlannerAttemptContext } from '../../src/main/agent/planner'
 import { compilePlannerContext } from '../../src/main/agent/context-builder'
 import { ProjectWorkspace } from '../../src/main/storage/project-workspace'
 import { agentRequestSchema } from '../../src/shared/agent'
@@ -118,6 +120,56 @@ describe('AH1 S5 persistent agent context integration', () => {
     // performs no Scene write, so its unsubstantiated completion stays reviewable.
     expect((await value.loop.snapshot()).turns.find((candidate) => candidate.id === turn.id)).toMatchObject({ status: 'needs_user_review' })
     expect((await value.context.getLatestManifest(projectId))?.id).not.toBe(manifest.id)
+  })
+
+  it('hands confirmed rules and memory to the model planner on every turn', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ai-canvas-context-to-model-'))
+    roots.push(root)
+    const ids = idFactory(19_000)
+    const opened = await ProjectWorkspace.create(join(root, 'context-model.aicanvas'), 'Context to model', { idFactory: ids })
+    const databasePath = join(root, 'context-model.aicanvas', 'project.db')
+    const harness = new AgentHarnessRepository(databasePath, { idFactory: ids })
+    const context = new AgentContextRepository(databasePath, { idFactory: ids })
+    const seen: AgentPlannerAttemptContext[] = []
+    const planner: AgentPlanner = {
+      plan: async (_request, _signal, _recovery, attempt) => {
+        if (attempt !== undefined) seen.push(attempt)
+        return { summary: '已阅读', response: '好的', nextAction: null, tools: [] }
+      }
+    }
+    const loop = new PersistentAgentLoop({
+      projectId: opened.workspace.metadata.id,
+      repository: harness,
+      contextRepository: context,
+      planner: new DeterministicCreativePlannerAdapter(planner),
+      executeTool: async (_tool, toolContext) => ({
+        toolIndex: toolContext.toolIndex, ok: true, batchId: null, jobId: null, affectedElementIds: [], message: 'unused'
+      }),
+      loadRequest: async () => request('聊聊这个构图'),
+      allowedTools: ['scene.get_summary', 'scene.get_elements', 'scene.apply_batch']
+    })
+    await loop.initialize()
+    closers.push(async () => {
+      await loop.close().catch(() => undefined)
+      await opened.workspace.close(true).catch(() => undefined)
+    })
+    const projectId = opened.workspace.metadata.id
+    await context.createDirective(projectId, { text: '标题一律使用衬线体', category: 'creative', priority: 300, sourceMessageId: 'message-rule' })
+    await context.createMemory(projectId, {
+      kind: 'direction', content: '聊构图时偏好清晨的冷光', sourceType: 'user', sourceId: 'message-memory', confidence: 0.9, supersedesId: null
+    })
+    await loop.start({
+      legacyRunId: '00000000-0000-4000-8000-000000000103',
+      sourceMessageId: 'message-3',
+      request: request('聊聊这个构图')
+    })
+    await loop.waitForIdle()
+
+    expect(seen.length).toBeGreaterThan(0)
+    expect(seen[0]?.projectContext).toMatchObject({
+      rules: [expect.objectContaining({ text: '标题一律使用衬线体' })],
+      memories: [expect.objectContaining({ content: '聊构图时偏好清晨的冷光' })]
+    })
   })
 
   it('persists local_only in the Turn manifest without attempting any external call', async () => {

@@ -140,6 +140,67 @@ export function compilePlannerContext(manifest: ContextManifest): PlannerContext
   }
 }
 
+/**
+ * The model-facing slice of a manifest: the continuity a planner needs beyond
+ * the scene summary it already receives. Only entries the outbound policy let
+ * through (inline or outbound) are projected; everything else stays local.
+ */
+export interface PlannerProjectContext {
+  readonly rules: readonly { readonly text: string; readonly category: string; readonly conflictsWithCurrentRequest: boolean }[]
+  readonly goal: { readonly objective: string; readonly completionDefinition: readonly string[] } | null
+  readonly memories: readonly { readonly kind: string; readonly content: string }[]
+  readonly recentConversation: readonly { readonly role: 'user' | 'assistant'; readonly text: string }[]
+  readonly earlierSummary: string | null
+}
+
+const PROJECT_CONTEXT_TEXT_LIMIT = 2_000
+
+function record(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {}
+}
+
+function boundedText(value: unknown): string {
+  return typeof value === 'string' ? value.trim().slice(0, PROJECT_CONTEXT_TEXT_LIMIT) : ''
+}
+
+export function plannerProjectContext(manifest: ContextManifest, currentRequestText: string): PlannerProjectContext | null {
+  const included = manifest.entries.filter((entry) => entry.disposition === 'inline' || entry.disposition === 'outbound')
+  const rules = included.filter((entry) => entry.sourceType === 'directive').flatMap((entry) => {
+    const content = record(entry.content)
+    const text = boundedText(content.text)
+    return text === '' ? [] : [{ text, category: boundedText(content.category) || 'general', conflictsWithCurrentRequest: content.conflictsWithCurrentRequest === true }]
+  })
+  const goalContent = included
+    .map((entry) => record(entry.content))
+    .find((content) => content.trust === 'trusted_goal_contract')
+  const goal = goalContent === undefined || boundedText(goalContent.objective) === '' ? null : {
+    objective: boundedText(goalContent.objective),
+    completionDefinition: Array.isArray(goalContent.completionDefinition)
+      ? goalContent.completionDefinition.map(boundedText).filter((line) => line !== '').slice(0, 12)
+      : []
+  }
+  const memories = included.filter((entry) => entry.sourceType === 'memory').flatMap((entry) => {
+    const content = record(entry.content)
+    const text = boundedText(content.content)
+    return text === '' ? [] : [{ kind: boundedText(content.kind) || 'note', content: text }]
+  })
+  const conversationEntry = included.find((entry) => entry.sourceType === 'summary' && entry.sourceId === 'recent-conversation')
+  const messages = Array.isArray(record(conversationEntry?.content).messages) ? record(conversationEntry?.content).messages as readonly unknown[] : []
+  const recentConversation = messages.flatMap((message) => {
+    const value = record(message)
+    const text = boundedText(record(value.payload).text)
+    if (text === '') return []
+    return [{ role: value.type === 'assistant_message' ? 'assistant' as const : 'user' as const, text }]
+  })
+  // The current request is sent separately; do not repeat it as history.
+  const last = recentConversation.at(-1)
+  if (last !== undefined && last.role === 'user' && last.text === currentRequestText.trim().slice(0, PROJECT_CONTEXT_TEXT_LIMIT)) recentConversation.pop()
+  const compaction = included.find((entry) => entry.sourceType === 'summary' && entry.sourceId !== 'recent-conversation' && entry.sourceId !== 'thread-ledger')
+  const earlierSummary = boundedText(record(compaction?.content).summary) || null
+  if (rules.length === 0 && goal === null && memories.length === 0 && recentConversation.length === 0 && earlierSummary === null) return null
+  return { rules, goal, memories, recentConversation, earlierSummary }
+}
+
 function estimatedBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), 'utf8')
 }

@@ -5,6 +5,7 @@ import type { AgentFailureEnvelope } from '../../shared/agent-recovery'
 import { buildDesignContract } from './design-capability'
 import { hasExplicitGenerationInstruction, hasNegatedGenerationInstruction } from './generation-policy'
 import type { AgentObservableEvent } from '../../shared/agent-observability'
+import type { PlannerProjectContext } from './context-builder'
 
 export interface AgentPlannerAttemptContext {
   readonly attempt: number
@@ -12,6 +13,8 @@ export interface AgentPlannerAttemptContext {
   readonly deadlineAt: number
   readonly deadlineCode: 'PROVIDER_TOTAL_TIMEOUT' | 'BUDGET_WALL_TIME'
   readonly observe?: (event: AgentObservableEvent, delivery?: { readonly checkpoint: boolean }) => void | Promise<void>
+  /** Rules, memory and conversation continuity the outbound policy allows the model to see. */
+  readonly projectContext?: PlannerProjectContext | null
 }
 
 export interface AgentPlanner {

@@ -211,22 +211,24 @@ describe('Provider and Agent P0 contracts without external calls', () => {
     })).rejects.toMatchObject({ code: 'PROVIDER_PROTOCOL_MISMATCH', status: 200, contentType: 'text/plain' })
   })
 
-  it('rejects an empty tool plan for an execution request but permits ordinary conversation', async () => {
+  it('asks once more when an execution request gets an empty plan, then accepts the model judgement', async () => {
     const protocol = createConfiguredLlmProtocol(llmConfig('openai-responses').providers[0])
+    const postJson = vi.fn(async (input: Parameters<ArkHttpClient['postJson']>[0]) => {
+      void input
+      return {
+        id: 'response-1',
+        status: 'completed',
+        output: [{
+          type: 'function_call',
+          call_id: 'call-1',
+          name: 'submitAgentPlan',
+          arguments: JSON.stringify({ summary: '已理解', response: '好的', nextAction: null, tools: [] })
+        }]
+      }
+    })
     const planner = new ArkAgentPlanner({
       protocol,
-      http: {
-        postJson: vi.fn(async () => ({
-          id: 'response-1',
-          status: 'completed',
-          output: [{
-            type: 'function_call',
-            call_id: 'call-1',
-            name: 'submitAgentPlan',
-            arguments: JSON.stringify({ summary: '已理解', response: '好的', nextAction: null, tools: [] })
-          }]
-        }))
-      },
+      http: { postJson },
       assets: { resolveAsset: async () => { throw new Error('No attachments expected') } },
       timeoutMs: 2_000
     })
@@ -238,6 +240,56 @@ describe('Provider and Agent P0 contracts without external calls', () => {
     })
     await expect(planner.plan(request('聊聊这个构图给人的感受'), new AbortController().signal)).resolves.toMatchObject({ tools: [] })
     await expect(planner.plan(request('先不要生成图片，只聊聊这个构图'), new AbortController().signal)).resolves.toMatchObject({ tools: [] })
+
+    const askedToAct = createAgentFailureEnvelope({
+      error: Object.assign(new Error('没有可执行操作'), { code: 'MODEL_ACTION_PLAN_EMPTY' }), fallbackCode: 'MODEL_ACTION_PLAN_EMPTY',
+      attempt: 1, maxAttempts: 2, completedToolIndexes: [], failedToolIndex: null,
+      unstartedToolIndexes: [], remainingWallTimeMs: 20_000, remainingCostCny: null
+    })
+    await expect(planner.plan(request('这张生成的效果怎么样？要不要调整'), new AbortController().signal, askedToAct)).resolves.toMatchObject({ tools: [] })
+    const repairBody = postJson.mock.calls.at(-1)?.[0].body as { input?: Array<{ content?: unknown }> }
+    expect(JSON.stringify(repairBody.input)).toContain('这一次的判断会被采纳')
+  })
+
+  it('sends confirmed rules, memory and recent conversation with the request', async () => {
+    const postJson = vi.fn(async (input: Parameters<ArkHttpClient['postJson']>[0]) => {
+      void input
+      return {
+        id: 'response-context',
+        status: 'completed',
+        output: [{
+          type: 'function_call',
+          call_id: 'call-context',
+          name: 'submitAgentPlan',
+          arguments: JSON.stringify({ summary: '已阅读', response: '好的', nextAction: null, tools: [] })
+        }]
+      }
+    })
+    const planner = new ArkAgentPlanner({
+      protocol: createConfiguredLlmProtocol(llmConfig('openai-responses').providers[0]),
+      http: { postJson },
+      assets: { resolveAsset: async () => { throw new Error('No attachments expected') } },
+      timeoutMs: 2_000
+    })
+    await planner.plan(request('聊聊上一版'), new AbortController().signal, null, {
+      attempt: 1,
+      requestCorrelationId: 'context-check',
+      deadlineAt: Date.now() + 60_000,
+      deadlineCode: 'PROVIDER_TOTAL_TIMEOUT',
+      projectContext: {
+        rules: [{ text: '标题一律使用衬线体', category: 'creative', conflictsWithCurrentRequest: false }],
+        goal: null,
+        memories: [{ kind: 'preference', content: '偏好清晨的冷光' }],
+        recentConversation: [{ role: 'assistant', text: '第一版用了暖色侧光。' }],
+        earlierSummary: null
+      }
+    })
+    const body = postJson.mock.calls[0]?.[0].body as { input?: unknown; instructions?: unknown }
+    const sent = JSON.stringify(body.input)
+    expect(sent).toContain('标题一律使用衬线体')
+    expect(sent).toContain('偏好清晨的冷光')
+    expect(sent).toContain('第一版用了暖色侧光。')
+    expect(String(body.instructions ?? '')).toContain('遵守 rules')
   })
 
   it('instructs the live planner to build editable semantic parts without claiming bitmap auto-layering', async () => {
