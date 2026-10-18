@@ -479,9 +479,15 @@ export class AgentRuntime {
           })
         }
       },
-      onToolStarted: async ({ legacyRunId, toolIndex, tool }) => {
+      onStepPlanned: async ({ legacyRunId }) => {
+        await this.#activityLedger?.transitionRunActivity(legacyRunId, 'plan', 'plan.completed', 'completed', {
+          progress: 1,
+          impactLabel: '逐步执行：每一步看到结果再决定下一步'
+        })
+      },
+      onToolStarted: async ({ legacyRunId, toolIndex, tool, label }) => {
         await this.#repository.ensureToolCall(legacyRunId, toolIndex, tool)
-        await this.#activityLedger?.ensureToolActivity(this.#projectId, legacyRunId, toolIndex, tool)
+        await this.#activityLedger?.ensureToolActivity(this.#projectId, legacyRunId, toolIndex, tool, label)
         const current = await this.#repository.getRun(legacyRunId)
         if (current.status !== 'executing') await this.#repository.transition(legacyRunId, { status: 'executing' })
         await this.#activityLedger?.transitionTool(legacyRunId, toolIndex, 'tool.running', 'running')

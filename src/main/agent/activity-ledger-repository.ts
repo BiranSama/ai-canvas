@@ -351,11 +351,14 @@ export class ActivityLedgerRepository {
     }
   }
 
-  async ensureToolActivity(projectId: string, runId: string, ordinal: number, tool: AgentPlan['tools'][number]): Promise<void> {
+  async ensureToolActivity(projectId: string, runId: string, ordinal: number, tool: AgentPlan['tools'][number], actionLabel?: string): Promise<void> {
     const existing = await this.#connection.kysely.selectFrom('agent_activities').select('id')
       .where('run_id', '=', runId).where('kind', '=', 'tool').where('ordinal', '=', ordinal).executeTakeFirst()
     if (existing !== undefined) return
-    await this.create({ projectId, runId, ordinal, eventType: 'tool.queued', state: 'queued', ...toolProjection(tool) })
+    await this.create({
+      projectId, runId, ordinal, eventType: 'tool.queued', state: 'queued', ...toolProjection(tool),
+      ...(actionLabel === undefined ? {} : { actionLabel })
+    })
   }
 
   async transitionTool(runId: string, ordinal: number, eventType: string, state: AgentActivityState, outcome?: AgentToolOutcome): Promise<void> {

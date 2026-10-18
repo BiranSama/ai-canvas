@@ -103,7 +103,9 @@ export interface AgentLoopProjection {
     readonly proposal: AgentDecisionProposal
   }): Promise<void>
   onDecisionResolved?(input: { readonly legacyRunId: string; readonly proposal: AgentDecisionProposal; readonly optionId: string }): Promise<void>
-  onToolStarted?(input: { readonly legacyRunId: string; readonly toolIndex: number; readonly tool: AgentToolPlan }): Promise<void>
+  onToolStarted?(input: { readonly legacyRunId: string; readonly toolIndex: number; readonly tool: AgentToolPlan; readonly label?: string }): Promise<void>
+  /** A stepwise planner chose its next step; there is no whole plan to show. */
+  onStepPlanned?(input: { readonly legacyRunId: string }): Promise<void>
   onToolFinished?(input: { readonly legacyRunId: string; readonly outcome: AgentToolOutcome }): Promise<void>
   onCompleted?(input: {
     readonly turn: AgentTurn
@@ -1407,7 +1409,8 @@ export class PersistentAgentLoop {
         results = []
       }
       if (step.kind === 'tool' && step.plan !== null) {
-        if (!stepwise) await this.#projection.onPlanReady?.({ turn, legacyRunId, request: plannerRequest, plan: step.plan })
+        if (stepwise) await this.#projection.onStepPlanned?.({ legacyRunId })
+        else await this.#projection.onPlanReady?.({ turn, legacyRunId, request: plannerRequest, plan: step.plan })
         const decision = decisionFor(plannerRequest, step.plan, this.#generationPolicy)
         if (decision !== null) {
           const decisionItem = await this.#repository.appendItem(turnId, {
@@ -1511,7 +1514,12 @@ export class PersistentAgentLoop {
         toolCalls: 1,
         sceneWriteBatches: isSceneMutationTool(step.call) && turn.taskRelation !== 'temporary_try' ? 1 : 0
       })
-      await this.#projection.onToolStarted?.({ legacyRunId, toolIndex: projectionIndex ?? step.toolIndex, tool: step.call })
+      await this.#projection.onToolStarted?.({
+        legacyRunId,
+        toolIndex: projectionIndex ?? step.toolIndex,
+        tool: step.call,
+        ...(stepwise && activePlan !== null ? { label: activePlan.summary } : {})
+      })
       await this.#publish(turn.threadId)
       let outcome: AgentToolOutcome
       const toolContext: AgentLoopToolContext = {
