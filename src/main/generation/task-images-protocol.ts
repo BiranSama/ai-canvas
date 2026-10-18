@@ -1,17 +1,7 @@
 import { z } from 'zod'
 import { familyPrompt } from './image-prompt-families'
-import type { GenerationRequest, ProviderCapabilities } from '../../shared/generation'
-
-export const TASK_IMAGES_CAPABILITIES: ProviderCapabilities = {
-  textToImage: true,
-  imageReferences: false,
-  maskEditing: false,
-  multipleReferences: false,
-  transparentOutput: false,
-  maxImages: 1,
-  supportedRatios: ['custom'],
-  supportedFormats: ['png', 'jpeg', 'webp']
-}
+import type { GenerationRequest } from '../../shared/generation'
+import { TASK_IMAGES_CAPABILITIES } from '../../shared/image-model-profiles'
 
 const modelSchema = z.string().trim().min(1).max(200)
 const taskIdSchema = z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/)

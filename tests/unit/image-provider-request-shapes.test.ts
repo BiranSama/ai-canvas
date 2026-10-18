@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { ArkSeedreamProtocol, seedreamCapabilitiesFor } from '../../src/main/generation/ark-seedream-protocol'
-import { OpenAiImagesProtocol, openAiImagesCapabilitiesFor } from '../../src/main/generation/openai-images-protocol'
+import { ArkSeedreamProtocol } from '../../src/main/generation/ark-seedream-protocol'
+import { OpenAiImagesProtocol } from '../../src/main/generation/openai-images-protocol'
+import { openAiImagesCapabilitiesFor, seedreamCapabilitiesFor } from '../../src/shared/image-model-profiles'
 import { familyPrompt, imagePromptFamily } from '../../src/main/generation/image-prompt-families'
 import type { GenerationRequest } from '../../src/shared/generation'
 

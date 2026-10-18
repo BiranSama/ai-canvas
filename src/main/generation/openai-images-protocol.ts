@@ -1,7 +1,8 @@
 import { z } from 'zod'
-import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
+import type { EditRequest, GenerationRequest } from '../../shared/generation'
 import { familyPrompt } from './image-prompt-families'
-import { fitFreeImageSize, formatImageSize, nearestPresetSize, type FreeSizeRule, type ImageSize } from './image-size-rules'
+import { GPT_IMAGE_1_PRESETS, GPT_IMAGE_FREE_SIZE, GROK_ASPECT_RATIOS, hasPresetSizesOnly, isGptImageModel, isGrokImageModel, OPENAI_IMAGES_CAPABILITIES } from '../../shared/image-model-profiles'
+import { fitFreeImageSize, formatImageSize, nearestPresetSize } from '../../shared/image-size-rules'
 
 const modelSchema = z.string().trim().min(1).max(200)
 const base64Schema = z.string().min(1).max(70 * 1024 * 1024)
@@ -11,17 +12,6 @@ const responseSchema = z.object({
     url: z.string().url().max(8_192).optional()
   }).passthrough()).min(1).max(4)
 }).passthrough()
-
-export const OPENAI_IMAGES_CAPABILITIES: ProviderCapabilities = {
-  textToImage: true,
-  imageReferences: true,
-  maskEditing: true,
-  multipleReferences: true,
-  transparentOutput: true,
-  maxImages: 4,
-  supportedRatios: ['custom'],
-  supportedFormats: ['png', 'jpeg', 'webp']
-}
 
 export interface OpenAiImagesJsonRequest {
   readonly url: string
@@ -63,31 +53,6 @@ function validatedBaseUrl(value: string): URL {
   return new URL(direct.toString().endsWith('/') ? direct.toString() : `${direct.toString()}/`)
 }
 
-
-const GPT_IMAGE_1_PRESETS: readonly ImageSize[] = [
-  { width: 1024, height: 1024 },
-  { width: 1536, height: 1024 },
-  { width: 1024, height: 1536 }
-]
-
-// gpt-image-2 and later accept any size on a 16 px grid within these bounds.
-const GPT_IMAGE_FREE_SIZE: FreeSizeRule = {
-  multipleOf: 16,
-  minPixels: 655_360,
-  maxPixels: 8_294_400,
-  maxEdge: 3_840,
-  maxAspect: 3
-}
-
-/** OpenAI's own image models: they always return Base64 and reject `response_format`. */
-function isGptImageModel(model: string): boolean {
-  return /^(?:gpt-image-|chatgpt-image)/i.test(model)
-}
-
-function hasPresetSizesOnly(model: string): boolean {
-  return /^gpt-image-1(?:$|[.-])/i.test(model) || /^chatgpt-image/i.test(model)
-}
-
 function outputSize(request: GenerationRequest | EditRequest): string {
   const requested = { width: request.outputWidth, height: request.outputHeight }
   const aspect = { width: request.aspectWidth, height: request.aspectHeight }
@@ -97,34 +62,11 @@ function outputSize(request: GenerationRequest | EditRequest): string {
   return formatImageSize(requested)
 }
 
-/** Grok Imagine takes an aspect ratio and a 1k/2k resolution instead of pixel sizes. */
-function isGrokImageModel(model: string): boolean {
-  return /^grok-/i.test(model)
-}
-
-const GROK_ASPECT_RATIOS: readonly ImageSize[] = [
-  { width: 1, height: 1 }, { width: 3, height: 4 }, { width: 4, height: 3 }, { width: 2, height: 3 },
-  { width: 3, height: 2 }, { width: 9, height: 16 }, { width: 16, height: 9 }
-]
-
 function grokFrameFields(request: GenerationRequest | EditRequest): Readonly<Record<string, string>> {
   const ratio = nearestPresetSize({ width: request.aspectWidth, height: request.aspectHeight }, GROK_ASPECT_RATIOS)
   return {
     aspect_ratio: `${ratio.width}:${ratio.height}`,
     resolution: Math.max(request.outputWidth, request.outputHeight) > 1_536 ? '2k' : '1k'
-  }
-}
-
-export function openAiImagesCapabilitiesFor(model: string): ProviderCapabilities {
-  if (!isGrokImageModel(model)) return OPENAI_IMAGES_CAPABILITIES
-  // Reference inputs and edits are not mapped for Grok yet; only text-to-image is sent.
-  return {
-    ...OPENAI_IMAGES_CAPABILITIES,
-    imageReferences: false,
-    maskEditing: false,
-    multipleReferences: false,
-    transparentOutput: false,
-    supportedFormats: ['jpeg', 'png']
   }
 }
 

@@ -2120,6 +2120,8 @@ select:focus-visible {
 .provider-resolved-endpoint { display: grid; min-width: 0; grid-column: 1 / -1; gap: 5px; color: var(--muted-slate); font-size: 9px; }
 .provider-resolved-endpoint code { min-width: 0; overflow: hidden; padding: 9px 10px; border: 1px solid rgba(81,106,137,.09); border-radius: 9px; color: #536b86; background: rgba(91,116,146,.045); font-family: ui-monospace, "Cascadia Code", monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .provider-resolved-endpoint > small { color: var(--faint-slate); font-size: 8px; line-height: 1.55; }
+.provider-model-hint { grid-column: 1 / -1; margin: 0; color: var(--muted-slate); font-size: 9px; line-height: 1.6; }
+.provider-model-hint strong { margin-right: 6px; color: var(--graphite); font-weight: 580; }
 .provider-editor .provider-capabilities { flex-wrap: wrap; margin: 10px 0 0; }
 .provider-editor .provider-capabilities label:has(input:disabled) { opacity: .46; cursor: not-allowed; }
 .provider-editor .provider-capabilities button:first-of-type { margin-left: auto; }

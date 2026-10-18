@@ -1,8 +1,9 @@
 import { z } from 'zod'
 import { familyPrompt } from './image-prompt-families'
-import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
+import type { EditRequest, GenerationRequest } from '../../shared/generation'
 import { resolveImageProtocolEndpoint } from '../../shared/provider-settings'
-import { fitFreeImageSize, formatImageSize, type FreeSizeRule } from './image-size-rules'
+import { ARK_SEEDREAM_CAPABILITIES, seedreamModelProfile, type SeedreamModelProfile } from '../../shared/image-model-profiles'
+import { fitFreeImageSize, formatImageSize } from '../../shared/image-size-rules'
 
 const arkBaseUrlSchema = z.string().url().max(2_048).refine((value) => {
   const url = new URL(value)
@@ -55,92 +56,9 @@ export interface NormalizedSeedreamResponse {
   readonly totalTokens: number | null
 }
 
-export const ARK_SEEDREAM_CAPABILITIES: ProviderCapabilities = {
-  textToImage: true,
-  imageReferences: true,
-  // Seedream has no native mask field. AI Canvas supports this through an
-  // annotated visual-control reference, as recommended by the prompt guide.
-  maskEditing: true,
-  multipleReferences: true,
-  transparentOutput: false,
-  maxImages: 4,
-  supportedRatios: ['custom'],
-  supportedFormats: ['png', 'jpeg', 'webp']
-}
 
 export const ARK_SEEDREAM_EDIT_MODE = 'visual-guided' as const
 
-/**
- * What a Seedream model accepts. Model families differ in their size range,
- * in whether they can return a related image set, and in whether seed and
- * guidance scale exist at all; sending a field a model does not support fails
- * the request.
- */
-export interface SeedreamModelProfile {
-  readonly presets: readonly string[]
-  /** Free width x height range, or null when the model takes presets only. */
-  readonly freeSize: FreeSizeRule | null
-  /** `adaptive` lets the model keep the input image size (SeedEdit). */
-  readonly adaptiveSize: boolean
-  readonly sequentialImages: boolean
-  readonly seedAndGuidance: boolean
-  readonly maxImages: number
-}
-
-const SEEDREAM_ASPECT_LIMIT = 16
-
-export function seedreamModelProfile(model: string): SeedreamModelProfile {
-  if (/seedream-5-0-(?:pro|flash)/i.test(model)) {
-    return {
-      presets: ['1K', '1.5K', '2K'],
-      freeSize: { multipleOf: 16, minPixels: 921_600, maxPixels: 4_624_220, maxAspect: SEEDREAM_ASPECT_LIMIT },
-      adaptiveSize: false,
-      sequentialImages: false,
-      seedAndGuidance: false,
-      maxImages: 1
-    }
-  }
-  if (/seedream-5-0|seedream-4-5/i.test(model)) {
-    return {
-      presets: ['2K', '4K'],
-      freeSize: { multipleOf: 16, minPixels: 3_686_400, maxPixels: 16_777_216, maxAspect: SEEDREAM_ASPECT_LIMIT },
-      adaptiveSize: false,
-      sequentialImages: true,
-      seedAndGuidance: false,
-      maxImages: 4
-    }
-  }
-  if (/seedream-4-0/i.test(model)) {
-    return {
-      presets: ['1K', '2K', '4K'],
-      freeSize: { multipleOf: 16, minPixels: 921_600, maxPixels: 16_777_216, maxAspect: SEEDREAM_ASPECT_LIMIT },
-      adaptiveSize: false,
-      sequentialImages: true,
-      seedAndGuidance: false,
-      maxImages: 4
-    }
-  }
-  if (/seededit-3-0/i.test(model)) {
-    return { presets: [], freeSize: null, adaptiveSize: true, sequentialImages: false, seedAndGuidance: true, maxImages: 1 }
-  }
-  if (/seedream-3-0/i.test(model)) {
-    return {
-      presets: [],
-      freeSize: { multipleOf: 16, minPixels: 512 * 512, maxPixels: 2_048 * 2_048, minEdge: 512, maxEdge: 2_048, maxAspect: 4 },
-      adaptiveSize: false,
-      sequentialImages: false,
-      seedAndGuidance: true,
-      maxImages: 1
-    }
-  }
-  // An unrecognised model gets only the request shape every current Seedream
-  // model accepts: the 2K preset, one image, no optional controls.
-  return { presets: ['2K'], freeSize: null, adaptiveSize: false, sequentialImages: false, seedAndGuidance: false, maxImages: 1 }
-}
-
-export function seedreamCapabilitiesFor(model: string): ProviderCapabilities {
-  return { ...ARK_SEEDREAM_CAPABILITIES, maxImages: seedreamModelProfile(model).maxImages }
-}
 
 function imageGenerationUrl(baseUrl: string): string {
   return resolveImageProtocolEndpoint(baseUrl, 'ark-seedream', 'generate')

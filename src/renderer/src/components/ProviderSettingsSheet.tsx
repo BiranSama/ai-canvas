@@ -13,6 +13,7 @@ import type { AgentEngine, AgentEngineSetting } from '../../../shared/agent-engi
 import type { DiagnosticExportResult } from '../../../shared/diagnostics'
 import type { GenerationProfileSnapshot } from '../../../shared/generation'
 import type { LlmPricing } from '../../../shared/model-usage'
+import { describeImageModel } from '../../../shared/image-model-profiles'
 import {
   providerPublicConfigSchema,
   resolveImageEndpoint,
@@ -578,6 +579,10 @@ export function ProviderSettingsSheet({
                   }} /></label>
                   {draft.kind === 'llm' && <div className="provider-resolved-endpoint"><span>实际请求地址</span><code>{draft.baseUrl === '' ? '填写地址后显示' : resolveLlmEndpoint(draft)}</code></div>}
                   {draft.kind === 'image' && <div className="provider-resolved-endpoint"><span>实际生成地址</span><code>{draft.baseUrl === '' || draft.protocol === 'unconfigured' ? '选择协议并填写地址后显示' : resolveImageEndpoint(draft, 'generate')}</code>{draft.protocol === 'openai-images' && <small>参考与编辑：{resolveImageEndpoint(draft, 'edit')}</small>}{draft.protocol === 'task-images' && <small>状态查询与下载地址会根据该服务的任务标识构造；每任务请求上限至少为 3 才能使用此服务。</small>}</div>}
+                  {draft.kind === 'image' && (() => {
+                    const hint = describeImageModel(draft.protocol, draft.defaultModel)
+                    return hint === null ? null : <p className="provider-model-hint" data-testid="image-model-hint"><strong>这个模型</strong>{hint}</p>
+                  })()}
                   <label><span>默认模型</span><input aria-label={`${prefix} 默认模型`} placeholder="未指定" value={draft.defaultModel} onChange={(event) => {
                     const value = event.currentTarget.value
                     updateDraft(provider.id, (current) => ({ ...current, defaultModel: value }))
