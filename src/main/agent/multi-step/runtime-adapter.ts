@@ -8,6 +8,10 @@ import type { AssetMetadata } from '../../storage/project-repository'
 import { createConfiguredTurnProtocol } from '../llm-protocol-factory'
 import type { LlmImage } from '../llm/transcript'
 import { BUILT_IN_MANUALS } from '../manuals'
+import { seedreamCapabilitiesFor } from '../../generation/ark-seedream-protocol'
+import { openAiImagesCapabilitiesFor } from '../../generation/openai-images-protocol'
+import { TASK_IMAGES_CAPABILITIES } from '../../generation/task-images-protocol'
+import type { ProviderCapabilities } from '../../../shared/generation'
 import { MultiStepPlannerAdapter, type MultiStepModel } from './multi-step-planner'
 import { SceneLooker } from './scene-looker'
 
@@ -24,6 +28,12 @@ export function environmentAgentEngine(environment: NodeJS.ProcessEnv = process.
 
 function mimeFor(format: AssetMetadata['format']): LlmImage['mimeType'] {
   return format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png'
+}
+
+function imageProtocolCapabilities(image: ImageConfig): ProviderCapabilities {
+  if (image.protocol === 'ark-seedream') return seedreamCapabilitiesFor(image.defaultModel)
+  if (image.protocol === 'openai-images') return openAiImagesCapabilitiesFor(image.defaultModel)
+  return TASK_IMAGES_CAPABILITIES
 }
 
 function engineError(code: string, message: string): Error & { code: string } {
@@ -88,7 +98,17 @@ export function createMultiStepPlannerAdapter(options: {
       const { image, file } = await providers()
       const available = image !== undefined && image.protocol !== 'unconfigured' && image.baseUrl !== '' && image.defaultModel !== ''
         && image.capabilities.textToImage && (image.protocol !== 'task-images' || file.executionPolicy.maxRequestsPerJob >= 3)
-      return available ? { providerId: 'image-provider', model: image.defaultModel, maxImages: Math.min(4, file.executionPolicy.maxImagesPerJob) } : null
+      if (!available) return null
+      const protocol = imageProtocolCapabilities(image)
+      const maxImages = Math.max(1, Math.min(4, protocol.maxImages, file.executionPolicy.maxImagesPerJob))
+      const references = protocol.imageReferences && image.capabilities.imageReferences
+      const edits = protocol.maskEditing && image.capabilities.maskEditing
+      return {
+        providerId: 'image-provider',
+        model: image.defaultModel,
+        maxImages,
+        summary: `${image.label}（${image.defaultModel}），每次最多 ${maxImages} 张；${references ? '可以用画布作参考图' : '不接受参考图，只能按文字生成'}；${edits ? image.protocol === 'ark-seedream' ? '局部修改用标注图引导' : '局部修改用蒙版' : '不支持局部修改'}。`
+      }
     },
     readAttachment: readImage,
     readAsset: async (assetId) => {

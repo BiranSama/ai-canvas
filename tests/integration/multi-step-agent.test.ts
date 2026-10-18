@@ -99,6 +99,8 @@ describe('multi-step agent engine', () => {
       expect(JSON.stringify(request.tools)).not.toContain('submitAgentPlan')
       expect(request).not.toHaveProperty('temperature')
     }
+    // The brief names the image service and its limits.
+    expect(String((requests[0]!.input as Item[])[0]!.content)).toMatch(/生图服务：.+每次最多 \d 张/)
     const second = requests[1]!.input as Item[]
     // The first step's output goes back unchanged, then both results in call order.
     expect(second.slice(1, 4)).toEqual([

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { familyPrompt } from './image-prompt-families'
 import type { GenerationRequest, ProviderCapabilities } from '../../shared/generation'
 
 export const KRILL_BASE_URL = 'https://api.krill-ai.net/v1'
@@ -141,13 +142,6 @@ function safeFailure(value: z.infer<typeof envelopeSchema>): Error {
   return new Error(summary || 'Krill image task failed.')
 }
 
-function compiledPrompt(request: GenerationRequest): string {
-  const ratio = `画幅比例严格保持 ${request.aspectWidth}:${request.aspectHeight}。`
-  const negative = request.negativePrompt.trim()
-  return negative === ''
-    ? `${ratio}\n${request.prompt}`
-    : `${ratio}\n${request.prompt}\n\n避免出现：${negative}`
-}
 
 export class KrillImagesProtocol {
   readonly id = 'krill-images-v1'
@@ -178,7 +172,7 @@ export class KrillImagesProtocol {
       url: new URL('images/generations', this.#baseUrl).toString(),
       body: {
         model: request.model,
-        prompt: compiledPrompt(request),
+        prompt: familyPrompt(request),
         size: `${request.outputWidth}x${request.outputHeight}`,
         n: 1,
         async: true,

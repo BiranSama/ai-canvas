@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { familyPrompt } from './image-prompt-families'
 import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
 import { resolveImageProtocolEndpoint } from '../../shared/provider-settings'
 import { fitFreeImageSize, formatImageSize, type FreeSizeRule } from './image-size-rules'
@@ -161,22 +162,6 @@ function booleanParameter(request: GenerationRequest | EditRequest, key: string,
   return typeof value === 'boolean' ? value : fallback
 }
 
-function compiledPrompt(request: GenerationRequest | EditRequest): string {
-  const negative = request.negativePrompt.trim()
-  const framedPrompt = `画幅比例严格保持 ${request.aspectWidth}:${request.aspectHeight}。\n${request.prompt}`
-  const rawRequirement = negative === ''
-    ? framedPrompt
-    : `${framedPrompt}\n\n避免出现：${negative}`
-  const requirement = request.count > 1
-    ? `请生成一组共 ${request.count} 张内容关联、主体与风格一致的图片。\n${rawRequirement}`
-    : rawRequirement
-  if (!('kind' in request) || request.kind !== 'edit') return requirement
-  return [
-    '这是一次视觉引导式局部编辑。图一是必须保留的原图；图二是带红色半透明标记的编辑指示图。',
-    '只修改红色标记覆盖的区域，未标记区域、构图、主体身份、文字与光影关系尽量保持不变。',
-    `编辑要求：${requirement}`
-  ].join('\n')
-}
 
 function configuredSize(request: GenerationRequest | EditRequest, profile: SeedreamModelProfile): string | null {
   const configured = request.parameters.seedreamSize
@@ -239,7 +224,7 @@ export class ArkSeedreamProtocol {
       url: imageGenerationUrl(this.#baseUrl),
       body: {
         model: request.model,
-        prompt: compiledPrompt(request),
+        prompt: familyPrompt(request, 'seedream'),
         ...(images.length === 0 ? {} : { image: images }),
         size: outputSize(request, profile),
         ...(profile.sequentialImages ? { sequential_image_generation: sequential } : {}),

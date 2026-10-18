@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ArkSeedreamProtocol, seedreamCapabilitiesFor } from '../../src/main/generation/ark-seedream-protocol'
-import { OpenAiImagesProtocol } from '../../src/main/generation/openai-images-protocol'
+import { OpenAiImagesProtocol, openAiImagesCapabilitiesFor } from '../../src/main/generation/openai-images-protocol'
+import { familyPrompt, imagePromptFamily } from '../../src/main/generation/image-prompt-families'
 import type { GenerationRequest } from '../../src/shared/generation'
 
 function request(model: string, overrides: Partial<GenerationRequest> = {}): GenerationRequest {
@@ -139,5 +140,42 @@ describe('Seedream request shapes per model', () => {
     expect(body).toMatchObject({ size: '2K' })
     expect(body).not.toHaveProperty('sequential_image_generation')
     expect(body).not.toHaveProperty('seed')
+  })
+})
+
+describe('Grok Imagine request shape', () => {
+  it('sends an aspect ratio and a resolution instead of pixel sizes, and no frame sentence', () => {
+    const body = new OpenAiImagesProtocol({ baseUrl: 'https://api.x.ai/v1', allowedModels: ['grok-imagine-image'] })
+      .buildGenerationRequest(request('grok-imagine-image', { aspectWidth: 7, aspectHeight: 5, outputWidth: 2048, outputHeight: 1463, count: 2 })).body
+    expect(body).toEqual({
+      model: 'grok-imagine-image',
+      prompt: '晨雾中的玻璃香水瓶',
+      n: 2,
+      response_format: 'b64_json',
+      aspect_ratio: '4:3',
+      resolution: '2k'
+    })
+  })
+
+  it('declares only text-to-image until references and edits are mapped', () => {
+    expect(openAiImagesCapabilitiesFor('grok-imagine-image')).toMatchObject({ textToImage: true, imageReferences: false, maskEditing: false, transparentOutput: false })
+    expect(openAiImagesCapabilitiesFor('gpt-image-2')).toMatchObject({ imageReferences: true, maskEditing: true })
+    expect(() => new OpenAiImagesProtocol({ baseUrl: 'https://api.x.ai/v1', allowedModels: ['grok-imagine-image'] })
+      .buildEditRequest({ request: request('grok-imagine-image'), images: [{ name: 'a.png', mimeType: 'image/png', bytes: Buffer.from('x') }], mask: null }))
+      .toThrow(/not supported/)
+  })
+})
+
+describe('image prompt families', () => {
+  it('recognises families by model name', () => {
+    expect(['gpt-image-2', 'doubao-seedream-5-0-260128', 'grok-imagine-image', 'gemini-3-pro-image', 'ep-20260101-x'].map(imagePromptFamily))
+      .toEqual(['gpt-image', 'seedream', 'grok', 'gemini', 'generic'])
+  })
+
+  it('frames the ratio in words except where a parameter carries it, and groups images only for Seedream', () => {
+    const negative = request('gpt-image-2', { negativePrompt: '水印', count: 2 })
+    expect(familyPrompt(negative)).toBe('画幅比例严格保持 4:5。\n晨雾中的玻璃香水瓶\n\n避免出现：水印')
+    expect(familyPrompt({ ...negative, model: 'grok-imagine-image' })).toBe('晨雾中的玻璃香水瓶\n\n避免出现：水印')
+    expect(familyPrompt(negative, 'seedream')).toMatch(/^请生成一组共 2 张内容关联/)
   })
 })

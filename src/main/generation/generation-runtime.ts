@@ -126,7 +126,7 @@ import { GenerationQueue } from './generation-queue'
 import { ArkSeedreamImageProvider } from './ark-seedream-provider'
 import { ArkSeedreamProtocol, seedreamCapabilitiesFor } from './ark-seedream-protocol'
 import { KrillImageProvider } from './krill-image-provider'
-import { OPENAI_IMAGES_CAPABILITIES, OpenAiImagesProtocol } from './openai-images-protocol'
+import { OpenAiImagesProtocol, openAiImagesCapabilitiesFor } from './openai-images-protocol'
 import { OpenAiImagesProvider } from './openai-images-provider'
 import { TASK_IMAGES_CAPABILITIES, TaskImagesProtocol } from './task-images-protocol'
 import { MockImageProvider } from './mock-image-provider'
@@ -491,7 +491,7 @@ export class GenerationRuntime {
     }
 
     if (image.protocol === 'openai-images') {
-      const capabilities = configuredImageCapabilities(image, OPENAI_IMAGES_CAPABILITIES, executionPolicy)
+      const capabilities = configuredImageCapabilities(image, openAiImagesCapabilitiesFor(image.defaultModel), executionPolicy)
       const provider = new OpenAiImagesProvider({
         label: image.label,
         capabilities,

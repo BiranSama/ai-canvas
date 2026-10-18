@@ -305,7 +305,8 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       scene,
       refs,
       results: toolContext.results,
-      projectContext: context?.projectContext ?? null
+      projectContext: context?.projectContext ?? null,
+      generation: toolContext.generation
     })
     const attachments: { readonly assetId: string; readonly image: LlmImage; readonly bytes: number }[] = []
     if (model.protocol.capabilities.vision && this.#options.readAttachment !== undefined) {

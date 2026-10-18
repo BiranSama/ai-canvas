@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
+import { familyPrompt } from './image-prompt-families'
 import { fitFreeImageSize, formatImageSize, nearestPresetSize, type FreeSizeRule, type ImageSize } from './image-size-rules'
 
 const modelSchema = z.string().trim().min(1).max(200)
@@ -62,13 +63,6 @@ function validatedBaseUrl(value: string): URL {
   return new URL(direct.toString().endsWith('/') ? direct.toString() : `${direct.toString()}/`)
 }
 
-function compiledPrompt(request: GenerationRequest | EditRequest): string {
-  const ratio = `画幅比例严格保持 ${request.aspectWidth}:${request.aspectHeight}。`
-  const negative = request.negativePrompt.trim()
-  return negative === ''
-    ? `${ratio}\n${request.prompt}`
-    : `${ratio}\n${request.prompt}\n\n避免出现：${negative}`
-}
 
 const GPT_IMAGE_1_PRESETS: readonly ImageSize[] = [
   { width: 1024, height: 1024 },
@@ -103,6 +97,37 @@ function outputSize(request: GenerationRequest | EditRequest): string {
   return formatImageSize(requested)
 }
 
+/** Grok Imagine takes an aspect ratio and a 1k/2k resolution instead of pixel sizes. */
+function isGrokImageModel(model: string): boolean {
+  return /^grok-/i.test(model)
+}
+
+const GROK_ASPECT_RATIOS: readonly ImageSize[] = [
+  { width: 1, height: 1 }, { width: 3, height: 4 }, { width: 4, height: 3 }, { width: 2, height: 3 },
+  { width: 3, height: 2 }, { width: 9, height: 16 }, { width: 16, height: 9 }
+]
+
+function grokFrameFields(request: GenerationRequest | EditRequest): Readonly<Record<string, string>> {
+  const ratio = nearestPresetSize({ width: request.aspectWidth, height: request.aspectHeight }, GROK_ASPECT_RATIOS)
+  return {
+    aspect_ratio: `${ratio.width}:${ratio.height}`,
+    resolution: Math.max(request.outputWidth, request.outputHeight) > 1_536 ? '2k' : '1k'
+  }
+}
+
+export function openAiImagesCapabilitiesFor(model: string): ProviderCapabilities {
+  if (!isGrokImageModel(model)) return OPENAI_IMAGES_CAPABILITIES
+  // Reference inputs and edits are not mapped for Grok yet; only text-to-image is sent.
+  return {
+    ...OPENAI_IMAGES_CAPABILITIES,
+    imageReferences: false,
+    maskEditing: false,
+    multipleReferences: false,
+    transparentOutput: false,
+    supportedFormats: ['jpeg', 'png']
+  }
+}
+
 function responseFormatField(model: string): Readonly<Record<string, string>> {
   return isGptImageModel(model) ? {} : { response_format: 'b64_json' }
 }
@@ -133,14 +158,16 @@ export class OpenAiImagesProtocol {
     }
     return {
       url: new URL('images/generations', this.#baseUrl).toString(),
-      body: {
-        model: request.model,
-        prompt: compiledPrompt(request),
-        n: request.count,
-        size: outputSize(request),
-        ...responseFormatField(request.model),
-        ...transparentFields(request)
-      }
+      body: isGrokImageModel(request.model)
+        ? { model: request.model, prompt: familyPrompt(request), n: request.count, response_format: 'b64_json', ...grokFrameFields(request) }
+        : {
+            model: request.model,
+            prompt: familyPrompt(request),
+            n: request.count,
+            size: outputSize(request),
+            ...responseFormatField(request.model),
+            ...transparentFields(request)
+          }
     }
   }
 
@@ -150,6 +177,7 @@ export class OpenAiImagesProtocol {
     readonly mask: OpenAiImagesFileInput | null
   }): OpenAiImagesMultipartRequest {
     this.#validate(input.request)
+    if (isGrokImageModel(input.request.model)) throw new Error('Grok Imagine reference inputs and edits are not supported by this protocol yet.')
     if (input.images.length === 0) throw new Error('OpenAI Images multipart editing requires at least one image.')
     if (input.images.length > 8) throw new Error('OpenAI Images accepts at most eight AI Canvas image inputs.')
     const files: OpenAiImagesMultipartFile[] = input.images.map((image) => ({ ...image, field: 'image[]' }))
@@ -158,7 +186,7 @@ export class OpenAiImagesProtocol {
       url: new URL('images/edits', this.#baseUrl).toString(),
       fields: {
         model: input.request.model,
-        prompt: compiledPrompt(input.request),
+        prompt: familyPrompt(input.request),
         n: String(input.request.count),
         size: outputSize(input.request),
         ...responseFormatField(input.request.model),

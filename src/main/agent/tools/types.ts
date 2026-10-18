@@ -37,7 +37,13 @@ export interface AgentToolContext {
   readonly newId: () => string
   readonly results: readonly GenerationResultEntry[]
   /** The image service generation goes to, or null when none is configured. */
-  readonly generation: { readonly providerId: string; readonly model: string; readonly maxImages: number } | null
+  readonly generation: {
+    readonly providerId: string
+    readonly model: string
+    readonly maxImages: number
+    /** What the model can do, in one line for the turn brief. */
+    readonly summary?: string
+  } | null
   readonly activeJobId: string | null
   readonly sourceMessageId: string | null
   readonly userText: string

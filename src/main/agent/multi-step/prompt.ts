@@ -3,7 +3,7 @@ import type { AgentRequest } from '../../../shared/agent'
 import type { PlannerProjectContext } from '../context-builder'
 import { formatBox, transformToBox, typeLabel } from '../tools/geometry'
 import type { ElementRefs } from '../tools/refs'
-import type { GenerationResultEntry, ManualLibrary } from '../tools/types'
+import type { AgentToolContext, GenerationResultEntry, ManualLibrary } from '../tools/types'
 
 export const MULTI_STEP_PROMPT_VERSION = 'multi-step-1'
 
@@ -73,6 +73,7 @@ export function multiStepTurnBrief(input: {
   readonly refs: ElementRefs
   readonly results: readonly GenerationResultEntry[]
   readonly projectContext: PlannerProjectContext | null
+  readonly generation?: AgentToolContext['generation']
 }): string {
   const { request, scene, refs, projectContext } = input
   const canvas = scene.canvas
@@ -108,6 +109,11 @@ export function multiStepTurnBrief(input: {
     }
   })
   if (selected.length > 0) sections.push(`用户选中了：${selected.join('、')}。「这个」「它」通常指选中的对象。`)
+  if (input.generation !== undefined) {
+    sections.push(input.generation === null
+      ? '没有配置生图服务，不能生成图片；需要时告诉用户先在设置里配置。'
+      : `生图服务：${input.generation.summary ?? `${input.generation.model}，每次最多 ${input.generation.maxImages} 张`}`)
+  }
   if (input.results.length > 0) {
     sections.push(`已生成的图片：${input.results.map((result, index) => `R${index + 1}（${result.width}×${result.height}）`).join('、')}`)
   }
