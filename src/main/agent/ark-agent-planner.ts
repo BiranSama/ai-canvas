@@ -17,6 +17,7 @@ import type {
 } from '../../shared/provider-settings'
 import type { ArkHttpClient, ArkLlmTransportObservation } from '../security/ark-http-client'
 import type { LlmProtocolAdapter, NormalizedLlmResponse } from './llm-provider'
+import type { LlmStreamAccumulator } from './llm-stream'
 import type { AgentPlanner, AgentPlannerAttemptContext } from './planner'
 import type { PlannerProjectContext } from './context-builder'
 import { normalizeAgentPlanCreativeBriefs } from './creative-brief-normalizer'
@@ -66,10 +67,10 @@ interface AssetResolver {
 interface ArkJsonPoster {
   postJson(request: Parameters<ArkHttpClient['postJson']>[0]): Promise<unknown>
   postLlmJson?(request: Parameters<ArkHttpClient['postLlmJson']>[0]): Promise<unknown>
-  postEventStream?(
-    request: Parameters<ArkHttpClient['postEventStream']>[0],
-    accumulator: Parameters<ArkHttpClient['postEventStream']>[1]
-  ): ReturnType<ArkHttpClient['postEventStream']>
+  postEventStream?<T>(
+    request: Parameters<ArkHttpClient['postLlmJson']>[0],
+    accumulator: LlmStreamAccumulator<T>
+  ): Promise<T>
 }
 
 const planJsonSchema = (() => {

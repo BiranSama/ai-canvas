@@ -41,7 +41,8 @@ type DiagnosticDisplayResult = DiagnosticExportResult | {
 const LLM_PROTOCOL_LABELS: Record<LlmProtocol, string> = {
   'ark-responses': '火山方舟 Responses',
   'openai-responses': 'Responses 兼容',
-  'openai-chat-completions': 'Chat Completions 兼容'
+  'openai-chat-completions': 'Chat Completions 兼容',
+  'anthropic-messages': 'Anthropic Messages 兼容'
 }
 
 const IMAGE_PROTOCOL_LABELS: Record<ImageProtocol, string> = {
@@ -525,6 +526,7 @@ export function ProviderSettingsSheet({
                     <option value="ark-responses">火山方舟 Responses</option>
                     <option value="openai-responses">Responses 兼容</option>
                     <option value="openai-chat-completions">Chat Completions 兼容</option>
+                    <option value="anthropic-messages">Anthropic Messages 兼容</option>
                   </select></label>}
                   {draft.kind === 'image' && <label><span>调用协议</span><select aria-label="Image Provider 调用协议" value={draft.protocol} onChange={(event) => {
                     const protocol = event.currentTarget.value as ImageProtocol
@@ -555,7 +557,10 @@ export function ProviderSettingsSheet({
                   {draft.kind === 'llm' && <label><span>思考强度</span><select aria-label="LLM Provider 思考强度" value={draft.reasoningEffort} onChange={(event) => {
                     const reasoningEffort = event.currentTarget.value as LlmReasoningEffort
                     updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, reasoningEffort } : current)
-                  }}>{Object.entries(LLM_REASONING_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                  }}>{Object.entries(LLM_REASONING_LABELS)
+                    // The agent always thinks; an older saved "off" still shows so it can be changed.
+                    .filter(([value]) => value !== 'none' || draft.reasoningEffort === 'none')
+                    .map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
                   {draft.kind === 'llm' && <label><span>图像理解细节</span><select aria-label="LLM Provider 图像细节" disabled={!draft.capabilities.vision} value={draft.imageDetail} onChange={(event) => {
                     const imageDetail = event.currentTarget.value as LlmImageDetail
                     updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, imageDetail } : current)

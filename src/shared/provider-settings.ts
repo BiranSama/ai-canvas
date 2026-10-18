@@ -5,7 +5,8 @@ export const configurableProviderIdSchema = z.enum(['openai-compatible-llm', 'im
 export const llmProtocolSchema = z.enum([
   'ark-responses',
   'openai-responses',
-  'openai-chat-completions'
+  'openai-chat-completions',
+  'anthropic-messages'
 ])
 
 export const llmReasoningEffortSchema = z.enum([
@@ -331,10 +332,15 @@ export type ProviderConnectionTestResult = z.infer<typeof providerConnectionTest
 
 export function resolveLlmProtocolEndpoint(baseUrl: string, protocol: z.infer<typeof llmProtocolSchema>): string {
   if (baseUrl === '') return ''
-  const target = protocol === 'openai-chat-completions' ? 'chat/completions' : 'responses'
   const direct = new URL(baseUrl)
   const normalizedPath = direct.pathname.replace(/\/+$/, '')
-  if (normalizedPath.endsWith(`/${target}`)) return direct.toString()
+  // Anthropic-style addresses are given without the version segment, e.g. https://api.anthropic.com or …/anthropic.
+  const target = protocol === 'openai-chat-completions'
+    ? 'chat/completions'
+    : protocol === 'anthropic-messages'
+      ? /\/v\d+$/.test(normalizedPath) ? 'messages' : 'v1/messages'
+      : 'responses'
+  if (normalizedPath.endsWith(protocol === 'anthropic-messages' ? '/messages' : `/${target}`)) return direct.toString()
   const base = new URL(baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`)
   return new URL(target, base).toString()
 }

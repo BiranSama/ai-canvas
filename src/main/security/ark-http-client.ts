@@ -49,6 +49,10 @@ export interface ArkLlmTransportObservation {
 }
 
 export interface ArkLlmRequest extends ArkJsonRequest {
+  /** How the saved key is sent; Bearer unless the protocol says otherwise. */
+  readonly authScheme?: 'bearer' | 'x-api-key'
+  /** Non-secret protocol headers such as an API version. */
+  readonly headers?: Readonly<Record<string, string>>
   readonly connectTimeoutMs: number
   readonly firstEventTimeoutMs: number
   readonly idleTimeoutMs: number
@@ -167,6 +171,18 @@ function safeErrorMessage(value: unknown, status: number, providerLabel: string)
   const message = parsed.data.error?.message
   return [code === undefined ? null : String(code), message].filter((part) => part !== null && part !== undefined && part !== '').join(': ')
     || `${providerLabel} 返回 HTTP ${status}。`
+}
+
+const PROTOCOL_HEADER_NAME = /^(?:anthropic-[a-z-]+|openai-[a-z-]+)$/
+
+/** Only named, non-secret protocol headers pass; credentials are set by the client alone. */
+function protocolHeaders(headers: Readonly<Record<string, string>> | undefined): Record<string, string> {
+  const allowed: Record<string, string> = {}
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    const key = name.toLowerCase()
+    if (PROTOCOL_HEADER_NAME.test(key) && /^[\x20-\x7e]{1,200}$/.test(value)) allowed[key] = value
+  }
+  return allowed
 }
 
 function redactKnownSecret(value: string, secret: string): string {
@@ -316,11 +332,11 @@ export class ArkHttpClient {
   }
 
   /** LLM-only SSE transport. Image Provider POST behavior intentionally remains separate. */
-  async postEventStream(request: ArkLlmRequest, accumulator: LlmStreamAccumulator): Promise<ReturnType<LlmStreamAccumulator['finalize']>> {
-    return this.#postLlm(request, accumulator) as Promise<ReturnType<LlmStreamAccumulator['finalize']>>
+  async postEventStream<T>(request: ArkLlmRequest, accumulator: LlmStreamAccumulator<T>): Promise<T> {
+    return this.#postLlm(request, accumulator) as Promise<T>
   }
 
-  async #postLlm(request: ArkLlmRequest, accumulator: LlmStreamAccumulator | null): Promise<unknown> {
+  async #postLlm(request: ArkLlmRequest, accumulator: LlmStreamAccumulator<unknown> | null): Promise<unknown> {
     const startedAt = Date.now()
     const url = approvedUrl(request.url, this.#approvedBases)
     const providerLabel = request.providerLabel?.trim() || '供应商'
@@ -431,9 +447,10 @@ export class ArkHttpClient {
       response = await this.#fetcher(url, {
         method: 'POST',
         headers: {
+          ...protocolHeaders(request.headers),
           'content-type': 'application/json',
           accept: accumulator === null ? 'application/json' : 'text/event-stream',
-          authorization: `Bearer ${apiKey}`
+          ...(request.authScheme === 'x-api-key' ? { 'x-api-key': apiKey } : { authorization: `Bearer ${apiKey}` })
         },
         body: serializedBody,
         redirect: 'error',
