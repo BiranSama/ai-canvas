@@ -79,6 +79,12 @@ export function CreationBar(): React.JSX.Element {
     ? latestRun.errorMessage ?? '这次操作没有完成；画布未被部分修改。'
     : null
   const latestReceipt = snapshot?.messages.find((message) => message.role === 'assistant' && message.receipt !== null)?.receipt ?? null
+  // The run may wait on any decision (aspect ratio, generation, budget). Show
+  // the one it is actually waiting on, never a generic generation prompt.
+  const waitingDecisions = activeRun?.status === 'awaiting_confirmation'
+    ? (snapshot?.activities ?? []).flatMap((activity) => activity.decision?.status === 'waiting' ? [activity.decision] : [])
+    : []
+  const waitingDecision = [...waitingDecisions].reverse().find((decision) => decision.runId === activeRun?.id) ?? waitingDecisions.at(-1) ?? null
   const effectiveScope = selectedIds.length === 0 ? 'canvas' : scope
   const autoGenerationCopy = autoGenerationTurnCopy(agentMode, providerAutoGeneration)
   const refresh = useCallback(async (): Promise<void> => {
@@ -145,10 +151,10 @@ export function CreationBar(): React.JSX.Element {
     }
   }
 
-  const confirm = async (): Promise<void> => {
+  const confirm = async (optionId?: string): Promise<void> => {
     if (activeRun?.status !== 'awaiting_confirmation') return
     try {
-      await window.desktop.confirmAgentRun(activeRun.id)
+      await window.desktop.confirmAgentRun(activeRun.id, optionId)
       await refresh()
     } catch {
       setProblem('确认没有生效，请重试')
@@ -258,9 +264,22 @@ export function CreationBar(): React.JSX.Element {
         </div>
       )}
       {composerState === 'confirm' && (
-        <div className="canvas-confirm-row">
-          <span>此要求将开始生成图片；确认后才会创建任务。</span>
-          <button type="button" onClick={() => void confirm()}>确认生成</button>
+        <div className="canvas-confirm-row" role="group" aria-label="需要你的决定" data-decision-kind={waitingDecision?.kind ?? 'unknown'}>
+          <span>{waitingDecision?.title ?? 'Agent 在等你的决定。'}</span>
+          {waitingDecision !== null
+            ? waitingDecision.options.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={option.id === waitingDecision.defaultOptionId ? undefined : 'quiet-choice'}
+                  title={option.consequence}
+                  aria-label={waitingDecision.kind === 'generation_confirmation' && option.id === waitingDecision.defaultOptionId ? '确认生成' : option.label}
+                  onClick={() => void confirm(option.id)}
+                >
+                  {option.label}
+                </button>
+              ))
+            : <button type="button" onClick={() => setActiveView('conversation')}>在对话中查看</button>}
           <button type="button" className="quiet-choice" onClick={() => void cancel()}><Square size={10} />停止</button>
         </div>
       )}
@@ -273,7 +292,7 @@ export function CreationBar(): React.JSX.Element {
         </div>
       )}
       <div className="creation-meta">
-        <span><span className="composer-state-label">{CREATION_STATE_COPY[composerState]}</span>{problem ?? latestRunProblem ?? (activeRun !== null ? `当前操作 · ${activeRun.status === 'planning' ? '正在理解要求' : activeRun.status === 'awaiting_confirmation' ? '需要确认生成' : '正在更新作品'}` : `当前画布 · ${autoGenerate ? '修改后继续生成' : '仅调整画布'}`)}</span>
+        <span><span className="composer-state-label">{CREATION_STATE_COPY[composerState]}</span>{problem ?? latestRunProblem ?? (activeRun !== null ? `当前操作 · ${activeRun.status === 'planning' ? '正在理解要求' : activeRun.status === 'awaiting_confirmation' ? '等你决定' : '正在更新作品'}` : `当前画布 · ${autoGenerate ? '修改后继续生成' : '仅调整画布'}`)}</span>
         <label className="composer-mode-select">
           <span className="visually-hidden">Agent 模式</span>
           <select aria-label="Agent 模式" value={agentMode} disabled={activeRun !== null} onChange={(event) => setAgentMode(event.currentTarget.value as typeof agentMode)}>

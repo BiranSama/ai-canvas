@@ -28,6 +28,7 @@ import {
 import type { ContextCompaction, ContextManifest } from '../../shared/agent-context'
 import { isTerminalGenerationJobStatus, type GenerationJob } from '../../shared/generation'
 import { isAutomaticAgentRecovery, normalizeAgentFailureEnvelope, type AgentFailureEnvelope } from '../../shared/agent-recovery'
+import { activeTurnElapsedMs } from '../../shared/execution-timing'
 import { ownerFullPermissionProfile } from './agent-tool-policy'
 import { GenerationPolicy } from './generation-policy'
 import type { AgentContextRepository } from './agent-context-repository'
@@ -433,12 +434,17 @@ function mergeInputs(items: readonly AgentItem[]): {
   }
 }
 
-function decisionFor(request: AgentRequest, plan: AgentPlan, generationPolicy: GenerationPolicy): AgentDecisionProposal | null {
+export function decisionFor(request: AgentRequest, plan: AgentPlan, generationPolicy: GenerationPolicy): AgentDecisionProposal | null {
   const hasExplicitAspect = /\d{1,3}\s*[:：]\s*\d{1,3}/.test(request.text)
   const plannedAspect = plan.tools.flatMap((tool) => tool.kind === 'scene_batch'
     ? tool.commands.filter((command) => command.kind === 'scene.set-canvas')
     : tool.kind === 'scene.set_canvas' ? [{ kind: 'scene.set-canvas' as const, canvas: tool.canvas }] : [])[0]
-  if (plannedAspect !== undefined && !hasExplicitAspect) {
+  const current = request.sceneSummary.canvas
+  // Ask only when the ratio is being chosen: a new composition, or a plan that
+  // changes it. Restyling an existing canvas keeps its ratio without a question.
+  const choosesAspect = plannedAspect !== undefined && (request.sceneSummary.elementCount === 0
+    || plannedAspect.canvas.aspectWidth * current.aspectHeight !== plannedAspect.canvas.aspectHeight * current.aspectWidth)
+  if (plannedAspect !== undefined && choosesAspect && !hasExplicitAspect) {
     const defaultRatio = `${plannedAspect.canvas.aspectWidth}:${plannedAspect.canvas.aspectHeight}`
     const options = [
       { id: defaultRatio, label: `${defaultRatio} · 推荐`, consequence: '采用规划器为当前内容选择的纵横方向' },
@@ -1009,13 +1015,20 @@ export class PersistentAgentLoop {
 
   async #ensureTurnDeadline(turn: AgentTurn): Promise<boolean> {
     if (isTerminalAgentTurnStatus(turn.status) || this.#closed) return false
-    const remaining = turn.timeLimitMs == null ? null : Date.parse(turn.createdAt) + turn.timeLimitMs - Date.parse(this.#now())
+    const remaining = turn.timeLimitMs == null
+      ? null
+      : turn.timeLimitMs - activeTurnElapsedMs(turn, await this.#repository.listTurnItems(turn.id), Date.parse(this.#now()))
     if (remaining === null || !Number.isFinite(remaining) || remaining <= 0) {
       this.#controllers.get(turn.id)?.abort(new AgentLoopControlError('interrupt'))
       await this.#terminal(turn, turn.inputMessageId ?? '', 'budget_limited', remaining === null ? 'TURN_TIME_UNVERIFIED' : 'BUDGET_WALL_TIME',
         remaining === null ? '旧任务没有可核对的本轮时限，后续操作已停止。现有作品和图片任务仍可查看。'
           : '本轮总时限已到，后续操作已停止。已提交的图片任务保留原有任务时限，可在生成页查看或停止。')
       return false
+    }
+    // The clock stops while the person decides; resolving the decision re-arms it.
+    if (turn.status === 'waiting_decision') {
+      this.#clearTurnDeadline(turn.id)
+      return true
     }
     if (this.#turnTimers.has(turn.id)) return true
     const timer = setTimeout(() => {
@@ -1080,7 +1093,8 @@ export class PersistentAgentLoop {
       let contextManifest: ContextManifest | null = null
 
       if (turn.status === 'queued' || turn.status === 'building_context') {
-        await this.#repository.transitionTurn(turnId, 'building_context', { errorCode: null, errorMessage: null })
+        const building = await this.#repository.transitionTurn(turnId, 'building_context', { errorCode: null, errorMessage: null })
+        if (isTerminalAgentTurnStatus(building.status)) return
         await this.#projection.onPlanningStarted?.({ turn, legacyRunId, request: plannerRequest })
       }
       if (this.#contextRepository !== null) {
@@ -1151,23 +1165,26 @@ export class PersistentAgentLoop {
       const stepCount = items.filter((item) => item.type === 'plan'
         && item.ordinal > merged.barrierOrdinal && !reviewGatedPlanItemIds.has(item.id)).length
 
-      const budgetFailure = this.#budgetFailure(turn, null, results, turnBudget)
+      const budgetFailure = this.#budgetFailure(turn, items, null, results, turnBudget)
       if (budgetFailure !== null) {
         await this.#terminal(turn, legacyRunId, 'budget_limited', budgetFailure.code, budgetFailure.message)
         return
       }
 
-      await this.#repository.transitionTurn(turnId, 'planning', { errorCode: null, errorMessage: null })
-      await this.#publish(turn.threadId)
+      // Register the planner's controller before re-checking the turn, so a
+      // Stop either finds the turn finished here or aborts this controller.
       controller = new AbortController()
       this.#controllers.set(turnId, controller)
+      const planning = await this.#repository.transitionTurn(turnId, 'planning', { errorCode: null, errorMessage: null })
+      if (isTerminalAgentTurnStatus(planning.status)) return
+      await this.#publish(turn.threadId)
       let step
       // The turn owns one stable correlation chain. Individual Provider calls
       // remain distinguishable by attemptId while request/cost reservations,
       // repairs, tool execution and diagnostics stay attributable end to end.
       const requestCorrelationId = turn.id
       const attemptNumber = recoveryCount(items, 'model_can_repair') + 1
-      const elapsedTurnTimeMs = Math.max(0, Date.parse(this.#now()) - Date.parse(turn.createdAt))
+      const elapsedTurnTimeMs = activeTurnElapsedMs(turn, items, Date.parse(this.#now()))
       const remainingPlannerTimeMs = turnBudget.maxWallTimeMs - elapsedTurnTimeMs - 1_000
       const harnessDeadlineAt = Date.now() + remainingPlannerTimeMs
       if (remainingPlannerTimeMs < 1_000) {
@@ -1260,7 +1277,7 @@ export class PersistentAgentLoop {
         const wallTimeExpired = surfacedFailureCode(error, 'AGENT_PLANNING_FAILED') === 'BUDGET_WALL_TIME'
         const attempt = attemptNumber
         const failedTurnBeforeAccounting = await this.#repository.getTurn(turnId)
-        const elapsed = Math.max(0, Date.parse(this.#now()) - Date.parse(turn.createdAt))
+        const elapsed = activeTurnElapsedMs(turn, items, Date.parse(this.#now()))
         const previousPlanningFailure = [...items].reverse().flatMap((item): AgentFailureEnvelope[] => {
           if (item.type !== 'recovery') return []
           const value = payload<StoredRecovery>(item).failure
@@ -1395,7 +1412,7 @@ export class PersistentAgentLoop {
             return
           }
         }
-        const toolBudgetFailure = this.#budgetFailure(await this.#repository.getTurn(turnId), step.call, cumulativeGenerationResults, effectiveBudget)
+        const toolBudgetFailure = this.#budgetFailure(await this.#repository.getTurn(turnId), items, step.call, cumulativeGenerationResults, effectiveBudget)
         if (toolBudgetFailure !== null) {
           await this.#terminal(turn, legacyRunId, 'budget_limited', toolBudgetFailure.code, toolBudgetFailure.message)
           return
@@ -1507,7 +1524,7 @@ export class PersistentAgentLoop {
             } catch (error) {
               if (!isTransientLocalReadFailure(step.call, error)) throw error
               const currentUsage = await this.#repository.getTurn(turnId)
-              const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - (Date.parse(this.#now()) - Date.parse(turn.createdAt)))
+              const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - activeTurnElapsedMs(turn, items, Date.parse(this.#now())))
               if (localReadRetries >= 2 || currentUsage.recoveryAttemptsUsed >= turnBudget.maxRecoveryAttempts || remainingWallTimeMs < 1_000) {
                 const exhaustedError = Object.assign(new Error('读取作品状态在两次本地重试后仍未恢复。'), { code: 'TOOL_READ_RETRY_EXHAUSTED' })
                 const exhausted = createAgentFailureEnvelope({
@@ -1585,7 +1602,7 @@ export class PersistentAgentLoop {
         const remainingIndexes = (activePlan ?? step.plan)?.tools.map((_tool, index) => index)
           .filter((index) => index > step.toolIndex) ?? []
         const currentTurnUsage = await this.#repository.getTurn(turnId)
-        const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - (Date.parse(this.#now()) - Date.parse(turn.createdAt)))
+        const remainingWallTimeMs = Math.max(0, turnBudget.maxWallTimeMs - activeTurnElapsedMs(turn, items, Date.parse(this.#now())))
         const initialFailure = createAgentFailureEnvelope({
           error,
           fallbackCode: 'TOOL_EXECUTION_FAILED',
@@ -1780,11 +1797,12 @@ export class PersistentAgentLoop {
 
   #budgetFailure(
     turn: AgentTurn,
+    items: readonly AgentItem[],
     nextTool: AgentToolPlan | null,
     results: readonly StoredToolResult[],
     budget: AgentRunBudget
   ): { readonly code: string; readonly message: string } | null {
-    if (Date.parse(this.#now()) - Date.parse(turn.createdAt) >= budget.maxWallTimeMs) {
+    if (activeTurnElapsedMs(turn, items, Date.parse(this.#now())) >= budget.maxWallTimeMs) {
       return { code: 'BUDGET_WALL_TIME', message: 'Agent turn reached its wall-time budget before the next action.' }
     }
     if (turn.modelTurnsUsed >= budget.maxModelTurns) {

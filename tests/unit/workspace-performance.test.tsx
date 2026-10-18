@@ -47,6 +47,12 @@ describe('100 element workspace fixture', () => {
   })
 
   it('renders and edits a 100 element layer projection within the local projection smoke budget', async () => {
+    // Render once and unmount so the budget measures the 100 element projection,
+    // not module JIT and first-render setup, which vary with the machine.
+    const warmup = render(<App />)
+    await screen.findByRole('listbox', { name: '图层' })
+    warmup.unmount()
+
     const startedAt = performance.now()
     render(<App />)
     const layerList = await screen.findByRole('listbox', { name: '图层' })

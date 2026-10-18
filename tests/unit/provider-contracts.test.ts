@@ -249,10 +249,11 @@ describe('provider protocol contracts without external calls', () => {
     expect(groupRequest.body).toMatchObject({
       image: [transparentPng],
       sequential_image_generation: 'auto',
-      sequential_image_generation_options: { max_images: 3 },
-      seed: 42,
-      guidance_scale: 4.5
+      sequential_image_generation_options: { max_images: 3 }
     })
+    // Seedream 4.x and 5.x have no seed or guidance scale; sending them fails the request.
+    expect(groupRequest.body).not.toHaveProperty('seed')
+    expect(groupRequest.body).not.toHaveProperty('guidance_scale')
     expect(groupRequest.body.prompt).toContain('一组共 3 张')
 
     const editRequest: EditRequest = {

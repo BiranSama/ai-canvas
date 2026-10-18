@@ -4,6 +4,7 @@ import { plannerStepSchema, type AgentItem, type AgentTurn, type PlannerStep } f
 import type { ContextManifest } from '../../shared/agent-context'
 import type { AgentPlanner, AgentPlannerAttemptContext } from './planner'
 import { buildLocalRefineTool, CompletionAssessor, designAssessmentNotes } from './design-capability'
+import { plannerProjectContext } from './context-builder'
 
 function itemPayload(item: AgentItem | undefined): Record<string, unknown> | null {
   return item !== undefined && typeof item.payload === 'object' && item.payload !== null ? item.payload as Record<string, unknown> : null
@@ -159,7 +160,8 @@ export class DeterministicCreativePlannerAdapter implements PlannerAdapter {
     if (candidate === null) {
       if (recovery === null) this.#validatedDrafts.delete(input.turn.id)
       try {
-        candidate = agentPlanSchema.parse(await this.#planner.plan(request, signal, recovery, context))
+        const projectContext = input.contextManifest === null ? null : plannerProjectContext(input.contextManifest, request.text)
+        candidate = agentPlanSchema.parse(await this.#planner.plan(request, signal, recovery, context === undefined ? undefined : { ...context, projectContext }))
         const validated = this.#validatedDrafts.get(input.turn.id)
         if (validated !== undefined && recovery !== null) {
           const missing = validated.flatMap((tool, index) => tool === null ? [index] : [])
