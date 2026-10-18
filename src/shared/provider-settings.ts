@@ -121,7 +121,9 @@ const legacyImageProviderConfigSchema = providerPublicFieldsSchema.extend({
 
 export const imageProviderConfigSchema = legacyImageProviderConfigSchema.extend({
   id: imageProviderIdSchema,
-  protocol: imageProtocolSchema
+  protocol: imageProtocolSchema,
+  /** What the owner pays per image, for estimates; null leaves the cost unknown. */
+  pricePerImageCny: z.number().min(0).max(10_000).nullable().default(null)
 })
 
 export const providerPublicConfigSchema = z.union([
@@ -238,7 +240,7 @@ function migrateLegacyProviders(
   const [llm, image] = providers
   return [
     withLegacyTransport({ ...llm, protocol: inferLlmProtocol(llm.baseUrl) }),
-    { ...image, protocol: inferImageProtocol(image.baseUrl) }
+    imageProviderConfigSchema.parse({ ...image, protocol: inferImageProtocol(image.baseUrl) })
   ]
 }
 
@@ -246,7 +248,7 @@ function migrateV3Providers(
   providers: z.infer<typeof providerConfigFileV3Schema>['providers']
 ): z.infer<typeof providerConfigFileV5Schema>['providers'] {
   const [llm, image] = providers
-  return [withLegacyTransport(llm), { ...image, protocol: inferImageProtocol(image.baseUrl) }]
+  return [withLegacyTransport(llm), imageProviderConfigSchema.parse({ ...image, protocol: inferImageProtocol(image.baseUrl) })]
 }
 
 function withLegacyTransport(
@@ -353,6 +355,8 @@ export type LlmTransportSettings = z.infer<typeof llmTransportSettingsSchema>
 export type ImageProtocol = z.infer<typeof imageProtocolSchema>
 export type ProviderSecretInput = z.infer<typeof providerSecretInputSchema>
 export type ProviderPublicConfig = z.infer<typeof providerPublicConfigSchema>
+/** What a caller may send: fields with defaults, such as prices, can be left out. */
+export type ProviderPublicConfigInput = z.input<typeof providerPublicConfigSchema>
 export type ProviderConfigFile = z.infer<typeof providerConfigFileSchema>
 export type ProviderExecutionPolicy = z.infer<typeof providerExecutionPolicySchema>
 export type ProviderSettingsSnapshot = z.infer<typeof providerSettingsSnapshotSchema>
@@ -452,7 +456,8 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
         maskEditing: true,
         multipleReferences: true,
         transparentOutput: false
-      }
+      },
+      pricePerImageCny: null
     }
   ],
   defaultImageProviderId: PRIMARY_IMAGE_PROVIDER_ID,

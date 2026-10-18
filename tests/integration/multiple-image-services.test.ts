@@ -5,7 +5,7 @@ import sharp from 'sharp'
 import { afterEach, expect, it, vi } from 'vitest'
 import { GenerationRuntime } from '../../src/main/generation/generation-runtime'
 import type { GenerationProfileRequest } from '../../src/shared/generation'
-import type { ProviderPublicConfig } from '../../src/shared/provider-settings'
+import type { ProviderPublicConfigInput } from '../../src/shared/provider-settings'
 
 // Only synthetic secrets. Production Main, protocol, HTTP, workflow and SQLite remain real.
 vi.mock('electron', () => ({ safeStorage: {
@@ -22,7 +22,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 5 })
 })
 
-function configuration(id: string, tag: string): ProviderPublicConfig {
+function configuration(id: string, tag: string): Extract<ProviderPublicConfigInput, { kind: 'image' }> {
   return { id, kind: 'image', label: `Synthetic ${tag}`, baseUrl: `https://${tag}.example.test/v1`,
     defaultModel: `model-${tag}`, protocol: 'openai-images', timeoutMs: 45_000, concurrency: 1,
     capabilities: { textToImage: true, imageReferences: true, maskEditing: true, multipleReferences: true, transparentOutput: false } }
@@ -59,7 +59,7 @@ it('keeps several image services side by side and runs each job on the service i
   const second = added.providers.find((provider) => provider.kind === 'image' && provider.id !== 'image-provider')!
   expect(second).toMatchObject({ protocol: 'unconfigured', configured: false })
   expect(second.id).toMatch(/^image-provider-[a-z0-9]{8}$/)
-  await runtime.setProviderConfig(configuration(second.id, 'b'))
+  await runtime.setProviderConfig({ ...configuration(second.id, 'b'), pricePerImageCny: 0.3 })
   await runtime.setProviderSecret({ providerId: second.id, apiKey: 'synthetic-B' })
   expect((await runtime.setDefaultImageProvider(second.id)).defaultImageProviderId).toBe(second.id)
 
@@ -73,6 +73,9 @@ it('keeps several image services side by side and runs each job on the service i
   const onSecond = await completed(runtime, (await runtime.enqueueProfile(request(`${second.id}-draft`, 'b'))).id)
   const onPrimary = await completed(runtime, (await runtime.enqueueProfile(request('configured-draft', 'a'))).id)
   expect([onSecond.providerId, onPrimary.providerId]).toEqual([second.id, 'image-provider'])
+  // Only the service with a price gets an estimate; the bill stays unknown either way.
+  expect(onSecond.cost).toMatchObject({ actual: { status: 'unknown' }, estimate: { amount: 0.3, currency: 'CNY', source: 'provider_price', parameters: { imageCount: 1, model: 'model-b' } } })
+  expect(onPrimary.cost?.estimate).toBeNull()
   expect(calls).toEqual([
     { url: 'https://b.example.test/v1/images/generations', key: 'Bearer synthetic-B', model: 'model-b' },
     { url: 'https://a.example.test/v1/images/generations', key: 'Bearer synthetic-A', model: 'model-a' }

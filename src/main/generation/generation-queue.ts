@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises'
-import type { ProviderCostReceipt } from '../../shared/generation-cost'
+import type { GenerationCostEstimate, ProviderCostReceipt } from '../../shared/generation-cost'
 import type { AssetStore } from '../storage/asset-store'
 import {
   imageTaskRequestSchema,
@@ -49,6 +49,8 @@ export interface GenerationQueueOptions {
 export interface GenerationExecutionIdentity {
   readonly executionIdentityId: string | null
   readonly effectiveTimeoutMs: number
+  /** From the bound service's price per image, when it has one. */
+  readonly costEstimate?: GenerationCostEstimate | null
 }
 
 export type GenerationJobListener = (job: GenerationJob) => void

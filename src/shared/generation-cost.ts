@@ -47,8 +47,15 @@ export function actualCostCny(cost: GenerationCost): number | null {
   return cost.actual.currency === 'CNY' ? cost.actual.amount : null
 }
 
+function formatAmount(currency: string, amount: number): string {
+  return `${currency === 'CNY' ? '¥' : `${currency} `}${amount.toFixed(2)}`
+}
+
 export function formatGenerationCost(cost: GenerationCost | undefined): string {
   const actual = cost?.actual
+  if ((actual === undefined || actual.status === 'unknown') && cost?.estimate?.source === 'provider_price') {
+    return `估算 · ${formatAmount(cost.estimate.currency, cost.estimate.amount)}（按设置的单价）`
+  }
   if (actual === undefined || actual.status === 'unknown') return '费用未知'
   if (actual.status === 'known_free' && actual.source === 'offline_mock') return '离线模拟 · ¥0.00'
   const amount = `${actual.currency === 'CNY' ? '¥' : `${actual.currency} `}${actual.amount.toFixed(2)}`
@@ -57,21 +64,33 @@ export function formatGenerationCost(cost: GenerationCost | undefined): string {
 
 export function summarizeGenerationCosts(jobs: readonly { readonly id: string; readonly cost?: GenerationCost; readonly copiedFromProjectId?: string | null }[]) {
   const currencies: Record<string, number> = {}
+  /** Jobs without an actual amount but with an estimate from the owner's price. */
+  const estimated: Record<string, number> = {}
+  let estimatedJobs = 0
   let unknownJobs = 0
   let simulatedJobs = 0
   let inheritedJobs = 0
   for (const job of new Map(jobs.map((entry) => [entry.id, entry])).values()) {
     if (job.copiedFromProjectId != null) { inheritedJobs++; continue }
     const actual = job.cost?.actual
+    if ((actual === undefined || actual.status === 'unknown') && job.cost?.estimate?.source === 'provider_price') {
+      const { currency, amount } = job.cost.estimate
+      estimated[currency] = Number(((estimated[currency] ?? 0) + amount).toFixed(6))
+      estimatedJobs++
+      continue
+    }
     if (actual === undefined || actual.status === 'unknown') { unknownJobs++; continue }
     if (actual.source === 'offline_mock') { simulatedJobs++; continue }
     currencies[actual.currency] = Number(((currencies[actual.currency] ?? 0) + actual.amount).toFixed(6))
   }
-  return { currencies, unknownJobs, simulatedJobs, inheritedJobs }
+  return { currencies, estimated, estimatedJobs, unknownJobs, simulatedJobs, inheritedJobs }
 }
 
 export function formatGenerationCostSummary(summary: ReturnType<typeof summarizeGenerationCosts>): string {
-  const amounts = Object.entries(summary.currencies).map(([currency, amount]) => `${currency === 'CNY' ? '¥' : `${currency} `}${amount.toFixed(2)}`)
-  return [amounts.length ? `已知实际 ${amounts.join(' + ')}` : '', summary.unknownJobs ? `${summary.unknownJobs} 笔费用未知` : '',
+  const amounts = Object.entries(summary.currencies).map(([currency, amount]) => formatAmount(currency, amount))
+  const estimates = Object.entries(summary.estimated).map(([currency, amount]) => formatAmount(currency, amount))
+  return [amounts.length ? `已知实际 ${amounts.join(' + ')}` : '',
+    summary.estimatedJobs ? `${summary.estimatedJobs} 笔按单价估算 ${estimates.join(' + ')}` : '',
+    summary.unknownJobs ? `${summary.unknownJobs} 笔费用未知` : '',
     summary.simulatedJobs ? `${summary.simulatedJobs} 笔离线模拟` : '', summary.inheritedJobs ? `${summary.inheritedJobs} 笔源项目记录` : ''].filter(Boolean).join(' · ') || '暂无费用记录'
 }

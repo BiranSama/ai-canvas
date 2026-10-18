@@ -27,7 +27,7 @@ import type {
   ProviderConnectionTestInput,
   ProviderConnectionTestResult,
   ProviderExecutionPolicy,
-  ProviderPublicConfig,
+  ProviderPublicConfigInput,
   ProviderSecretInput,
   ProviderSettingsSnapshot
 } from './provider-settings'
@@ -197,7 +197,7 @@ export interface DesktopApi {
   validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult>
   getAgentEngine(): Promise<AgentEngineSetting>
   setAgentEngine(engine: AgentEngine): Promise<AgentEngineSetting>
-  setProviderConfig(input: ProviderPublicConfig): Promise<ProviderSettingsSnapshot>
+  setProviderConfig(input: ProviderPublicConfigInput): Promise<ProviderSettingsSnapshot>
   setProviderExecutionPolicy(input: ProviderExecutionPolicy): Promise<ProviderSettingsSnapshot>
   setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot>
   deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot>

@@ -655,6 +655,10 @@ export function ProviderSettingsSheet({
                     const value = Number(event.currentTarget.value) * 1000
                     updateDraft(provider.id, (current) => ({ ...current, timeoutMs: value }))
                   }} /></label>
+                  {draft.kind === 'image' && <label><span>每张价格（元，可选）</span><input aria-label={`${prefix} 每张价格`} type="number" min={0} max={10000} step={0.01} placeholder="未设置则费用显示为未知" value={draft.pricePerImageCny ?? ''} onChange={(event) => {
+                    const raw = event.currentTarget.value
+                    updateDraft(provider.id, (current) => current.kind === 'image' ? { ...current, pricePerImageCny: raw === '' ? null : Number(raw) } : current)
+                  }} /></label>}
                 </div>
 
                 <p className="provider-time-policy" data-testid={`${provider.id}-effective-timeout`}>已保存：{provider.timeoutMs / 1000} 秒。{draft.kind === 'image'

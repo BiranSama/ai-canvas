@@ -23,7 +23,7 @@ import type {
   ConfigurableProviderId,
   ProviderConnectionTestInput,
   ProviderExecutionPolicy,
-  ProviderPublicConfig,
+  ProviderPublicConfigInput,
   ProviderSecretInput
 } from '../shared/provider-settings'
 import type { AssetImportInput, ProjectCreateInput, ProjectFavoriteInput, ProjectLibraryChangeMode } from '../shared/project'
@@ -62,7 +62,7 @@ const desktopApi: DesktopApi = Object.freeze({
   validateProviderConnection: (input: ProviderConnectionTestInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConnectionTest, input),
   getAgentEngine: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineGet),
   setAgentEngine: (engine: AgentEngine) => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineSet, engine),
-  setProviderConfig: (input: ProviderPublicConfig) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConfigSet, input),
+  setProviderConfig: (input: ProviderPublicConfigInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConfigSet, input),
   setProviderExecutionPolicy: (input: ProviderExecutionPolicy) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerExecutionPolicySet, input),
   setProviderSecret: (input: ProviderSecretInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretSet, input),
   deleteProviderSecret: (providerId: ConfigurableProviderId) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretDelete, providerId),

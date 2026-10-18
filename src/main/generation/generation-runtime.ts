@@ -93,6 +93,7 @@ import type {
   ProviderConnectionTestInput,
   ProviderConnectionTestResult,
   ProviderPublicConfig,
+  ProviderPublicConfigInput,
   ProviderSecretInput,
   ProviderSettingsSnapshot
 } from '../../shared/provider-settings'
@@ -1347,7 +1348,7 @@ export class GenerationRuntime {
     return this.#providerSettings.setSecret(input)
   }
 
-  async setProviderConfig(input: ProviderPublicConfig): Promise<ProviderSettingsSnapshot> {
+  async setProviderConfig(input: ProviderPublicConfigInput): Promise<ProviderSettingsSnapshot> {
     const snapshot = await this.#providerSettings.setConfig(input)
     await this.#refreshConfiguredImageProvider()
     return snapshot
@@ -2052,7 +2053,15 @@ export class GenerationRuntime {
           || binding.requestHash !== executionRequestHash(compiled)) {
           throw new ProviderError('IDEMPOTENCY_CONFLICT', '同一生成请求的内容与原身份不一致。', 'validating')
         }
-        return { executionIdentityId: binding.id, effectiveTimeoutMs }
+        const price = binding.image.pricePerImageCny
+        return {
+          executionIdentityId: binding.id,
+          effectiveTimeoutMs,
+          costEstimate: price === null ? null : {
+            amount: Number((price * compiled.count).toFixed(4)), currency: 'CNY', source: 'provider_price', estimatedAt: new Date().toISOString(),
+            parameters: { profileId, model: compiled.model, imageCount: compiled.count }
+          }
+        }
       },
       deferActivation: metadata.deferActivation === true,
       parentJobId: metadata.parentJobId ?? null
