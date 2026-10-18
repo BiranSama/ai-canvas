@@ -2,6 +2,7 @@ import sharp from 'sharp'
 import { sceneSchema, type Scene, type SceneElement } from '../../domain'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
+import { layoutTextLines } from './text-layout'
 
 export type ReferenceAssetResolver = (assetId: string) => Promise<string | Buffer | null>
 
@@ -105,14 +106,32 @@ async function elementSvg(
       const y = box.y + box.h * .58
       return `${groupStart}<path d="M ${finite(box.x + box.w * .04)} ${finite(y)} C ${finite(box.x + box.w * .3)} ${finite(y - box.h * .08)}, ${finite(box.x + box.w * .7)} ${finite(y + box.h * .08)}, ${finite(box.x + box.w * .96)} ${finite(y)}" fill="none" stroke="${color}" stroke-opacity="${finite(opacity)}" stroke-width="${finite(strokeWidth)}" stroke-linecap="round"/><path d="M ${finite(box.x + box.w * .04)} ${finite(y - box.h * .16)} V ${finite(y + box.h * .16)} M ${finite(box.x + box.w * .96)} ${finite(y - box.h * .16)} V ${finite(y + box.h * .16)}" fill="none" stroke="${color}" stroke-opacity="${finite(opacity * .56)}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`
     }
-    const anchor = element.align === 'start' ? 'start' : element.align === 'end' ? 'end' : 'middle'
-    const x = element.align === 'start' ? box.x : element.align === 'end' ? box.x + box.w : box.x + box.w / 2
     const fontSize = Math.min(box.h * .95, Math.max(7, element.fontSize))
-    const lines = element.orientation === 'vertical' ? [...element.content] : element.content.split('\n')
+    const letterSpacing = Math.min(element.letterSpacing, box.w * .03)
+    const vertical = element.orientation === 'vertical'
+    // Wrapped and truncated like the editor, so a render shows overflow the way the user sees it.
+    const lines = layoutTextLines({
+      content: element.content, fontSize, letterSpacing, lineHeight: element.lineHeight,
+      width: box.w, height: box.h, wrapping: element.wrapping, vertical
+    })
+    const justify = element.align === 'justify' && !vertical
+    const anchor = justify || element.align === 'start' ? 'start' : element.align === 'end' ? 'end' : 'middle'
+    const x = justify || element.align === 'start' ? box.x : element.align === 'end' ? box.x + box.w : box.x + box.w / 2
     const lineHeight = fontSize * element.lineHeight
     const firstY = box.y + box.h / 2 - (lines.length - 1) * lineHeight / 2
     const stroke = element.stroke === null ? '' : ` stroke="${escapeXml(element.stroke)}" stroke-width="${finite(element.strokeWidth)}"`
-    return `${groupStart}<text text-anchor="${anchor}" dominant-baseline="central" fill="${escapeXml(element.fill)}"${stroke} font-family="${escapeXml(element.fontFamily)}" font-size="${finite(fontSize)}" font-weight="${element.fontWeight}" letter-spacing="${finite(Math.min(element.letterSpacing, box.w * .03))}">${lines.map((line, index) => `<tspan x="${finite(x)}" y="${finite(firstY + index * lineHeight)}">${escapeXml(line)}</tspan>`).join('')}</text>${groupEnd}`
+    const shadowId = `text-shadow-${element.id.replaceAll('-', '')}`
+    const shadow = element.shadowColor === null
+      ? { defs: '', attribute: '' }
+      : {
+          defs: `<defs><filter id="${shadowId}" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="0" stdDeviation="${finite(element.shadowBlur / 2)}" flood-color="${escapeXml(element.shadowColor)}" flood-opacity=".62"/></filter></defs>`,
+          attribute: ` filter="url(#${shadowId})"`
+        }
+    const spans = lines.map((line, index) => {
+      const spread = justify && !line.paragraphEnd && line.text.length > 1 ? ` textLength="${finite(box.w)}" lengthAdjust="spacing"` : ''
+      return `<tspan x="${finite(x)}" y="${finite(firstY + index * lineHeight)}"${spread}>${escapeXml(line.text)}</tspan>`
+    }).join('')
+    return `${groupStart}${shadow.defs}<text text-anchor="${anchor}" dominant-baseline="central" fill="${escapeXml(element.fill)}"${stroke}${shadow.attribute} font-family="${escapeXml(element.fontFamily)}" font-size="${finite(fontSize)}" font-weight="${element.fontWeight}" letter-spacing="${finite(letterSpacing)}">${spans}</text>${groupEnd}`
   }
 
   if (element.type === 'shape') {

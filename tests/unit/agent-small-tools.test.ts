@@ -178,3 +178,18 @@ describe('small agent tools', () => {
     expect(formatToolResult({ ok: false, summary: '不行', hint: '换个做法' })).toBe('未执行：不行\n建议：换个做法')
   })
 })
+
+describe('look', () => {
+  it('describes the layout in words when the model cannot see images', async () => {
+    const harness = new Harness()
+    await harness.call('add_subject', { subject: '香水瓶', box: [20, 20, 60, 60] })
+    await harness.call('add_text', { content: '晨雾', role: 'title', box: [30, 30, 40, 10] })
+    const { step } = await prepareAgentToolCall(
+      { callId: 'l', name: 'look', argumentsText: '{}', arguments: {}, argumentsError: null },
+      { ...harness.context(), looker: { look: async () => { throw new Error('not used') } }, vision: false }
+    )
+    expect(step).toMatchObject({ kind: 'answer', result: { ok: true, summary: '当前文字模型不能看图，这是画面的文字描述。' } })
+    const details = step.kind === 'answer' ? step.result.details ?? [] : []
+    expect(details).toContain('E1 和 E2 重叠约 100%')
+  })
+})

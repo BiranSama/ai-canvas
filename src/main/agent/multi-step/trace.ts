@@ -96,7 +96,8 @@ export function transcriptFrom(input: {
           return { callId: call.callId, name: call.name, isError: true, content: [{ type: 'text' as const, text: '未执行：这一步在执行前被中断。' }] }
         }
         const images = input.images.get(call.callId)
-        if (images === undefined || images.length === 0) return stored
+        // Results from this pass still carry their images; stored ones get them back from the cache.
+        if (images === undefined || images.length === 0 || stored.content.some((part) => part.type === 'image')) return stored
         return {
           ...stored,
           content: [...stored.content.filter((part) => !(part.type === 'text' && part.text === IMAGE_NOT_STORED)), ...images.map((image) => ({ type: 'image' as const, image }))]

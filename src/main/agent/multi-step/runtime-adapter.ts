@@ -7,6 +7,7 @@ import type { AssetMetadata } from '../../storage/project-repository'
 import { createConfiguredTurnProtocol } from '../llm-protocol-factory'
 import type { LlmImage } from '../llm/transcript'
 import { MultiStepPlannerAdapter, type MultiStepModel } from './multi-step-planner'
+import { SceneLooker } from './scene-looker'
 
 type LlmConfig = Extract<ProviderPublicConfig, { kind: 'llm' }>
 type ImageConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -50,6 +51,13 @@ export function createMultiStepPlannerAdapter(options: {
   }
   return new MultiStepPlannerAdapter({
     scene: options.scene,
+    looker: new SceneLooker(async (assetId) => {
+      try {
+        return (await options.assets.resolveAsset(assetId)).filePath
+      } catch {
+        return null
+      }
+    }),
     model: async (): Promise<MultiStepModel> => {
       const { llm } = await providers()
       if (llm === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !await options.secrets.has('openai-compatible-llm')) {

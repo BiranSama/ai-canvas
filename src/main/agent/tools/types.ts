@@ -40,6 +40,8 @@ export interface AgentToolContext {
   readonly sourceMessageId: string | null
   readonly userText: string
   readonly looker?: CanvasLooker | null
+  /** False when the text model cannot see images; look then describes the layout in words. */
+  readonly vision?: boolean
   readonly manuals?: ManualLibrary | null
   readonly readAsset?: ((assetId: string) => Promise<LlmImage>) | null
 }

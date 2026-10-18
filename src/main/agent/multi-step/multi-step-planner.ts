@@ -121,6 +121,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       const images = result.content.flatMap((part) => part.type === 'image' ? [part.image] : [])
       if (images.length > 0) this.#cacheScreenshots(result.callId, images)
     }
+    const model = await this.#options.model()
     const generated = (input.request.generationResults ?? []) as readonly GenerationResultEntry[]
     for (const result of this.#settleEmittedCalls(items, traces, scene, generated)) record(result)
 
@@ -134,6 +135,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       sourceMessageId: input.turn.inputMessageId,
       userText: input.request.text,
       looker: this.#options.looker ?? null,
+      vision: model.protocol.capabilities.vision,
       manuals: this.#options.manuals ?? null,
       readAsset: this.#options.readAsset ?? null
     }
@@ -153,7 +155,6 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       modelTurns
     })
 
-    let model: MultiStepModel | null = null
     let brief: LlmTranscriptMessage | null = null
     let modelTurns = 0
     const callLimit = this.#modelCallLimit(input.turn.modelTurnsUsed, input.budget)
@@ -196,7 +197,6 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           }
         }, null, modelTurns)
       }
-      model ??= await this.#options.model()
       brief ??= await this.#brief(input, scene, refs, toolContext, context, model)
       const tools = availableAgentTools(toolContext)
       const transcript = transcriptFrom({ brief, assistants: [...assistants, ...pass.assistants], results, images: this.#screenshots })

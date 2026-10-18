@@ -1,6 +1,37 @@
 import { z } from 'zod'
-import { percentBoxSchema } from './geometry'
-import { answer, defineTool, rejected } from './types'
+import type { SceneElement } from '../../../domain'
+import { elementFacts, percentBoxSchema } from './geometry'
+import { answer, defineTool, rejected, type AgentToolContext, type AgentToolResult } from './types'
+
+function overlapRatio(left: SceneElement, right: SceneElement): number {
+  const a = left.transform
+  const b = right.transform
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+  if (width <= 0 || height <= 0) return 0
+  return width * height / Math.min(a.width * a.height, b.width * b.height)
+}
+
+/** For models that cannot see images: the layout in words, with overlaps that involve text. */
+function describeLayout(context: AgentToolContext): AgentToolResult {
+  const visible = context.scene.elements.filter((element) => element.visible && element.type !== 'group')
+  const overlaps = visible.flatMap((element, index) => visible.slice(index + 1).flatMap((other) => {
+    if (element.type !== 'text' && other.type !== 'text') return []
+    const ratio = overlapRatio(element, other)
+    return ratio > 0.05 ? [`${context.refs.ref(element.id)} 和 ${context.refs.ref(other.id)} 重叠约 ${Math.round(ratio * 100)}%`] : []
+  }))
+  const margin = visible.filter((element) => element.type === 'text' && (element.transform.x < 0.05 || element.transform.y < 0.05
+    || element.transform.x + element.transform.width > 0.95 || element.transform.y + element.transform.height > 0.95))
+  return {
+    ok: true,
+    summary: '当前文字模型不能看图，这是画面的文字描述。',
+    details: [
+      ...visible.map((element) => elementFacts(element, context.refs, context.scene)),
+      ...(overlaps.length === 0 ? ['文字没有和其他对象明显重叠。'] : overlaps),
+      ...margin.map((element) => `${context.refs.ref(element.id)} 离画布边缘不到 5%`)
+    ]
+  }
+}
 
 export const lookTool = defineTool({
   name: 'look',
@@ -14,6 +45,7 @@ export const lookTool = defineTool({
   available: (context) => context.looker !== undefined && context.looker !== null,
   describe: (args) => args.mode === 'reference' ? '查看生图参考图' : args.region === undefined ? '查看画面' : '查看画面局部',
   async prepare(args, context) {
+    if (context.vision === false) return answer(describeLayout(context))
     if (context.looker === undefined || context.looker === null) return rejected('当前无法渲染画面。', '用 inspect 读取对象属性代替。')
     const image = await context.looker.look(context.scene, { region: args.region ?? null, mode: args.mode })
     return answer({

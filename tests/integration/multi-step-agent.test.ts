@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   EVAL_ENV,
@@ -226,4 +227,22 @@ describe('multi-step engine decisions and corrections', () => {
     expect(observation.turns.at(-1)).toMatchObject({ status: 'completed', modelCalls: 8, toolSteps: 14 })
     expect(observation.scenes.final.elements).toHaveLength(14)
   }, 120_000)
+
+  it('shows the model a rendered screenshot when it looks', async () => {
+    const looking = customCase({ id: 'multi-step-look-01', request: { text: '加个标题，然后看看效果' } })
+    const { requests, observation } = await runScripted(looking, (results) => results === 0
+      ? [call('t1', 'add_text', { content: '晨雾', role: 'title' }), call('l1', 'look', {})]
+      : [message('标题在上方，画面很干净。')], 'look')
+    expect(observation.turns.at(-1)).toMatchObject({ status: 'completed', modelCalls: 2, toolSteps: 1 })
+    expect(outputOf(requests[1]!, 'l1')).toContain('这是当前整张画面')
+    // An unknown relay takes images only in user messages, so the screenshot follows the results.
+    const shown = (requests[1]!.input as Item[]).flatMap((item) => item.type === 'message' && Array.isArray(item.content)
+      ? (item.content as Item[]).filter((part) => part.type === 'input_image')
+      : [])
+    expect(shown).toHaveLength(1)
+    const bytes = Buffer.from(String(shown[0]!.image_url).replace(/^data:image\/jpeg;base64,/, ''), 'base64')
+    const metadata = await sharp(bytes).metadata()
+    expect(metadata.format).toBe('jpeg')
+    expect(Math.max(metadata.width ?? 0, metadata.height ?? 0)).toBeLessThanOrEqual(1_024)
+  }, 90_000)
 })
