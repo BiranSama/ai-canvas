@@ -15,6 +15,8 @@ import type { GenerationProfileSnapshot } from '../../../shared/generation'
 import type { LlmPricing } from '../../../shared/model-usage'
 import { describeImageModel } from '../../../shared/image-model-profiles'
 import {
+  MAX_IMAGE_PROVIDERS,
+  PRIMARY_IMAGE_PROVIDER_ID,
   providerPublicConfigSchema,
   resolveImageEndpoint,
   resolveLlmEndpoint,
@@ -130,10 +132,8 @@ export function ProviderSettingsSheet({
   const [policyDraft, setPolicyDraft] = useState<ProviderExecutionPolicy | null>(null)
   const [profileSnapshot, setProfileSnapshot] = useState<GenerationProfileSnapshot | null>(null)
   const [drafts, setDrafts] = useState<ProviderDrafts>({})
-  const [secrets, setSecrets] = useState<Record<ConfigurableProviderId, string>>({
-    'openai-compatible-llm': '',
-    'image-provider': ''
-  })
+  const [secrets, setSecrets] = useState<Partial<Record<ConfigurableProviderId, string>>>({})
+  const [removingImageService, setRemovingImageService] = useState<string | null>(null)
   const [busy, setBusy] = useState<ConfigurableProviderId | null>(null)
   const [expandedProvider, setExpandedProvider] = useState<ConfigurableProviderId | null>(initialProviderId)
   const [section, setSection] = useState<'providers' | 'agent' | 'profiles' | 'projects' | 'appearance' | 'privacy'>('providers')
@@ -289,7 +289,7 @@ export function ProviderSettingsSheet({
   }
 
   const saveSecret = async (providerId: ConfigurableProviderId): Promise<void> => {
-    const apiKey = secrets[providerId].trim()
+    const apiKey = (secrets[providerId] ?? '').trim()
     if (apiKey.length < 8 || busy !== null) return
     setBusy(providerId)
     try {
@@ -298,6 +298,51 @@ export function ProviderSettingsSheet({
       setStatus('已由操作系统加密保存；界面不会再次显示密钥。')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '未能保存本地凭据。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const addImageService = async (): Promise<void> => {
+    if (busy !== null) return
+    setBusy('image-service')
+    try {
+      const value = await window.desktop.addImageProvider()
+      publishSnapshot(value)
+      setExpandedProvider(value.providers.at(-1)?.id ?? null)
+      setProfileSnapshot(await window.desktop.listGenerationProfiles())
+      setStatus('已添加生图服务：选好协议、填写地址和模型并保存 Key 后就能用。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能添加生图服务。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const removeImageService = async (providerId: string): Promise<void> => {
+    if (busy !== null) return
+    setBusy(providerId)
+    try {
+      publishSnapshot(await window.desktop.removeImageProvider(providerId))
+      setRemovingImageService(null)
+      setExpandedProvider(null)
+      setProfileSnapshot(await window.desktop.listGenerationProfiles())
+      setStatus('已删除这个生图服务和它的 Key；用它生成过的图片不受影响。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能删除生图服务。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const makeDefaultImageService = async (providerId: string): Promise<void> => {
+    if (busy !== null) return
+    setBusy(providerId)
+    try {
+      publishSnapshot(await window.desktop.setDefaultImageProvider(providerId))
+      setStatus('默认生图服务已更新；Agent 和快速生成会用它。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能更改默认生图服务。')
     } finally {
       setBusy(null)
     }
@@ -520,16 +565,19 @@ export function ProviderSettingsSheet({
               <p>{budgetStatus({ ...snapshot, executionPolicy: policyDraft })}</p>
             </aside>
           )}
-          {snapshot?.providers.map((provider) => {
+          {snapshot?.providers.map((provider, index) => {
             const draft = drafts[provider.id]
             if (draft === undefined) return null
-            const prefix = provider.kind === 'llm' ? 'LLM Provider' : 'Image Provider'
+            // Index 1 is the primary image service; added services are numbered after it.
+            const prefix = provider.kind === 'llm' ? 'LLM Provider' : provider.id === PRIMARY_IMAGE_PROVIDER_ID ? 'Image Provider' : `Image Provider ${index}`
+            const imageServices = snapshot.providers.length - 1
+            const isDefaultImage = provider.kind === 'image' && snapshot.defaultImageProviderId === provider.id
             return (
               <article key={provider.id} className="provider-setting-row" data-provider-slot={provider.kind}>
                 <div className="provider-setting-copy">
                   <span className="provider-slot-mark" aria-hidden="true">{provider.kind === 'llm' ? <BrainCircuit size={17} /> : <ImageIcon size={17} />}</span>
                   <div>
-                    <span className="provider-slot-label">{provider.kind === 'llm' ? '语言模型' : '图片模型'}</span>
+                    <span className="provider-slot-label">{provider.kind === 'llm' ? '语言模型' : '图片模型'}{isDefaultImage && imageServices > 1 && <em className="provider-default-mark">默认</em>}</span>
                     <strong>{draft.label}</strong>
                     <small>{draft.kind === 'llm' ? `${LLM_PROTOCOL_LABELS[draft.protocol]} · ${LLM_REASONING_LABELS[draft.reasoningEffort]}思考` : `${IMAGE_PROTOCOL_LABELS[draft.protocol]} · 能力由协议与下方声明共同决定`}</small>
                   </div>
@@ -538,6 +586,7 @@ export function ProviderSettingsSheet({
                     <span className={`provider-state${provider.configured ? ' is-configured' : ''}`}>
                       {provider.configured ? <Check size={11} /> : <KeyRound size={11} />}
                       {provider.configured ? '已配置' : '无凭据'}</span>
+                    {provider.kind === 'image' && !isDefaultImage && <button type="button" className="provider-edit-toggle" aria-label={`把 ${draft.label} 设为默认生图服务`} disabled={busy !== null} onClick={() => void makeDefaultImageService(provider.id)}>设为默认</button>}
                     <button type="button" className="provider-edit-toggle" aria-expanded={expandedProvider === provider.id} onClick={() => setExpandedProvider((current) => current === provider.id ? null : provider.id)}><Pencil size={11} />{expandedProvider === provider.id ? '收起' : '编辑'}</button>
                   </div>
                 </div>
@@ -718,7 +767,7 @@ export function ProviderSettingsSheet({
                       type="password"
                       autoComplete="new-password"
                       aria-label={`${provider.label} API Key`}
-                      value={secrets[provider.id]}
+                      value={secrets[provider.id] ?? ''}
                       placeholder={provider.configured ? '输入新 Key 以替换' : 'Key 仅在本机输入'}
                       onChange={(event) => {
                         const nextValue = event.currentTarget.value
@@ -726,7 +775,7 @@ export function ProviderSettingsSheet({
                       }}
                     />
                   </label>
-                  <button type="button" className="settings-save" aria-label={`安全保存 ${provider.label} 凭据`} disabled={secrets[provider.id].trim().length < 8 || busy !== null} onClick={() => void saveSecret(provider.id)}>
+                  <button type="button" className="settings-save" aria-label={`安全保存 ${provider.label} 凭据`} disabled={(secrets[provider.id] ?? '').trim().length < 8 || busy !== null} onClick={() => void saveSecret(provider.id)}>
                     {busy === provider.id ? '保存中' : '安全保存'}
                   </button>
                   {provider.configured && <button type="button" className="settings-delete" aria-label={`删除 ${provider.label} 凭据`} disabled={busy !== null} onClick={() => void removeSecret(provider.id)}><Trash2 size={14} /></button>}
@@ -776,10 +825,22 @@ export function ProviderSettingsSheet({
                     </div>}
                   </div>
                 })()}
+                {provider.kind === 'image' && provider.id !== PRIMARY_IMAGE_PROVIDER_ID && <div className="provider-service-remove">
+                  <small>删除后这个服务的配置和 Key 都会移除；用它生成过的图片不受影响。</small>
+                  {removingImageService === provider.id
+                    ? <span>
+                        <button type="button" className="settings-delete" disabled={busy !== null} onClick={() => void removeImageService(provider.id)}>确认删除</button>
+                        <button type="button" disabled={busy !== null} onClick={() => setRemovingImageService(null)}>取消</button>
+                      </span>
+                    : <button type="button" className="settings-delete" aria-label={`删除生图服务 ${draft.label}`} disabled={busy !== null} onClick={() => setRemovingImageService(provider.id)}><Trash2 size={13} />删除这个服务</button>}
+                </div>}
                 </div>}
               </article>
             )
           }) ?? <div className="settings-loading">正在读取本地安全状态…</div>}
+          {snapshot !== null && snapshot.providers.length - 1 < MAX_IMAGE_PROVIDERS && <button type="button" className="provider-add-service" disabled={busy !== null} onClick={() => void addImageService()}>
+            <ImageIcon size={14} />添加生图服务<small>可同时保存多个，例如 OpenAI、Grok、火山方舟，再选一个作默认</small>
+          </button>}
           </>}
           </div>
         </div>

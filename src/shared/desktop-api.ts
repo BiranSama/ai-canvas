@@ -81,6 +81,9 @@ export const DESKTOP_CHANNELS = {
   providerExecutionPolicySet: 'provider:execution-policy-set',
   providerSecretSet: 'provider:secret-set',
   providerSecretDelete: 'provider:secret-delete',
+  providerImageAdd: 'provider:image-add',
+  providerImageRemove: 'provider:image-remove',
+  providerImageDefaultSet: 'provider:image-default-set',
   projectRecent: 'project:recent',
   projectCreate: 'project:create',
   projectOpen: 'project:open',
@@ -198,6 +201,9 @@ export interface DesktopApi {
   setProviderExecutionPolicy(input: ProviderExecutionPolicy): Promise<ProviderSettingsSnapshot>
   setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot>
   deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot>
+  addImageProvider(): Promise<ProviderSettingsSnapshot>
+  removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
+  setDefaultImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
   listRecentProjects(): Promise<readonly RecentProjectSummary[]>
   createProject(input: ProjectCreateInput): Promise<ProjectActionResult>
   openProject(): Promise<ProjectActionResult>

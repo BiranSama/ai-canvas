@@ -51,6 +51,7 @@ import { activeModal, canvasKeyboardBlocked, canvasPasteBlocked } from './intera
 import { useModalScope } from './interaction/use-modal-scope'
 import { flushProjectWorkContext, startProjectContextSync } from './store/project-context-sync'
 import { projectContextWritable, projectGeneration, setProjectContextWritable } from './store/project-context-lifecycle'
+import type { ConfigurableProviderId } from '../../shared/provider-settings'
 
 const viewLabels: Record<WorkspaceView, string> = {
   conversation: '对话',
@@ -138,7 +139,7 @@ function WorkspaceHeader({
   const [format, setFormat] = useState<'png' | 'jpeg' | 'webp'>('png')
   const [jpegBackground, setJpegBackground] = useState('#F5F4F1')
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsProviderId, setSettingsProviderId] = useState<'openai-compatible-llm' | 'image-provider' | null>(null)
+  const [settingsProviderId, setSettingsProviderId] = useState<ConfigurableProviderId | null>(null)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [recentProjects, setRecentProjects] = useState<readonly RecentProjectSummary[]>([])
   const [projectBusy, setProjectBusy] = useState(false)
@@ -164,7 +165,7 @@ function WorkspaceHeader({
 
   useEffect(() => {
     const openProviderSettings = (event: Event): void => {
-      const detail = (event as CustomEvent<{ providerId?: 'openai-compatible-llm' | 'image-provider' }>).detail
+      const detail = (event as CustomEvent<{ providerId?: ConfigurableProviderId }>).detail
       setSettingsProviderId(detail?.providerId ?? null)
       setSettingsOpen(true)
     }

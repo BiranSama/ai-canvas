@@ -85,7 +85,7 @@ import { ArkHttpClient } from '../security/ark-http-client'
 import { KrillHttpTransport } from '../security/krill-http-transport'
 import { ProviderUsageLedger } from '../security/provider-usage-ledger'
 import { ProviderConnectionValidator } from '../security/provider-connection-validator'
-import { DEFAULT_PROVIDER_EXECUTION_POLICY, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
+import { DEFAULT_PROVIDER_EXECUTION_POLICY, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
@@ -318,7 +318,7 @@ export class GenerationRuntime {
   readonly #executionBindings: ImageExecutionBindings
   readonly #providerUsage: ProviderUsageLedger
   readonly #providerConnection: ProviderConnectionValidator
-  #configuredImage: ImageProviderConfig | null = null
+  #configuredImages: ReadonlyMap<string, ImageProviderConfig> = new Map()
   #executionPolicy: ProviderExecutionPolicy = DEFAULT_PROVIDER_EXECUTION_POLICY
   readonly #userDataDirectory: string
   #projectLibraryDirectory: string
@@ -434,15 +434,19 @@ export class GenerationRuntime {
   async #refreshConfiguredImageProvider(): Promise<void> {
     return this.#providerSettings.withStableConfiguration(async (config) => {
     this.#executionPolicy = config.executionPolicy
-    const image = config.providers.find((provider): provider is ImageProviderConfig => provider.kind === 'image') ?? null
-    this.#configuredImage = image
-    this.#providers.remove('image-provider')
-    this.#profiles.setProviderModels('image-provider', [])
-    if (image === null) return
-    const provider = this.#makeImageProvider(image, config.executionPolicy)
-    if (provider === null) return
-    this.#providers.replace(provider)
-    this.#profiles.setProviderModels(provider.id, [image.defaultModel])
+    const images = imageProviderConfigs(config)
+    for (const id of new Set([PRIMARY_IMAGE_PROVIDER_ID, ...this.#configuredImages.keys()])) {
+      this.#providers.remove(id)
+      this.#profiles.setProviderModels(id, [])
+    }
+    this.#configuredImages = new Map(images.map((image) => [image.id, image]))
+    // Every complete service is registered; each job keeps the service it was submitted to.
+    for (const image of images) {
+      const provider = this.#makeImageProvider(image, config.executionPolicy)
+      if (provider === null) continue
+      this.#providers.replace(provider)
+      this.#profiles.setProviderModels(provider.id, [image.defaultModel])
+    }
     })
   }
 
@@ -461,7 +465,7 @@ export class GenerationRuntime {
       if (executionPolicy.maxRequestsPerJob < 3) return null
       const capabilities = configuredImageCapabilities(image, TASK_IMAGES_CAPABILITIES, executionPolicy)
       const provider = new KrillImageProvider({
-        id: 'image-provider',
+        id: image.id,
         label: image.label,
         capabilities,
         allowArbitraryModels: true,
@@ -483,7 +487,8 @@ export class GenerationRuntime {
           timeoutMs: image.timeoutMs,
           baseUrl: image.baseUrl,
           submissionCostCeilingCny: executionPolicy.maxCostCnyPerJob,
-          providerLabel: image.label
+          providerLabel: image.label,
+          providerId: image.id
         }),
         stagingDirectory: join(this.#userDataDirectory, 'generation-staging'),
         maxPollRequests: Math.max(1, Math.min(40, executionPolicy.maxRequestsPerJob - 2))
@@ -494,6 +499,7 @@ export class GenerationRuntime {
     if (image.protocol === 'openai-images') {
       const capabilities = configuredImageCapabilities(image, openAiImagesCapabilitiesFor(image.defaultModel), executionPolicy)
       const provider = new OpenAiImagesProvider({
+        id: image.id,
         label: image.label,
         capabilities,
         protocol: new OpenAiImagesProtocol({ baseUrl: image.baseUrl, allowedModels: [image.defaultModel] }),
@@ -514,6 +520,7 @@ export class GenerationRuntime {
 
     const capabilities = configuredImageCapabilities(image, seedreamCapabilitiesFor(image.defaultModel), executionPolicy)
     const provider = new ArkSeedreamImageProvider({
+      id: image.id,
       label: image.label,
       capabilities,
       protocol: new ArkSeedreamProtocol({ baseUrl: image.baseUrl }),
@@ -539,7 +546,7 @@ export class GenerationRuntime {
       || binding.invocationKey !== job.request.parameters.workflowIdempotencyKey
       || binding.operation !== ('kind' in job.request && job.request.kind === 'edit' ? 'edit' : 'generate')
       || job.effectiveTimeoutMs !== binding.image.timeoutMs
-      || !await this.#secrets.hasReference('image-provider', binding.credentialReference)) {
+      || !await this.#secrets.hasReference(binding.image.id, binding.credentialReference)) {
       throw new Error('The original image execution identity is unavailable or mismatched.')
     }
     const provider = this.#makeImageProvider(binding.image, binding.policy, {
@@ -633,7 +640,7 @@ export class GenerationRuntime {
         endpoint: resolveLlmEndpoint(llm),
         maxOutputTokens: llm.maxOutputTokens,
         llmProviderLabel: llm.label,
-        imageProviderId: 'image-provider',
+        imageProviderId: image.id,
         imageModel: image.defaultModel,
         maxImages,
         imageGenerationAvailable
@@ -1272,13 +1279,14 @@ export class GenerationRuntime {
               { id: 'mock-timeout', label: '超时状态验证', behavior: '仅用于离线测试超时恢复' }
             ])
           ]
-        : provider.id === 'image-provider' && this.#configuredImage !== null
-          ? [{
-              id: this.#configuredImage.defaultModel,
-              label: this.#configuredImage.defaultModel,
-              behavior: `当前图片模块 · ${this.#configuredImage.protocol} · 实际能力与价格以供应商为准`
+        : (() => {
+            const image = this.#configuredImages.get(provider.id)
+            return image === undefined ? [] : [{
+              id: image.defaultModel,
+              label: image.defaultModel,
+              behavior: `${image.label} · ${image.protocol} · 实际能力与价格以供应商为准`
             }]
-          : []
+          })()
     }))
   }
 
@@ -1307,7 +1315,7 @@ export class GenerationRuntime {
       workspace: owner.workspace, scene: this.#sceneService.state().scene,
       jobs: await this.#repository.listJobs(owner.workspace.metadata.id), capabilities: provider.capabilities, thumbnails,
       configurationIdentity: { profile, capabilities: provider.capabilities,
-        image: profile.providerId === 'mock' ? null : config.providers.find((entry) => entry.kind === 'image') }
+        image: profile.providerId === 'mock' ? null : imageProviderConfigs(config).find((entry) => entry.id === profile.providerId) }
     })
     this.#assertGenerationProject(owner)
     return preview
@@ -1353,6 +1361,24 @@ export class GenerationRuntime {
 
   deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot> {
     return this.#providerSettings.deleteSecret(providerId)
+  }
+
+  async addImageProvider(): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.addImageProvider()
+    await this.#refreshConfiguredImageProvider()
+    return snapshot
+  }
+
+  async removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.removeImageProvider(providerId)
+    await this.#refreshConfiguredImageProvider()
+    return snapshot
+  }
+
+  async setDefaultImageProvider(providerId: string): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.setDefaultImageProvider(providerId)
+    await this.#refreshConfiguredImageProvider()
+    return snapshot
   }
 
   listJobs(): Promise<readonly GenerationJob[]> {
@@ -1443,11 +1469,15 @@ export class GenerationRuntime {
   async #profileEnvironment(config: ProviderConfigFile, identity?: string) {
     const existing = identity === undefined ? null : await this.#workflowCoordinator.getIntentByKey(this.#project.workspace.metadata.id, identity)
     const binding = existing?.spec.executionIdentityId ? await this.#executionBindings.read(existing.spec.executionIdentityId) : null
-    const image = binding?.image ?? config.providers.find((item): item is ImageProviderConfig => item.kind === 'image')
-    const imageProvider = image === undefined ? null : this.#makeImageProvider(image, binding?.policy ?? config.executionPolicy)
-    const providers = new ProviderRegistry([this.#providers.get('mock'), ...(imageProvider === null ? [] : [imageProvider])])
+    const images = binding === null ? imageProviderConfigs(config) : [binding.image]
+    const imageProviders = images.flatMap((image) => {
+      const provider = this.#makeImageProvider(image, binding?.policy ?? config.executionPolicy)
+      return provider === null ? [] : [provider]
+    })
+    const providers = new ProviderRegistry([this.#providers.get('mock'), ...imageProviders])
     const profiles = new GenerationProfileRegistry(providers, {
-      mock: ['mock-balanced', 'mock-slow', 'mock-failure', 'mock-timeout'], 'image-provider': image === undefined ? [] : [image.defaultModel]
+      mock: ['mock-balanced', 'mock-slow', 'mock-failure', 'mock-timeout'],
+      ...Object.fromEntries(images.map((image) => [image.id, [image.defaultModel]]))
     })
     return { profiles, providers }
   }
@@ -1963,7 +1993,7 @@ export class GenerationRuntime {
     const existing = await coordinator.getIntentByKey(owner.workspace.metadata.id, identity)
     let binding: ImageExecutionBinding | null = existing?.spec.executionIdentityId
       ? await this.#executionBindings.read(existing.spec.executionIdentityId) : null
-    const image = binding?.image ?? metadata.retryExecution?.image ?? config.providers.find((item): item is ImageProviderConfig => item.kind === 'image')
+    const image = binding?.image ?? metadata.retryExecution?.image ?? imageProviderConfigs(config).find((item) => item.id === request.providerId)
     const policy = binding?.policy ?? metadata.retryExecution?.policy ?? config.executionPolicy
     const provider = request.providerId === 'mock' ? this.#providers.get('mock')
       : image === undefined ? null : this.#makeImageProvider(image, policy)
@@ -2008,9 +2038,9 @@ export class GenerationRuntime {
             || retryExecution.requestHash !== executionRequestHash(compiled))) {
             throw new ProviderError('IDEMPOTENCY_CONFLICT', '重试内容与原请求身份不一致。', 'validating')
           }
-          const credentialReference = retryExecution?.credentialReference ?? await this.#secrets.captureReference('image-provider')
+          const credentialReference = retryExecution?.credentialReference ?? await this.#secrets.captureReference(image.id)
           if (credentialReference === null) throw new ProviderError('PROVIDER_KEY_MISSING', '请先安全保存图片供应商凭据。', 'validating')
-          if (!await this.#secrets.hasReference('image-provider', credentialReference)) {
+          if (!await this.#secrets.hasReference(image.id, credentialReference)) {
             throw new ProviderError('REQUEST_IDENTITY_UNAVAILABLE', '原凭据版本已撤销，请核对原任务。', 'validating')
           }
           binding = await this.#executionBindings.create({ projectId: owner.workspace.metadata.id,

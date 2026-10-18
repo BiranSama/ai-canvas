@@ -9,11 +9,12 @@ import {
   type AgentRequest
 } from '../../shared/agent'
 import type { AssetMetadata } from '../storage/project-repository'
-import type {
-  LlmProtocol,
-  LlmTransportSettings,
-  ProviderConfigFile,
-  ProviderPublicConfig
+import {
+  defaultImageProviderConfig,
+  type LlmProtocol,
+  type LlmTransportSettings,
+  type ProviderConfigFile,
+  type ProviderPublicConfig
 } from '../../shared/provider-settings'
 import type { ArkHttpClient, ArkLlmTransportObservation } from '../security/ark-http-client'
 import type { LlmProtocolAdapter, NormalizedLlmResponse } from './llm-provider'
@@ -686,8 +687,8 @@ export class ConfiguredAgentPlanner implements AgentPlanner {
     }
     const config = await this.#config.read()
     const llm = config.providers.find((provider): provider is Extract<ProviderPublicConfig, { kind: 'llm' }> => provider.kind === 'llm')
-    const image = config.providers.find((provider): provider is Extract<ProviderPublicConfig, { kind: 'image' }> => provider.kind === 'image')
-    if (llm === undefined || image === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !llm.capabilities.toolCalling) {
+    const image = defaultImageProviderConfig(config)
+    if (llm === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !llm.capabilities.toolCalling) {
       return forwardPlan(this.#fallback, request, signal, recovery, context)
     }
     const imageGenerationAvailable = image.protocol !== 'unconfigured'

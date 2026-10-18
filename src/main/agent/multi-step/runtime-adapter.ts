@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import type { Scene } from '../../../domain'
 import type { AgentEngine } from '../../../shared/agent-engine'
-import { resolveLlmEndpoint, type ProviderConfigFile, type ProviderPublicConfig } from '../../../shared/provider-settings'
+import { defaultImageProviderConfig, resolveLlmEndpoint, type ProviderConfigFile, type ProviderPublicConfig } from '../../../shared/provider-settings'
 import { ArkHttpClient } from '../../security/ark-http-client'
 import type { ProviderUsageReservation } from '../../security/provider-usage-ledger'
 import type { AssetMetadata } from '../../storage/project-repository'
@@ -50,7 +50,7 @@ export function createMultiStepPlannerAdapter(options: {
     const file = await options.config.read()
     return {
       llm: file.providers.find((provider): provider is LlmConfig => provider.kind === 'llm'),
-      image: file.providers.find((provider): provider is ImageConfig => provider.kind === 'image'),
+      image: defaultImageProviderConfig(file),
       file
     }
   }
@@ -103,7 +103,7 @@ export function createMultiStepPlannerAdapter(options: {
       const references = protocol.imageReferences && image.capabilities.imageReferences
       const edits = protocol.maskEditing && image.capabilities.maskEditing
       return {
-        providerId: 'image-provider',
+        providerId: image.id,
         model: image.defaultModel,
         maxImages,
         summary: `${image.label}（${image.defaultModel}），每次最多 ${maxImages} 张；${references ? '可以用画布作参考图' : '不接受参考图，只能按文字生成'}；${edits ? image.protocol === 'ark-seedream' ? '局部修改用标注图引导' : '局部修改用蒙版' : '不支持局部修改'}。`

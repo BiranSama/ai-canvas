@@ -36,6 +36,7 @@ import {
   providerConnectionTestSchema,
   agentEngineSetSchema,
   providerSecretDeleteSchema,
+  providerImageIdSchema,
   providerConfigSetSchema,
   providerExecutionPolicySetSchema,
   providerSecretSetSchema,
@@ -211,6 +212,13 @@ export function registerDesktopIpc(
   })
   ipcMain.handle(DESKTOP_CHANNELS.providerSecretDelete, async (_event, input: unknown) => {
     return (await generationRuntime).deleteProviderSecret(providerSecretDeleteSchema.parse(input))
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.providerImageAdd, async () => (await generationRuntime).addImageProvider())
+  ipcMain.handle(DESKTOP_CHANNELS.providerImageRemove, async (_event, input: unknown) => {
+    return (await generationRuntime).removeImageProvider(providerImageIdSchema.parse(input))
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.providerImageDefaultSet, async (_event, input: unknown) => {
+    return (await generationRuntime).setDefaultImageProvider(providerImageIdSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.projectRecent, async () => (await generationRuntime).listRecentProjects())
   ipcMain.handle(DESKTOP_CHANNELS.projectCreate, async (event, input: unknown) => {

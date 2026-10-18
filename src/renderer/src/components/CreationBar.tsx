@@ -23,16 +23,16 @@ async function preferredImageProvider(operation: 'generate' | 'reference' | 'edi
     window.desktop.getProviderSettings(),
     window.desktop.listGenerationProfiles()
   ])
-  const imageProvider = settings.providers.find((provider) => provider.id === 'image-provider')
+  const imageProvider = settings.providers.find((provider) => provider.id === settings.defaultImageProviderId)
   const realProfile = profiles.profiles.find((entry) => entry.status === 'available'
-    && entry.profile.providerId === 'image-provider'
+    && entry.profile.providerId === settings.defaultImageProviderId
     && entry.profile.supportedOperations.includes(operation))?.profile
   return settings.realCallsAuthorized
     && imageProvider?.configured === true
     && imageProvider.baseUrl.trim() !== ''
     && imageProvider.defaultModel.trim() !== ''
     && realProfile !== undefined
-    ? { providerId: 'image-provider', model: imageProvider.defaultModel, profileId: realProfile.id, confirmed: true }
+    ? { providerId: imageProvider.id, model: imageProvider.defaultModel, profileId: realProfile.id, confirmed: true }
     : { providerId: 'mock', model: 'mock-balanced', profileId: 'local-sketch', confirmed: false }
 }
 

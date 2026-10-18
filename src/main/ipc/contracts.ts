@@ -20,6 +20,7 @@ import { canvasGenerationInputSchema } from '../../shared/reference'
 import { canvasEditInputSchema } from '../../shared/edit'
 import {
   configurableProviderIdSchema,
+  imageProviderIdSchema,
   providerConnectionTestInputSchema,
   providerExecutionPolicySchema,
   providerPublicConfigSchema,
@@ -82,6 +83,7 @@ export const agentEngineSetSchema = agentEngineSchema
 export const providerConfigSetSchema = providerPublicConfigSchema
 export const providerExecutionPolicySetSchema = providerExecutionPolicySchema
 export const providerSecretDeleteSchema = configurableProviderIdSchema
+export const providerImageIdSchema = imageProviderIdSchema
 export const projectCreateSchema = projectCreateInputSchema
 export const projectIdSchema = projectIdInputSchema
 export const projectFavoriteSchema = projectFavoriteInputSchema

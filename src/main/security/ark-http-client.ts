@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { G2UsageLedger } from './g2-usage-ledger'
 import type { ProviderUsageReservation } from './provider-usage-ledger'
+import type { ConfigurableProviderId } from '../../shared/provider-settings'
 import {
   MAX_LLM_RESPONSE_BYTES,
   SseDecoder,
@@ -21,7 +22,7 @@ interface SecretSource {
 export interface ArkJsonRequest {
   readonly url: string
   readonly body: Readonly<Record<string, unknown>>
-  readonly secretId: 'openai-compatible-llm' | 'image-provider'
+  readonly secretId: ConfigurableProviderId
   readonly expectedImages: number
   /** Conservative pre-request charge ceiling used by the persistent Provider ledger. */
   readonly costCeilingCny: number

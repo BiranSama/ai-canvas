@@ -2113,6 +2113,15 @@ select:focus-visible {
 .provider-summary-actions { display: flex; align-items: center; gap: 7px; }
 .provider-edit-toggle { display: flex; height: 30px; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid rgba(84,105,131,.12); border-radius: 9px; color: #53657a; background: rgba(255,255,255,.32); font-size: 9px; cursor: pointer; }
 .provider-edit-toggle:hover { color: #38669d; background: rgba(255,255,255,.5); }
+.provider-default-mark { margin-left: 6px; padding: 1px 5px; border-radius: 5px; color: #38669d; background: rgba(55,107,255,.08); font-style: normal; letter-spacing: 0; }
+.provider-service-remove { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(84,105,131,.09); }
+.provider-service-remove small { color: var(--faint-slate); font-size: 8px; line-height: 1.5; }
+.provider-service-remove span { display: flex; gap: 6px; }
+.provider-service-remove button { display: inline-flex; width: auto; height: 28px; flex-shrink: 0; align-items: center; gap: 5px; padding: 0 10px; border: 1px solid rgba(84,105,131,.12); border-radius: 9px; color: #53657a; background: transparent; font-size: 9px; cursor: pointer; }
+.provider-service-remove .settings-delete { border-color: transparent; color: #9a5852; background: rgba(166,80,71,.08); }
+.provider-add-service { display: flex; width: 100%; align-items: center; gap: 8px; padding: 12px 14px; border: 1px dashed rgba(84,105,131,.24); border-radius: 12px; color: #53657a; background: rgba(255,255,255,.22); font-size: 10px; text-align: left; cursor: pointer; }
+.provider-add-service:hover:not(:disabled) { color: #38669d; background: rgba(255,255,255,.42); }
+.provider-add-service small { margin-left: auto; color: var(--faint-slate); font-size: 8px; }
 .provider-editor { padding: 2px 14px 15px 44px; border-top: 1px solid rgba(79,98,122,.09); background: rgba(255,255,255,.1); animation: settings-editor-in 180ms cubic-bezier(.2,.78,.22,1) both; }
 @keyframes settings-editor-in { from { opacity: 0; transform: translateY(-4px); } }
 .provider-editor .provider-public-grid { grid-template-columns: minmax(150px,.8fr) minmax(210px,1.2fr); margin: 13px 0 0; }

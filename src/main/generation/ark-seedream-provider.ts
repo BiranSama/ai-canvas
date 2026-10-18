@@ -6,6 +6,7 @@ import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../..
 import type { ArkHttpClient } from '../security/ark-http-client'
 import { compileSeedreamVisualEditReference } from '../edit/seedream-visual-edit-compiler'
 import { ARK_SEEDREAM_CAPABILITIES } from '../../shared/image-model-profiles'
+import { PRIMARY_IMAGE_PROVIDER_ID } from '../../shared/provider-settings'
 import type { ArkSeedreamProtocol, NormalizedSeedreamImage } from './ark-seedream-protocol'
 import type { ImageProvider, ProviderGenerateContext, ProviderOutput } from './provider'
 import { ProviderError } from './provider'
@@ -51,7 +52,8 @@ function providerFailure(error: unknown, stage: 'submitting' | 'generating' | 'l
 }
 
 export class ArkSeedreamImageProvider implements ImageProvider {
-  readonly id = 'image-provider'
+  /** Also the id of the key in the vault. */
+  readonly id: string
   readonly label: string
   readonly capabilities: ProviderCapabilities
   readonly #protocol: ArkSeedreamProtocol
@@ -61,6 +63,7 @@ export class ArkSeedreamImageProvider implements ImageProvider {
   readonly #allowedModels: ReadonlySet<string>
 
   constructor(options: {
+    readonly id?: string
     readonly protocol: ArkSeedreamProtocol
     readonly http: ArkJsonPoster
     readonly stagingDirectory: string
@@ -69,6 +72,7 @@ export class ArkSeedreamImageProvider implements ImageProvider {
     readonly label?: string
     readonly capabilities?: ProviderCapabilities
   }) {
+    this.id = options.id ?? PRIMARY_IMAGE_PROVIDER_ID
     this.label = options.label ?? '火山方舟 · Seedream 5.0'
     this.capabilities = options.capabilities ?? ARK_SEEDREAM_CAPABILITIES
     this.#protocol = options.protocol
@@ -132,7 +136,7 @@ export class ArkSeedreamImageProvider implements ImageProvider {
       await context.onStage('generating')
       const raw = await this.#http.postJson({
         ...protocolRequest,
-        secretId: 'image-provider',
+        secretId: this.id,
         providerId: this.id,
         providerLabel: this.label,
         authorizationScopeId: typeof request.parameters.workflowIntentId === 'string'

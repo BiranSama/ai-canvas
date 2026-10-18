@@ -5,7 +5,7 @@ import { calculateOutputSize, parseAspectRatio } from '../../../domain'
 import type { GenerationDraft, GenerationJob, GenerationProfileAvailability, GenerationProfileSnapshot, GenerationResult } from '../../../shared/generation'
 import type { GenerationProviderInfo } from '../../../shared/desktop-api'
 import type { GenerationResultFamily } from '../../../shared/generation-workflow'
-import type { ProviderSettingsSnapshot } from '../../../shared/provider-settings'
+import { PRIMARY_IMAGE_PROVIDER_ID, type ProviderSettingsSnapshot } from '../../../shared/provider-settings'
 import { registerRuntimeAsset } from '../assets/runtime-assets'
 import { useGenerationDraftStore } from '../store/generation-draft-store'
 import { useWorkspaceStore } from '../store/workspace-store'
@@ -153,9 +153,9 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
         setProviders(providerList)
         setProfileSnapshot(profiles)
         setProviderSettings(settings)
-        const configuredImage = settings.providers.find((provider) => provider.id === 'image-provider')
+        const configuredImage = settings.providers.find((provider) => provider.id === settings.defaultImageProviderId)
         const preferred = configuredImage?.configured === true
-          ? profiles.profiles.find((entry) => entry.status === 'available' && entry.profile.providerId === 'image-provider' && entry.profile.tier === 'draft')?.profile
+          ? profiles.profiles.find((entry) => entry.status === 'available' && entry.profile.providerId === configuredImage.id && entry.profile.tier === 'draft')?.profile
           : undefined
         const currentDraft = useGenerationDraftStore.getState()
         if (preferred !== undefined && !currentDraft.profileSelectionMade) {
@@ -189,7 +189,7 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
       setProviders(nextProviders)
       setProfileSnapshot(profiles)
       setProviderSettings(settings)
-      const image = settings.providers.find((provider) => provider.id === 'image-provider')
+      const image = settings.providers.find((provider) => provider.id === settings.defaultImageProviderId)
       const imageReady = image?.kind === 'image'
         && image.configured
         && image.baseUrl.trim() !== ''
@@ -198,7 +198,7 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
         && (image.protocol !== 'task-images' || settings.executionPolicy.maxRequestsPerJob >= 3)
       const preferred = imageReady
         ? profiles.profiles.find((entry) => entry.status === 'available'
-          && entry.profile.providerId === 'image-provider'
+          && entry.profile.providerId === image.id
           && entry.profile.tier === 'draft')?.profile
         : undefined
       const current = useGenerationDraftStore.getState()
@@ -248,12 +248,20 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
   const activeProfile = activeProfileEntry?.profile ?? null
   const providerId = activeProfile?.providerId ?? 'mock'
   const activeProvider = providers.find((provider) => provider.id === providerId) ?? providers[0]
-  const configuredImageProvider = providerSettings?.providers.find((provider) => provider.id === 'image-provider')
+  const imageServices = providerSettings?.providers.filter((provider) => provider.kind === 'image') ?? []
+  // The service of the chosen real profile; with a local profile, the default service.
+  const selectedImageServiceId = activeProfile !== null && activeProfile.providerId !== 'mock'
+    ? activeProfile.providerId
+    : providerSettings?.defaultImageProviderId ?? PRIMARY_IMAGE_PROVIDER_ID
+  const draftProfileFor = (serviceId: string) => profileEntries.find((entry) => entry.status === 'available'
+    && entry.profile.providerId === serviceId && entry.profile.tier === 'draft')?.profile
+  const readyImageServices = imageServices.filter((service) => service.configured && draftProfileFor(service.id) !== undefined)
+  const configuredImageProvider = imageServices.find((provider) => provider.id === selectedImageServiceId)
   const imageModuleConfigured = configuredImageProvider?.kind === 'image'
     && configuredImageProvider.baseUrl.trim() !== ''
     && configuredImageProvider.defaultModel.trim() !== ''
     && configuredImageProvider.protocol !== 'unconfigured'
-  const hasAvailableImageProfile = profileEntries.some((entry) => entry.status === 'available' && entry.profile.providerId === 'image-provider')
+  const hasAvailableImageProfile = profileEntries.some((entry) => entry.status === 'available' && entry.profile.providerId === selectedImageServiceId)
   const taskProtocolBudgetBlocked = imageModuleConfigured
     && configuredImageProvider?.protocol === 'task-images'
     && (providerSettings?.executionPolicy.maxRequestsPerJob ?? 0) < 3
@@ -532,14 +540,23 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
                       ? `${configuredImageProvider.protocol} · ${configuredImageProvider.configured ? configuredImageProvider.defaultModel : '未保存凭据，当前任务仍可使用本地档'}`
                     : '选择协议、地址与模型后启用真实生成'}</small>
                 </span>
-                <button type="button" aria-label="配置图片模型" onClick={() => window.dispatchEvent(new CustomEvent('ai-canvas:open-provider-settings', { detail: { providerId: 'image-provider' } }))}><Settings2 size={13} />更换配置</button>
+                <button type="button" aria-label="配置图片模型" onClick={() => window.dispatchEvent(new CustomEvent('ai-canvas:open-provider-settings', { detail: { providerId: selectedImageServiceId } }))}><Settings2 size={13} />更换配置</button>
               </div>
             </div>
+            {imageServices.length > 1 && readyImageServices.length > 0 && <label className="generation-model-scenario"><span>生图服务</span><select aria-label="生图服务" value={readyImageServices.some((service) => service.id === selectedImageServiceId) ? selectedImageServiceId : ''} onChange={(event) => {
+              const profile = draftProfileFor(event.currentTarget.value)
+              if (profile === undefined) return
+              updateDraft({ profileId: profile.id, profileSelectionMade: true, quantity: profile.defaultQuantity, model: profile.modelId })
+              setPendingConfirmation(false)
+            }}>
+              {!readyImageServices.some((service) => service.id === selectedImageServiceId) && <option value="" disabled>默认服务未就绪，选一个</option>}
+              {readyImageServices.map((service) => <option key={service.id} value={service.id}>{service.label}{service.id === providerSettings?.defaultImageProviderId ? '（默认）' : ''}</option>)}
+            </select></label>}
             <label className="generation-model-scenario"><span>模型情景</span><select aria-label="模型情景" value={model} onChange={(event) => updateDraft({ model: event.currentTarget.value })}>{activeProvider?.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
           </div>
           <div className="generation-tier" role="group" aria-label="生成档位">
             <span>生成档位</span>
-            {profileEntries.map((entry: GenerationProfileAvailability) => (
+            {profileEntries.filter((entry) => entry.profile.providerId === 'mock' || entry.profile.providerId === selectedImageServiceId).map((entry: GenerationProfileAvailability) => (
               <button
                 key={entry.profile.id}
                 type="button"
