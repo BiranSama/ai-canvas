@@ -21,6 +21,7 @@ generate 的 brief 和 edit_image 的 instruction 会交给生图模型。按当
 ## xAI Grok 与 Google Gemini
 - 叙述式描述，像讲一个画面；比例通过参数决定，不用写在文字里。
 - 适合描述场景氛围和故事感。
+- Grok 可以参考 1–3 张图（例如画布截图和已有成图），用「第一张图」「第二张图」指代；它没有蒙版，局部修改要换用支持蒙版的服务。
 
 ## 本地 SDXL
 - 用英文标签式写法，逗号分隔，重要的词加权重：(perfume bottle:1.3), soft morning light, frosted glass。

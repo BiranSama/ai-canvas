@@ -137,14 +137,15 @@ export const GROK_ASPECT_RATIOS: readonly ImageSize[] = [
   { width: 3, height: 2 }, { width: 9, height: 16 }, { width: 16, height: 9 }
 ]
 
+/** Grok edits take at most this many source images. */
+export const GROK_MAX_REFERENCES = 3
+
 export function openAiImagesCapabilitiesFor(model: string): ProviderCapabilities {
   if (!isGrokImageModel(model)) return OPENAI_IMAGES_CAPABILITIES
-  // Reference inputs and edits are not mapped for Grok yet; only text-to-image is sent.
+  // Grok follows reference images but has no mask, so local edits are not offered.
   return {
     ...OPENAI_IMAGES_CAPABILITIES,
-    imageReferences: false,
     maskEditing: false,
-    multipleReferences: false,
     transparentOutput: false,
     supportedFormats: ['jpeg', 'png']
   }
@@ -219,7 +220,11 @@ export function describeImageModel(protocol: ImageProtocol, model: string): stri
       : hasPresetSizesOnly(name)
         ? `只有 ${sizeList(GPT_IMAGE_1_PRESETS, '×')}，按画幅取最接近的一个`
         : freeSizeText(GPT_IMAGE_FREE_SIZE)
-    return [`尺寸：${sizes}`, `每次最多 ${capabilities.maxImages} 张`, supportText(capabilities)].join('。') + '。'
+    return [
+      `尺寸：${sizes}`,
+      `每次最多 ${capabilities.maxImages} 张`,
+      `${supportText(capabilities)}${isGrokImageModel(name) ? `（最多 ${GROK_MAX_REFERENCES} 张，没有蒙版局部修改）` : ''}`
+    ].join('。') + '。'
   }
   return `每次 ${TASK_IMAGES_CAPABILITIES.maxImages} 张。${supportText(TASK_IMAGES_CAPABILITIES)}。`
 }

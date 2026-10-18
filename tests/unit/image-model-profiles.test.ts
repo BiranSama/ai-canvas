@@ -15,7 +15,7 @@ describe('image model hints', () => {
       '尺寸：66 万–829 万像素，边长取 16 的倍数，长边不超过 3840，长宽比不超过 3:1。每次最多 4 张。支持参考图、局部修改、透明背景。'
     )
     expect(describeImageModel('openai-images', 'grok-imagine-image')).toBe(
-      '尺寸：按画幅取最接近的比例（1:1、3:4、4:3、2:3、3:2、9:16、16:9），长边超过 1536 用 2k，否则 1k。每次最多 4 张。只按文字生成。'
+      '尺寸：按画幅取最接近的比例（1:1、3:4、4:3、2:3、3:2、9:16、16:9），长边超过 1536 用 2k，否则 1k。每次最多 4 张。支持参考图（最多 3 张，没有蒙版局部修改）。'
     )
     expect(describeImageModel('openai-images', 'flux-dev')).toMatch(/^尺寸：按画布尺寸原样发送/)
     expect(describeImageModel('task-images', 'any-model')).toBe('每次 1 张。只按文字生成。')

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { EditRequest, GenerationRequest } from '../../shared/generation'
 import { familyPrompt } from './image-prompt-families'
-import { GPT_IMAGE_1_PRESETS, GPT_IMAGE_FREE_SIZE, GROK_ASPECT_RATIOS, hasPresetSizesOnly, isGptImageModel, isGrokImageModel, OPENAI_IMAGES_CAPABILITIES } from '../../shared/image-model-profiles'
+import { GPT_IMAGE_1_PRESETS, GPT_IMAGE_FREE_SIZE, GROK_ASPECT_RATIOS, GROK_MAX_REFERENCES, hasPresetSizesOnly, isGptImageModel, isGrokImageModel, OPENAI_IMAGES_CAPABILITIES } from '../../shared/image-model-profiles'
 import { fitFreeImageSize, formatImageSize, nearestPresetSize } from '../../shared/image-size-rules'
 
 const modelSchema = z.string().trim().min(1).max(200)
@@ -113,13 +113,40 @@ export class OpenAiImagesProtocol {
     }
   }
 
+  /**
+   * Grok Imagine reads references from a JSON body: one `image` or up to three
+   * `images`, each a data URI. The canvas frame is set explicitly, since the
+   * output would otherwise follow the first reference.
+   */
+  buildGrokReferenceRequest(input: {
+    readonly request: GenerationRequest | EditRequest
+    readonly images: readonly OpenAiImagesFileInput[]
+  }): OpenAiImagesJsonRequest {
+    this.#validate(input.request)
+    if (!isGrokImageModel(input.request.model)) throw new Error('Only Grok Imagine models take JSON reference requests.')
+    if (input.images.length === 0) throw new Error('A Grok reference request needs at least one image.')
+    if (input.images.length > GROK_MAX_REFERENCES) throw new Error(`Grok Imagine accepts at most ${GROK_MAX_REFERENCES} reference images.`)
+    const sources = input.images.map((image) => ({ url: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`, type: 'image_url' }))
+    return {
+      url: new URL('images/edits', this.#baseUrl).toString(),
+      body: {
+        model: input.request.model,
+        prompt: familyPrompt(input.request),
+        n: input.request.count,
+        response_format: 'b64_json',
+        aspect_ratio: grokFrameFields(input.request).aspect_ratio,
+        ...(sources.length === 1 ? { image: sources[0] } : { images: sources })
+      }
+    }
+  }
+
   buildEditRequest(input: {
     readonly request: GenerationRequest | EditRequest
     readonly images: readonly OpenAiImagesFileInput[]
     readonly mask: OpenAiImagesFileInput | null
   }): OpenAiImagesMultipartRequest {
     this.#validate(input.request)
-    if (isGrokImageModel(input.request.model)) throw new Error('Grok Imagine reference inputs and edits are not supported by this protocol yet.')
+    if (isGrokImageModel(input.request.model)) throw new Error('Grok Imagine takes reference images as JSON; use buildGrokReferenceRequest.')
     if (input.images.length === 0) throw new Error('OpenAI Images multipart editing requires at least one image.')
     if (input.images.length > 8) throw new Error('OpenAI Images accepts at most eight AI Canvas image inputs.')
     const files: OpenAiImagesMultipartFile[] = input.images.map((image) => ({ ...image, field: 'image[]' }))

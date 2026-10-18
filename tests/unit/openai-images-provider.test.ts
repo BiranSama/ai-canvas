@@ -6,7 +6,7 @@ import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OpenAiImagesProvider } from '../../src/main/generation/openai-images-provider'
 import { OpenAiImagesProtocol } from '../../src/main/generation/openai-images-protocol'
-import { OPENAI_IMAGES_CAPABILITIES } from '../../src/shared/image-model-profiles'
+import { OPENAI_IMAGES_CAPABILITIES, openAiImagesCapabilitiesFor } from '../../src/shared/image-model-profiles'
 import type { ArkHttpClient } from '../../src/main/security/ark-http-client'
 import type { EditRequest, GenerationRequest } from '../../src/shared/generation'
 import type { AssetMetadata } from '../../src/main/storage/project-repository'
@@ -144,5 +144,46 @@ describe('OpenAI Images provider offline execution', () => {
       expect(output.mimeType).toBe('image/png')
       await expect(readFile(output.filePath)).resolves.toEqual(png)
     }
+  })
+
+  it('sends Grok references as JSON data URIs under the service key and refuses masks and a fourth reference', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ai-canvas-grok-images-'))
+    roots.push(root)
+    const png = await sharp({ create: { width: 8, height: 8, channels: 4, background: { r: 30, g: 60, b: 90, alpha: 1 } } }).png().toBuffer()
+    const sourcePath = join(root, 'source.png')
+    await writeFile(sourcePath, png)
+    const postJson = vi.fn<(input: Parameters<ArkHttpClient['postJson']>[0]) => Promise<unknown>>(async () => ({ data: [{ b64_json: png.toString('base64') }] }))
+    const postMultipart = vi.fn<(input: Parameters<ArkHttpClient['postMultipart']>[0]) => Promise<unknown>>()
+    const provider = new OpenAiImagesProvider({
+      id: 'image-provider-grok1',
+      label: 'Grok Imagine',
+      capabilities: openAiImagesCapabilitiesFor('grok-imagine-image'),
+      protocol: new OpenAiImagesProtocol({ baseUrl: 'https://api.x.ai/v1', allowedModels: ['grok-imagine-image'] }),
+      http: { postJson, postMultipart },
+      stagingDirectory: join(root, 'staging'),
+      timeoutMs: 30_000,
+      costCeilingCny: 3
+    })
+    const source = await asset('source', sourcePath, 8, 8)
+    const context = {
+      signal: new AbortController().signal,
+      onStage: vi.fn(async () => undefined),
+      onExternalTaskId: vi.fn(async () => undefined),
+      resolveAsset: async () => source
+    }
+    const reference = { assetId: 'source', intent: 'subject' as const, strength: 0.8 }
+    const grok = (overrides: Partial<GenerationRequest>) => request({ model: 'grok-imagine-image', providerId: 'image-provider-grok1', ...overrides })
+
+    expect(await provider.generate(grok({ references: [reference] }), context)).toHaveLength(1)
+    expect(postMultipart).not.toHaveBeenCalled()
+    expect(postJson).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'https://api.x.ai/v1/images/edits',
+      secretId: 'image-provider-grok1',
+      providerId: 'image-provider-grok1',
+      body: expect.objectContaining({ image: { url: `data:image/png;base64,${png.toString('base64')}`, type: 'image_url' } })
+    }))
+    await expect(provider.generate(grok({ references: [reference, reference, reference, reference] }), context)).rejects.toMatchObject({ code: 'GROK_REFERENCE_LIMIT' })
+    await expect(provider.edit({ ...grok({}), kind: 'edit', sourceAssetId: 'source', maskAssetId: 'source' }, context)).rejects.toMatchObject({ code: 'OPENAI_IMAGES_EDIT_UNSUPPORTED' })
+    expect(postJson).toHaveBeenCalledTimes(1)
   })
 })

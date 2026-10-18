@@ -158,12 +158,29 @@ describe('Grok Imagine request shape', () => {
     })
   })
 
-  it('declares only text-to-image until references and edits are mapped', () => {
-    expect(openAiImagesCapabilitiesFor('grok-imagine-image')).toMatchObject({ textToImage: true, imageReferences: false, maskEditing: false, transparentOutput: false })
+  it('sends references as JSON image sources in the canvas frame, without masks', () => {
+    const protocol = new OpenAiImagesProtocol({ baseUrl: 'https://api.x.ai/v1', allowedModels: ['grok-imagine-image'] })
+    const image = (name: string) => ({ name, mimeType: 'image/png' as const, bytes: Buffer.from(name) })
+    const single = protocol.buildGrokReferenceRequest({ request: request('grok-imagine-image', { aspectWidth: 9, aspectHeight: 16, count: 2 }), images: [image('a')] })
+    expect(single).toEqual({
+      url: 'https://api.x.ai/v1/images/edits',
+      body: {
+        model: 'grok-imagine-image',
+        prompt: '晨雾中的玻璃香水瓶',
+        n: 2,
+        response_format: 'b64_json',
+        aspect_ratio: '9:16',
+        image: { url: `data:image/png;base64,${Buffer.from('a').toString('base64')}`, type: 'image_url' }
+      }
+    })
+    const several = protocol.buildGrokReferenceRequest({ request: request('grok-imagine-image'), images: [image('a'), image('b'), image('c')] }).body
+    expect(several).not.toHaveProperty('image')
+    expect((several.images as unknown[])).toHaveLength(3)
+    expect(() => protocol.buildGrokReferenceRequest({ request: request('grok-imagine-image'), images: [image('a'), image('b'), image('c'), image('d')] })).toThrow(/at most 3/)
+    expect(() => protocol.buildEditRequest({ request: request('grok-imagine-image'), images: [image('a')], mask: null })).toThrow(/JSON/)
+
+    expect(openAiImagesCapabilitiesFor('grok-imagine-image')).toMatchObject({ textToImage: true, imageReferences: true, multipleReferences: true, maskEditing: false, transparentOutput: false })
     expect(openAiImagesCapabilitiesFor('gpt-image-2')).toMatchObject({ imageReferences: true, maskEditing: true })
-    expect(() => new OpenAiImagesProtocol({ baseUrl: 'https://api.x.ai/v1', allowedModels: ['grok-imagine-image'] })
-      .buildEditRequest({ request: request('grok-imagine-image'), images: [{ name: 'a.png', mimeType: 'image/png', bytes: Buffer.from('x') }], mask: null }))
-      .toThrow(/not supported/)
   })
 })
 
