@@ -76,7 +76,7 @@ import { buildTransientAnnotationMasks } from '../../shared/ephemeral-annotation
 import { ProviderSettingsService } from '../security/provider-settings-service'
 import { FileProviderConfigStore } from '../security/provider-config-store'
 import { FileRedactedLogger } from '../security/file-redacted-logger'
-import { ElectronSecretVault } from '../security/secret-vault'
+import { ElectronSecretVault, type ProviderSecretVault } from '../security/secret-vault'
 import { ImageExecutionBindings, executionInputHash, executionRequestHash, type ImageExecutionBinding } from '../security/image-execution-bindings'
 import { ArkHttpClient } from '../security/ark-http-client'
 import { KrillHttpTransport } from '../security/krill-http-transport'
@@ -153,6 +153,8 @@ export interface GenerationProviderInfo {
 
 export interface GenerationRuntimeOptions {
   readonly projectLibraryDirectory?: string
+  /** Replaces the operating-system vault; used by the offline/real-model eval harness only. */
+  readonly secretVault?: ProviderSecretVault
 }
 
 type ImageProviderConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -302,7 +304,7 @@ export class GenerationRuntime {
   #editMaskCompiler!: EditMaskCompiler
   readonly #providerSettings: ProviderSettingsService
   readonly #providerConfig: FileProviderConfigStore
-  readonly #secrets: ElectronSecretVault
+  readonly #secrets: ProviderSecretVault
   readonly #executionBindings: ImageExecutionBindings
   readonly #providerUsage: ProviderUsageLedger
   readonly #providerConnection: ProviderConnectionValidator
@@ -341,7 +343,7 @@ export class GenerationRuntime {
     providers: ProviderRegistry,
     providerSettings: ProviderSettingsService,
     providerConfig: FileProviderConfigStore,
-    secrets: ElectronSecretVault,
+    secrets: ProviderSecretVault,
     providerUsage: ProviderUsageLedger
   ) {
     this.#userDataDirectory = userDataDirectory
@@ -390,7 +392,7 @@ export class GenerationRuntime {
         project = await openDefaultProject(projectDirectory)
       }
     }
-    const secrets = new ElectronSecretVault(join(userDataDirectory, 'security', 'provider-secrets.json'))
+    const secrets = options.secretVault ?? new ElectronSecretVault(join(userDataDirectory, 'security', 'provider-secrets.json'))
     const providerConfig = new FileProviderConfigStore(join(userDataDirectory, 'security', 'provider-settings.json'))
     const providerUsage = new ProviderUsageLedger(join(userDataDirectory, 'security', 'provider-usage.json'), providerConfig)
     const providers = new ProviderRegistry([
