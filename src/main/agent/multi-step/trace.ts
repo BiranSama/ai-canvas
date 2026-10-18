@@ -13,6 +13,8 @@ import {
   type LlmUsage
 } from '../llm/transcript'
 
+export const MAX_STORED_BRIEF_CHARS = 100_000
+
 const usageSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   cachedInputTokens: z.number().int().nonnegative(),
@@ -40,7 +42,14 @@ export const modelTraceSchema = z.object({
   results: z.array(llmToolResultSchema).max(64),
   /** The call this pass handed to the loop (a tool run or a question), if any. */
   emitted: z.object({ callId: z.string().min(1).max(256), name: z.string().min(1).max(128) }).nullable(),
-  usage: z.array(usageSchema).max(16)
+  usage: z.array(usageSchema).max(16),
+  /**
+   * The turn brief, stored by the pass that wrote it. Later passes send the
+   * same text, so the transcript only grows and providers can cache it.
+   */
+  brief: z.string().max(MAX_STORED_BRIEF_CHARS).nullable().default(null),
+  /** Set when this pass replaced the first `assistants` steps of the turn with `text`. */
+  checkpoint: z.object({ assistants: z.number().int().nonnegative(), text: z.string().max(120_000) }).nullable().default(null)
 })
 
 export type ModelTrace = z.infer<typeof modelTraceSchema>

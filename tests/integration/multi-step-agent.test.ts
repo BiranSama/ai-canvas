@@ -102,6 +102,9 @@ describe('multi-step agent engine', () => {
     // The brief names the image service and its limits.
     expect(String((requests[0]!.input as Item[])[0]!.content)).toMatch(/生图服务：.+每次最多 \d 张/)
     const second = requests[1]!.input as Item[]
+    // The canvas changed between steps, yet each request extends the previous one, so providers can cache it.
+    expect(second[0]).toEqual((requests[0]!.input as Item[])[0])
+    expect((requests[2]!.input as Item[]).slice(0, second.length)).toEqual(second)
     // The first step's output goes back unchanged, then both results in call order.
     expect(second.slice(1, 4)).toEqual([
       { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'enc-step-1' },

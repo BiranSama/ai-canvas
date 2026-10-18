@@ -5,7 +5,7 @@ import { formatBox, transformToBox, typeLabel } from '../tools/geometry'
 import type { ElementRefs } from '../tools/refs'
 import type { AgentToolContext, GenerationResultEntry, ManualLibrary } from '../tools/types'
 
-export const MULTI_STEP_PROMPT_VERSION = 'multi-step-1'
+export const MULTI_STEP_PROMPT_VERSION = 'multi-step-2'
 
 /**
  * Fixed for the whole session so providers can cache it. Per-turn facts go in
@@ -20,6 +20,7 @@ export function multiStepSystemPrompt(manuals: ManualLibrary | null): string {
     '- 先弄清要什么。要求含糊时做合理假设并在汇报里说明；只有拿不准、而且猜错代价大时才用 ask_user。',
     '- 每次调用一个具体的小工具，看到结果再决定下一步。动手前后各用 look 看一次画面即可，不要每步都看。',
     '- 按比例改（「缩小 20%」「往上挪一点」）用 update 的 scale 或 move；需要确切数值时先 inspect。',
+    '- 第一条消息里的画布是本轮开始时（或较早步骤压缩时）的样子；之后的变化以工具结果为准，拿不准就 inspect 或 look。',
     '- 只改用户提到的对象和属性，其他对象一律不动。',
     '- 工具返回「未执行」时按建议修正后再试；同一个错误不要原样重复。改坏了用 undo 撤销再换做法。',
     '- 完成后用一两句话汇报做了什么、做了哪些假设，然后结束，不再调用工具。',

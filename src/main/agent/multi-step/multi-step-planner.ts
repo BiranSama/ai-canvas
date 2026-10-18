@@ -14,8 +14,9 @@ import { availableAgentTools, llmToolDefinitions, prepareAgentToolCall } from '.
 import { SCREENSHOT_QUESTION } from '../tools/look'
 import { ElementRefs } from '../tools/refs'
 import { formatToolResult, type AgentToolContext, type AgentToolResult, type AgentToolStep, type CanvasLooker, type ExecutedTool, type GenerationResultEntry, type ManualLibrary } from '../tools/types'
+import { CHECKPOINT_TOKENS, checkpointText, estimateRequestTokens, MIN_STEPS_BETWEEN_CHECKPOINTS } from './context-budget'
 import { MULTI_STEP_PROMPT_VERSION, multiStepSystemPrompt, multiStepTurnBrief } from './prompt'
-import { storableResult, traceOf, transcriptFrom, type AssistantStep, type ModelTrace } from './trace'
+import { MAX_STORED_BRIEF_CHARS, storableResult, traceOf, transcriptFrom, type AssistantStep, type ModelTrace } from './trace'
 
 /** The configured text model, resolved again for every pass so settings changes apply. */
 export interface MultiStepModel {
@@ -43,6 +44,8 @@ export interface MultiStepPlannerOptions {
   readonly newId?: () => string
   /** Model calls one pass may make while it answers read-only tools itself. */
   readonly maxModelCallsPerPass?: number
+  /** Estimated input above which earlier steps are replaced by a checkpoint. */
+  readonly checkpointTokens?: number
 }
 
 /** A cost reservation per model call; the ledger settles against it. */
@@ -114,8 +117,16 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     const results = new Map<string, LlmToolResult>()
     for (const { trace } of traces) for (const result of trace.results) results.set(result.callId, result)
     const assistants: AssistantStep[] = traces.flatMap(({ trace }) => trace.assistants)
+    const storedBrief = traces.find(({ trace }) => trace.brief !== null)?.trace.brief ?? null
+    let checkpoint = [...traces].reverse().find(({ trace }) => trace.checkpoint !== null)?.trace.checkpoint ?? null
 
-    const pass = { assistants: [] as AssistantStep[], results: [] as LlmToolResult[], usage: [] as LlmUsage[] }
+    const pass = {
+      assistants: [] as AssistantStep[],
+      results: [] as LlmToolResult[],
+      usage: [] as LlmUsage[],
+      brief: null as string | null,
+      checkpoint: null as ModelTrace['checkpoint']
+    }
     const record = (result: LlmToolResult): void => {
       results.set(result.callId, result)
       pass.results.push(storableResult(result))
@@ -152,13 +163,15 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           assistants: pass.assistants.map((assistant) => ({ parts: [...assistant.parts], native: assistant.native })),
           results: pass.results,
           emitted,
-          usage: pass.usage
+          usage: pass.usage,
+          brief: pass.brief,
+          checkpoint: pass.checkpoint
         } satisfies ModelTrace
       },
       modelTurns
     })
 
-    let brief: LlmTranscriptMessage | null = null
+    let opening: LlmTranscriptMessage | null = null
     let modelTurns = 0
     const callLimit = this.#modelCallLimit(input.turn.modelTurnsUsed, input.budget)
     while (true) {
@@ -200,13 +213,32 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           }
         }, null, modelTurns)
       }
-      brief ??= await this.#brief(input, scene, refs, toolContext, context, model)
-      const tools = availableAgentTools(toolContext)
-      const transcript = transcriptFrom({ brief, assistants: [...assistants, ...pass.assistants], results, images: this.#screenshots })
+      const system = multiStepSystemPrompt(this.#options.manuals ?? null)
+      const tools = [...llmToolDefinitions(availableAgentTools(toolContext))]
+      const steps = [...assistants, ...pass.assistants]
+      if (opening === null) {
+        // The brief written by the first pass is sent unchanged; changes reach the model as tool results.
+        let text = checkpoint?.text ?? storedBrief
+        if (text === null) {
+          text = this.#briefText(input, scene, refs, toolContext, context)
+          // One too long to store is written again on each pass instead.
+          pass.brief = text.length <= MAX_STORED_BRIEF_CHARS ? text : null
+        }
+        opening = await this.#opening(text, input, model)
+      }
+      let messages = transcriptFrom({ brief: opening, assistants: steps.slice(checkpoint?.assistants ?? 0), results, images: this.#screenshots })
+      if (steps.length - (checkpoint?.assistants ?? 0) >= MIN_STEPS_BETWEEN_CHECKPOINTS && estimateRequestTokens({ system, messages, tools }) > (this.#options.checkpointTokens ?? CHECKPOINT_TOKENS)) {
+        checkpoint = pass.checkpoint = {
+          assistants: steps.length,
+          text: checkpointText({ brief: this.#briefText(input, scene, refs, toolContext, context), assistants: steps, results })
+        }
+        opening = await this.#opening(checkpoint.text, input, model)
+        messages = [opening]
+      }
       const turn = await this.#callModel(model, {
-        system: multiStepSystemPrompt(this.#options.manuals ?? null),
-        messages: transcript,
-        tools: [...llmToolDefinitions(tools)],
+        system,
+        messages,
+        tools,
         maxOutputTokens: model.maxOutputTokens
       }, signal, context, modelTurns, screenshots === 'allowed')
       modelTurns += 1
@@ -296,15 +328,14 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     while (this.#screenshots.size > MAX_CACHED_SCREENSHOT_CALLS) this.#screenshots.delete(this.#screenshots.keys().next().value!)
   }
 
-  async #brief(
+  #briefText(
     input: PlannerInput,
     scene: Scene,
     refs: ElementRefs,
     toolContext: AgentToolContext,
-    context: AgentPlannerAttemptContext | undefined,
-    model: MultiStepModel
-  ): Promise<LlmTranscriptMessage> {
-    const text = multiStepTurnBrief({
+    context: AgentPlannerAttemptContext | undefined
+  ): string {
+    return multiStepTurnBrief({
       request: input.request,
       scene,
       refs,
@@ -312,6 +343,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       projectContext: context?.projectContext ?? null,
       generation: toolContext.generation
     })
+  }
+
+  /** The first message of the transcript: the brief or checkpoint text with the request's attached images. */
+  async #opening(text: string, input: PlannerInput, model: MultiStepModel): Promise<LlmTranscriptMessage> {
     const attachments: { readonly assetId: string; readonly image: LlmImage; readonly bytes: number }[] = []
     if (model.protocol.capabilities.vision && this.#options.readAttachment !== undefined) {
       for (const attachment of input.request.attachments.filter((candidate) => candidate.kind === 'asset').slice(0, 4)) {
