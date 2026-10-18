@@ -5,6 +5,9 @@ import {
   DEFAULT_AUTO_BUDGET,
   DEFAULT_COLLABORATION_BUDGET,
   DEFAULT_REVIEW_BUDGET,
+  STEPWISE_AUTO_BUDGET,
+  STEPWISE_COLLABORATION_BUDGET,
+  STEPWISE_REVIEW_BUDGET,
   normalizeAgentTaskInput,
   isTerminalAgentTurnStatus,
   plannerStepSchema,
@@ -500,11 +503,15 @@ function reviewDecisionFor(tool: AgentToolPlan): AgentDecisionProposal {
   }
 }
 
-function hasReviewApproval(items: readonly AgentItem[], toolIndex: number, barrierOrdinal: number): boolean {
+/**
+ * A stepwise planner numbers every call 0 within its own one-tool plan, so its
+ * approvals are matched to that plan as well as to the index.
+ */
+function hasReviewApproval(items: readonly AgentItem[], toolIndex: number, barrierOrdinal: number, planItemId: string | null = null): boolean {
   return items.some((item) => {
     if (item.type !== 'decision' || item.status !== 'completed' || item.ordinal <= barrierOrdinal) return false
     const stored = payload<StoredDecisionPayload>(item)
-    return stored.toolIndex === toolIndex && stored.optionId === 'apply_once'
+    return stored.toolIndex === toolIndex && stored.optionId === 'apply_once' && (planItemId === null || stored.planItemId === planItemId)
   })
 }
 
@@ -512,7 +519,8 @@ function executionApprovalId(
   items: readonly AgentItem[],
   toolIndex: number,
   planItemId: string,
-  barrierOrdinal: number
+  barrierOrdinal: number,
+  stepwise = false
 ): string | null {
   return items
     .filter((item) => item.type === 'decision' && item.status === 'completed' && item.ordinal > barrierOrdinal)
@@ -520,6 +528,7 @@ function executionApprovalId(
     .find((item) => {
       const stored = payload<StoredDecisionPayload>(item)
       const reviewApproval = stored.toolIndex === toolIndex && stored.optionId === 'apply_once'
+        && (!stepwise || stored.planItemId === planItemId)
       const generationApproval = stored.planItemId === planItemId
         && stored.proposal.kind === 'generation_confirmation'
         && stored.optionId === 'generate'
@@ -634,7 +643,7 @@ export class PersistentAgentLoop {
     this.#projection = options.projection ?? {}
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
     this.#budgetOverride = options.budget ?? null
-    this.#budget = options.budget ?? DEFAULT_AUTO_BUDGET
+    this.#budget = options.budget ?? (options.planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
     this.#permissionProfileId = options.permissionProfileId ?? ownerFullPermissionProfile().id
     this.#providerIds = [...(options.providerIds ?? ['image-provider'])]
     this.#now = options.now ?? (() => new Date().toISOString())
@@ -822,7 +831,8 @@ export class PersistentAgentLoop {
     if (decision === undefined) throw new Error('Agent decision item is no longer waiting.')
     const decisionPayload = payload<StoredDecisionPayload>(decision)
     if (!decisionPayload.proposal.options.some((option) => option.id === optionId)) throw new Error('Decision option does not exist.')
-    if (decisionPayload.proposal.kind === 'generation_confirmation' && optionId === 'keep_canvas') {
+    // A stepwise planner hears the refusal as the call's result and carries on.
+    if (decisionPayload.proposal.kind === 'generation_confirmation' && optionId === 'keep_canvas' && this.#planner.stepwise !== true) {
       await this.#repository.transitionItem(decision.id, 'completed', { ...decisionPayload, optionId })
       const legacyRunId = turn.inputMessageId ?? ''
       await this.#projection.onDecisionResolved?.({ legacyRunId, proposal: decisionPayload.proposal, optionId })
@@ -1149,12 +1159,12 @@ export class PersistentAgentLoop {
           return
         }
       }
-      const activePlanItem = [...items]
+      let activePlanItem = [...items]
         .reverse()
         .find((item) => item.type === 'plan' && item.status === 'completed'
           && item.ordinal > merged.barrierOrdinal && payload<StoredPlanItem>(item).plan !== null)
-      const activePlan = activePlanItem === undefined ? null : payload<StoredPlanItem>(activePlanItem).plan
-      const results = items.filter((item) => item.type === 'tool_result' && item.status === 'completed')
+      let activePlan = activePlanItem === undefined ? null : payload<StoredPlanItem>(activePlanItem).plan
+      let results = items.filter((item) => item.type === 'tool_result' && item.status === 'completed')
         .map((item) => payload<StoredToolResult>(item))
         .filter((result) => activePlanItem !== undefined && result.planItemId === activePlanItem.id)
       const cumulativeGenerationResults = items.filter((item) => item.type === 'tool_result' && item.status === 'completed')
@@ -1233,7 +1243,8 @@ export class PersistentAgentLoop {
             items,
             stepIndex: stepCount,
             activePlan,
-            nextToolIndex: results.length
+            nextToolIndex: results.length,
+            budget: turnBudget
           }, controller.signal, {
             attempt: attemptNumber,
             requestCorrelationId,
@@ -1384,8 +1395,19 @@ export class PersistentAgentLoop {
           requestCorrelationId
         } satisfies StoredPlanItem
       })
+      const stepwise = this.#planner.stepwise === true
+      // A stepwise planner's one-tool plans are steps, not replacement plans; the
+      // activity list grows per call instead.
+      const projectionIndex = stepwise ? items.filter((item) => item.type === 'tool_call').length : null
+      if (stepwise && step.kind === 'tool' && step.plan !== null) {
+        // Each new call starts its own one-tool plan: approvals, results and the
+        // expected revision belong to it, not to the previous call's plan.
+        activePlanItem = planItem
+        activePlan = step.plan
+        results = []
+      }
       if (step.kind === 'tool' && step.plan !== null) {
-        await this.#projection.onPlanReady?.({ turn, legacyRunId, request: plannerRequest, plan: step.plan })
+        if (!stepwise) await this.#projection.onPlanReady?.({ turn, legacyRunId, request: plannerRequest, plan: step.plan })
         const decision = decisionFor(plannerRequest, step.plan, this.#generationPolicy)
         if (decision !== null) {
           const decisionItem = await this.#repository.appendItem(turnId, {
@@ -1431,7 +1453,7 @@ export class PersistentAgentLoop {
       }
       if (step.kind === 'tool') {
         const approvalPlanItemId = activePlanItem?.id ?? planItem.id
-        if (activeGoal?.mode === 'review' && !hasReviewApproval(items, step.toolIndex, merged.barrierOrdinal)) {
+        if (activeGoal?.mode === 'review' && !hasReviewApproval(items, step.toolIndex, merged.barrierOrdinal, stepwise ? approvalPlanItemId : null)) {
           const proposal = reviewDecisionFor(step.call)
           const decisionItem = await this.#repository.appendItem(turnId, {
             type: 'decision',
@@ -1463,6 +1485,19 @@ export class PersistentAgentLoop {
         return
       }
       if (step.kind === 'complete') {
+        if (stepwise) {
+          // The receipt covers every call of the turn, not only the last one-tool plan.
+          const executed = items.filter((item) => item.type === 'tool_result' && item.status === 'completed' && item.ordinal > merged.barrierOrdinal)
+            .map((item) => payload<StoredToolResult>(item))
+          const turnPlan: AgentPlan = {
+            summary: step.assessment.summary.slice(0, 500),
+            response: step.assessment.summary,
+            nextAction: step.assessment.nextAction,
+            tools: executed.map((result) => result.tool)
+          }
+          await this.#complete(turn, legacyRunId, turnPlan, executed.map((result, index) => ({ ...result.outcome, toolIndex: index })), step.assessment, plannerRequest)
+          return
+        }
         await this.#complete(turn, legacyRunId, activePlan, results.map((result) => result.outcome), step.assessment, plannerRequest)
         return
       }
@@ -1476,7 +1511,7 @@ export class PersistentAgentLoop {
         toolCalls: 1,
         sceneWriteBatches: isSceneMutationTool(step.call) && turn.taskRelation !== 'temporary_try' ? 1 : 0
       })
-      await this.#projection.onToolStarted?.({ legacyRunId, toolIndex: step.toolIndex, tool: step.call })
+      await this.#projection.onToolStarted?.({ legacyRunId, toolIndex: projectionIndex ?? step.toolIndex, tool: step.call })
       await this.#publish(turn.threadId)
       let outcome: AgentToolOutcome
       const toolContext: AgentLoopToolContext = {
@@ -1496,7 +1531,8 @@ export class PersistentAgentLoop {
           items,
           step.toolIndex,
           activePlanItem?.id ?? planItem.id,
-          merged.barrierOrdinal
+          merged.barrierOrdinal,
+          stepwise
         ),
         sceneWritesBefore: results.filter((result) => result.outcome.ok && result.outcome.batchId !== null && isSceneMutationTool(result.tool)).length,
         expectedSceneRevision: activePlanItem === undefined
@@ -1665,7 +1701,7 @@ export class PersistentAgentLoop {
           type: 'tool_result', status: 'failed', payloadVersion: 1,
           payload: { planItemId: activePlanItem?.id ?? planItem.id, toolCallItemId: callItem.id, tool: step.call, outcome } satisfies StoredToolResult
         })
-        await this.#projection.onToolFinished?.({ legacyRunId, outcome })
+        await this.#projection.onToolFinished?.({ legacyRunId, outcome: projectionIndex === null ? outcome : { ...outcome, toolIndex: projectionIndex } })
         const failedTurn = await this.#repository.getTurn(turnId)
         const modelRepairCount = recoveryCount(items, 'model_can_repair')
         const sameFingerprintCount = items.filter((item) => {
@@ -1707,7 +1743,7 @@ export class PersistentAgentLoop {
         type: 'tool_result', status: outcome.ok ? 'completed' : 'failed', payloadVersion: 1,
         payload: { planItemId: resultPlanItemId, toolCallItemId: callItem.id, tool: step.call, outcome } satisfies StoredToolResult
       })
-      await this.#projection.onToolFinished?.({ legacyRunId, outcome })
+      await this.#projection.onToolFinished?.({ legacyRunId, outcome: projectionIndex === null ? outcome : { ...outcome, toolIndex: projectionIndex } })
       if (outcome.ok && outcome.batchId !== null && isSceneMutationTool(step.call)) {
         const refreshed = await this.#refreshRequest(plannerRequest)
         await this.#repository.appendItem(turnId, {
@@ -1979,11 +2015,12 @@ export class PersistentAgentLoop {
   }
 
   async #createGoal(threadId: string, request: AgentRequest, mode: AgentMode): Promise<AgentGoalContract> {
+    const stepwise = this.#planner.stepwise === true
     const budget = this.#budgetOverride ?? (mode === 'auto'
-      ? DEFAULT_AUTO_BUDGET
+      ? stepwise ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET
       : mode === 'review'
-        ? DEFAULT_REVIEW_BUDGET
-        : DEFAULT_COLLABORATION_BUDGET)
+        ? stepwise ? STEPWISE_REVIEW_BUDGET : DEFAULT_REVIEW_BUDGET
+        : stepwise ? STEPWISE_COLLABORATION_BUDGET : DEFAULT_COLLABORATION_BUDGET)
     return this.#repository.createGoal(threadId, {
       objective: request.text,
       completionDefinition: ['所需设计与生成操作有可核对回执', '外发、费用与项目写入符合当前 Owner 权限和预算'],

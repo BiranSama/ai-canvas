@@ -68,6 +68,7 @@ import {
   OutboundContextService
 } from '../agent'
 import type { AgentLoopToolContext } from '../agent'
+import { createMultiStepPlannerAdapter, selectedAgentEngine } from '../agent/multi-step/runtime-adapter'
 import { projectWorkContextSchema, type ProjectWorkContext } from '../../shared/project-work-context'
 import { blendModeCommandViolation, compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../agent/atomic-scene-tools'
 import { compileDesignDirectionSelection } from '../agent/design-direction-selection'
@@ -155,6 +156,8 @@ export interface GenerationRuntimeOptions {
   readonly projectLibraryDirectory?: string
   /** Replaces the operating-system vault; used by the offline/real-model eval harness only. */
   readonly secretVault?: ProviderSecretVault
+  /** Overrides the AI_CANVAS_AGENT_ENGINE developer switch. */
+  readonly agentEngine?: 'plan-once' | 'multi-step'
 }
 
 type ImageProviderConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -305,6 +308,7 @@ export class GenerationRuntime {
   readonly #providerSettings: ProviderSettingsService
   readonly #providerConfig: FileProviderConfigStore
   readonly #secrets: ProviderSecretVault
+  readonly #agentEngine: 'plan-once' | 'multi-step'
   readonly #executionBindings: ImageExecutionBindings
   readonly #providerUsage: ProviderUsageLedger
   readonly #providerConnection: ProviderConnectionValidator
@@ -344,8 +348,10 @@ export class GenerationRuntime {
     providerSettings: ProviderSettingsService,
     providerConfig: FileProviderConfigStore,
     secrets: ProviderSecretVault,
-    providerUsage: ProviderUsageLedger
+    providerUsage: ProviderUsageLedger,
+    agentEngine: 'plan-once' | 'multi-step'
   ) {
+    this.#agentEngine = agentEngine
     this.#userDataDirectory = userDataDirectory
     this.#projectLibraryDirectory = projectLibraryDirectory
     this.#librarySettings = new LibrarySettingsStore(
@@ -410,7 +416,8 @@ export class GenerationRuntime {
       providerSettings,
       providerConfig,
       secrets,
-      providerUsage
+      providerUsage,
+      options.agentEngine ?? selectedAgentEngine()
     )
     await runtime.#refreshConfiguredImageProvider()
     await runtime.#activate(project, openedRecent)
@@ -625,10 +632,20 @@ export class GenerationRuntime {
         imageGenerationAvailable
       })
     })
+    const multiStep = this.#agentEngine === 'multi-step'
+      ? createMultiStepPlannerAdapter({
+          secrets: this.#secrets,
+          config: this.#providerConfig,
+          authorization: this.#providerUsage,
+          assets: project.workspace.assets,
+          scene: () => sceneService.state().scene
+        })
+      : null
     const agent = new AgentRuntime({
       projectId: project.workspace.metadata.id,
       repository: conversationRepository,
       planner,
+      ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: 40 }),
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
       logger: this.#diagnosticLog,
       activityLedger,
