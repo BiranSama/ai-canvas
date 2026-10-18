@@ -27,9 +27,13 @@ export interface ModelOutboundRequest {
   readonly textBytes: number
   readonly imageAssetIds: readonly string[]
   readonly imageBytes: number
+  /** The person agreed in this turn to send images to the model. */
+  readonly imagesApproved?: boolean
 }
 
 export interface ModelOutboundGate {
+  /** The policy wants a person to approve images before they go to the model. */
+  readonly imageReview?: boolean
   /** Throws when the policy blocks the call. Images may be withheld while the text still goes. */
   authorize(request: ModelOutboundRequest): Promise<{ readonly recordId: string; readonly imagesAllowed: boolean }>
   sent(recordId: string): Promise<void>

@@ -50,6 +50,11 @@ export interface AgentToolContext {
   readonly looker?: CanvasLooker | null
   /** False when the text model cannot see images; look then describes the layout in words. */
   readonly vision?: boolean
+  /**
+   * Whether screenshots may go to the model in this turn: always, only after
+   * asking the person once (per-image review policy), or not at all.
+   */
+  readonly screenshots?: 'allowed' | 'ask' | 'declined'
   readonly manuals?: ManualLibrary | null
   readonly readAsset?: ((assetId: string) => Promise<LlmImage>) | null
 }

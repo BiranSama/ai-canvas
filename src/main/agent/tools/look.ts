@@ -33,6 +33,9 @@ function describeLayout(context: AgentToolContext): AgentToolResult {
   }
 }
 
+/** Asked once per turn under the per-image review policy, before the first screenshot leaves. */
+export const SCREENSHOT_QUESTION = '要把画面截图发给文字模型吗？截图会发往外部服务，这一轮内不再重复询问。'
+
 export const lookTool = defineTool({
   name: 'look',
   title: '看画面',
@@ -46,6 +49,13 @@ export const lookTool = defineTool({
   describe: (args) => args.mode === 'reference' ? '查看生图参考图' : args.region === undefined ? '查看画面' : '查看画面局部',
   async prepare(args, context) {
     if (context.vision === false) return answer(describeLayout(context))
+    if (context.screenshots === 'ask') {
+      return { kind: 'ask', question: SCREENSHOT_QUESTION, options: ['发送截图', '不发送，只用文字描述'], recommended: 0 }
+    }
+    if (context.screenshots === 'declined') {
+      const described = describeLayout(context)
+      return answer({ ...described, summary: '用户这一轮不发送截图，这是画面的文字描述。' })
+    }
     if (context.looker === undefined || context.looker === null) return rejected('当前无法渲染画面。', '用 inspect 读取对象属性代替。')
     const image = await context.looker.look(context.scene, { region: args.region ?? null, mode: args.mode })
     return answer({

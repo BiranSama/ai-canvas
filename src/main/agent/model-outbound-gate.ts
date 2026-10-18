@@ -48,9 +48,10 @@ export function createModelOutboundGate(input: {
     requestCorrelationId: input.requestCorrelationId,
     providerLocal: isLocalModelEndpoint(request.endpoint),
     permissionAllowsExternal: true,
-    imageReviewApproved: false
+    imageReviewApproved: withImages && request.imagesApproved === true
   })
   return {
+    imageReview: input.manifest.outboundPolicy === 'review_each_image',
     async authorize(request) {
       const record = await prepare(request, true)
       if (record.status !== 'blocked') return { recordId: record.id, imagesAllowed: true }

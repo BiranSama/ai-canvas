@@ -11,6 +11,7 @@ import type { LlmTurnProtocol } from '../llm/turn-protocol'
 import type { AgentPlannerAttemptContext } from '../planner'
 import type { PlannerAdapter, PlannerInput, PlannerStepResult } from '../planner-adapter'
 import { availableAgentTools, llmToolDefinitions, prepareAgentToolCall } from '../tools/catalogue'
+import { SCREENSHOT_QUESTION } from '../tools/look'
 import { ElementRefs } from '../tools/refs'
 import { formatToolResult, type AgentToolContext, type AgentToolResult, type AgentToolStep, type CanvasLooker, type ExecutedTool, type GenerationResultEntry, type ManualLibrary } from '../tools/types'
 import { MULTI_STEP_PROMPT_VERSION, multiStepSystemPrompt, multiStepTurnBrief } from './prompt'
@@ -122,6 +123,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       if (images.length > 0) this.#cacheScreenshots(result.callId, images)
     }
     const model = await this.#options.model()
+    const screenshots = screenshotPermission(items, context)
     const generated = (input.request.generationResults ?? []) as readonly GenerationResultEntry[]
     for (const result of this.#settleEmittedCalls(items, traces, scene, generated)) record(result)
 
@@ -136,6 +138,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       userText: input.request.text,
       looker: this.#options.looker ?? null,
       vision: model.protocol.capabilities.vision,
+      screenshots,
       manuals: this.#options.manuals ?? null,
       readAsset: this.#options.readAsset ?? null
     }
@@ -205,7 +208,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         messages: transcript,
         tools: [...llmToolDefinitions(tools)],
         maxOutputTokens: model.maxOutputTokens
-      }, signal, context, modelTurns)
+      }, signal, context, modelTurns, screenshots === 'allowed')
       modelTurns += 1
       if (turn.usage !== null) pass.usage.push(turn.usage)
       if (turn.stopReason === 'content_filter' || turn.stopReason === 'refusal') {
@@ -258,7 +261,8 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       if (emitted === null || known.has(emitted.callId)) continue
       const decision = items.find((candidate) => candidate.type === 'decision' && candidate.ordinal > item.ordinal)
       if ((item.payload as { readonly step?: { readonly kind?: string } }).step?.kind === 'decision') {
-        if (decision?.status !== 'completed') continue
+        // The screenshot question is answered by running look again under the person's choice.
+        if (decision?.status !== 'completed' || emitted.name === 'look') continue
         const stored = payloadOf<StoredDecisionPayload>(decision)
         const label = stored.proposal?.options?.find((option) => option.id === stored.optionId)?.label ?? stored.optionId ?? '未选择'
         settled.push(toLlmResult(emitted.callId, emitted.name, { ok: true, summary: `用户选择：${label}` }))
@@ -327,7 +331,8 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     request: Parameters<LlmTurnProtocol['buildTurnRequest']>[0],
     signal: AbortSignal,
     context: AgentPlannerAttemptContext | undefined,
-    previousCalls: number
+    previousCalls: number,
+    imagesApproved: boolean
   ): Promise<LlmAssistantTurn> {
     const images = request.messages.flatMap((message) => message.role === 'user'
       ? message.parts.filter((part) => part.type === 'image')
@@ -342,7 +347,8 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           textBytes: Buffer.byteLength(JSON.stringify({ system: request.system, messages: request.messages.map(withoutImages) }), 'utf8'),
           // Images without a project asset (none yet) are still counted, under a one-off ID.
           imageAssetIds: images.map((part) => this.#imageIds.get(part.image) ?? randomUUID()),
-          imageBytes: images.reduce((total, part) => total + Math.floor(part.image.base64.length * 3 / 4), 0)
+          imageBytes: images.reduce((total, part) => total + Math.floor(part.image.base64.length * 3 / 4), 0),
+          imagesApproved
         })
     const messages = outbound === null || outbound.imagesAllowed ? request.messages : request.messages.map(withoutImages)
     const now = Date.now()
@@ -404,6 +410,15 @@ function withJobResults(result: AgentToolResult, outcome: AgentToolOutcome, gene
     ? '生成任务还没有返回成图。'
     : `生成完成，新成图：${produced.join('、')}。可以用 view_result 查看，用 place_result 放到画布上。`
   return { ...result, details: [...(result.details ?? []), line] }
+}
+
+/** Under the per-image review policy, screenshots wait for one answer per turn. */
+function screenshotPermission(items: readonly AgentItem[], context: AgentPlannerAttemptContext | undefined): 'allowed' | 'ask' | 'declined' {
+  if (context?.outbound?.imageReview !== true) return 'allowed'
+  const answer = [...items].reverse().find((item) => item.type === 'decision' && item.status === 'completed'
+    && payloadOf<StoredDecisionPayload & { readonly proposal?: { readonly title?: string } }>(item).proposal?.title === SCREENSHOT_QUESTION)
+  if (answer === undefined) return 'ask'
+  return payloadOf<StoredDecisionPayload>(answer).optionId === 'option-1' ? 'allowed' : 'declined'
 }
 
 function withoutImages(message: LlmTranscriptMessage): LlmTranscriptMessage {
