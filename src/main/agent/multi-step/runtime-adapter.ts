@@ -6,6 +6,7 @@ import type { ProviderUsageReservation } from '../../security/provider-usage-led
 import type { AssetMetadata } from '../../storage/project-repository'
 import { createConfiguredTurnProtocol } from '../llm-protocol-factory'
 import type { LlmImage } from '../llm/transcript'
+import { BUILT_IN_MANUALS } from '../manuals'
 import { MultiStepPlannerAdapter, type MultiStepModel } from './multi-step-planner'
 import { SceneLooker } from './scene-looker'
 
@@ -51,6 +52,7 @@ export function createMultiStepPlannerAdapter(options: {
   }
   return new MultiStepPlannerAdapter({
     scene: options.scene,
+    manuals: BUILT_IN_MANUALS,
     looker: new SceneLooker(async (assetId) => {
       try {
         return (await options.assets.resolveAsset(assetId)).filePath

@@ -144,7 +144,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         ...step,
         trace: {
           version: 1,
-          promptVersion: MULTI_STEP_PROMPT_VERSION,
+          promptVersion: this.#options.manuals?.version === undefined ? MULTI_STEP_PROMPT_VERSION : `${MULTI_STEP_PROMPT_VERSION}+${this.#options.manuals.version}`,
           refs: refs.toJSON(),
           assistants: pass.assistants.map((assistant) => ({ parts: [...assistant.parts], native: assistant.native })),
           results: pass.results,

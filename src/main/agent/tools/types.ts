@@ -25,6 +25,8 @@ export interface CanvasLooker {
 
 /** Topic manuals the model can load on demand (work package 6). */
 export interface ManualLibrary {
+  /** Recorded with each step, so results can be tied to the manuals the model read. */
+  readonly version?: string
   list(): readonly { readonly id: string; readonly title: string; readonly purpose: string }[]
   load(id: string): string | null
 }

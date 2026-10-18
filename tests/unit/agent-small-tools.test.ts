@@ -193,3 +193,19 @@ describe('look', () => {
     expect(details).toContain('E1 和 E2 重叠约 100%')
   })
 })
+
+describe('load_manual', () => {
+  it('serves the built-in manuals on demand and names them in the system prompt', async () => {
+    const { BUILT_IN_MANUALS } = await import('../../src/main/agent/manuals')
+    const { multiStepSystemPrompt } = await import('../../src/main/agent/multi-step/prompt')
+    const harness = new Harness()
+    const context = { ...harness.context(), manuals: BUILT_IN_MANUALS }
+    expect(availableAgentTools(context).map((tool) => tool.name)).toContain('load_manual')
+    expect(multiStepSystemPrompt(BUILT_IN_MANUALS)).toContain('- chinese-typography：字体、字间距、行高、中英混排和竖排')
+    const loaded = await prepareAgentToolCall({ callId: 'm', name: 'load_manual', argumentsText: '', arguments: { topic: 'color' }, argumentsError: null }, context)
+    expect(loaded.step).toMatchObject({ kind: 'answer', result: { ok: true, summary: expect.stringContaining('# 配色') } })
+    expect(formatToolResult((loaded.step as { result: AgentToolResult }).result)).not.toContain('已截断')
+    const missing = await prepareAgentToolCall({ callId: 'n', name: 'load_manual', argumentsText: '', arguments: { topic: 'fonts' }, argumentsError: null }, context)
+    expect(missing.step).toMatchObject({ kind: 'answer', result: { ok: false, hint: expect.stringContaining('poster-layout') } })
+  })
+})
