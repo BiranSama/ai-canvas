@@ -193,6 +193,14 @@ export const AGENT_ERROR_RECIPES: Readonly<Record<string, AgentErrorRecipe>> = O
   PROVIDER_HTTP_ERROR: terminalProviderRecipe('PROVIDER_HTTP_ERROR', '供应商拒绝请求', '供应商返回了不能自动恢复的 HTTP 错误。', undefined, { defaultExternalState: 'known_failed' }),
   PROVIDER_CONTENT_FILTERED: terminalProviderRecipe('PROVIDER_CONTENT_FILTERED', '图片未通过内容审核', '图片服务拒绝了本次内容，没有返回图片。请检查创作内容和参考图。', ['ask_user', 'stop'], { defaultExternalState: 'known_failed', defaultRetryClass: 'user_action_required' }),
   PROVIDER_UPSTREAM_ERROR: terminalProviderRecipe('PROVIDER_UPSTREAM_ERROR', '供应商暂时不可用', '供应商返回了服务端错误；POST 不会自动重复提交。', undefined, { defaultExternalState: 'known_failed' }),
+  OUTBOUND_POLICY_BLOCKED: recipe('OUTBOUND_POLICY_BLOCKED', {
+    phase: 'validation', category: 'permission', defaultRetryClass: 'user_action_required', defaultExternalState: 'not_started',
+    publicTitle: '隐私设置阻止了外发',
+    publicExplanation: '项目的隐私设置不允许把这些内容发往外部模型，没有发出任何请求。手动编辑照常可用；需要 Agent 时可在隐私设置里调整。',
+    repairInstruction: null, replacementScope: 'none', includeAllowedToolSchemas: false, refreshSceneBeforeRepair: false,
+    allowedActions: ['ask_user', 'stop'], prohibitedRepairs: ['不得绕过隐私设置'],
+    maxAutomaticModelRepairs: 0, maxAutomaticLocalRetries: 0
+  }),
   PROVIDER_DESTINATION_DENIED: terminalProviderRecipe('PROVIDER_DESTINATION_DENIED', '请求目标被拒绝', '请求地址不在已保存供应商范围内。', undefined, { defaultExternalState: 'not_started' }),
   PROVIDER_RESPONSE_TOO_LARGE: terminalProviderRecipe('PROVIDER_RESPONSE_TOO_LARGE', '响应超过安全上限', '为保护本地资源，应用已停止读取过大的响应。'),
   TOOL_NOT_FOUND: modelRecipe('TOOL_NOT_FOUND', { category: 'scope', defaultExternalState: 'not_started' }),

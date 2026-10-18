@@ -15,6 +15,24 @@ export interface AgentPlannerAttemptContext {
   readonly observe?: (event: AgentObservableEvent, delivery?: { readonly checkpoint: boolean }) => void | Promise<void>
   /** Rules, memory and conversation continuity the outbound policy allows the model to see. */
   readonly projectContext?: PlannerProjectContext | null
+  /** Applies the project's outbound policy to a model call before anything leaves the machine. */
+  readonly outbound?: ModelOutboundGate | null
+}
+
+export interface ModelOutboundRequest {
+  readonly providerId: string
+  readonly model: string
+  readonly endpoint: string
+  readonly dataTypes: readonly string[]
+  readonly textBytes: number
+  readonly imageAssetIds: readonly string[]
+  readonly imageBytes: number
+}
+
+export interface ModelOutboundGate {
+  /** Throws when the policy blocks the call. Images may be withheld while the text still goes. */
+  authorize(request: ModelOutboundRequest): Promise<{ readonly recordId: string; readonly imagesAllowed: boolean }>
+  sent(recordId: string): Promise<void>
 }
 
 export interface AgentPlanner {

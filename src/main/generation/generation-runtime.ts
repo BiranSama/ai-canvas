@@ -82,7 +82,7 @@ import { ArkHttpClient } from '../security/ark-http-client'
 import { KrillHttpTransport } from '../security/krill-http-transport'
 import { ProviderUsageLedger } from '../security/provider-usage-ledger'
 import { ProviderConnectionValidator } from '../security/provider-connection-validator'
-import { DEFAULT_PROVIDER_EXECUTION_POLICY, resolveImageProtocolEndpoint } from '../../shared/provider-settings'
+import { DEFAULT_PROVIDER_EXECUTION_POLICY, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
@@ -614,6 +614,7 @@ export class GenerationRuntime {
         transport: llm.transport,
         protocolId: llm.protocol,
         model: llm.defaultModel,
+        endpoint: resolveLlmEndpoint(llm),
         maxOutputTokens: llm.maxOutputTokens,
         llmProviderLabel: llm.label,
         imageProviderId: 'image-provider',

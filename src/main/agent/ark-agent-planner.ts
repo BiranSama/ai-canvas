@@ -348,6 +348,7 @@ export class ArkAgentPlanner implements AgentPlanner {
   readonly #protocolId: LlmProtocol
   readonly #model: string
   readonly #transport: LlmTransportSettings
+  readonly #endpoint: string
 
   constructor(options: {
     readonly protocol: LlmProtocolAdapter
@@ -363,8 +364,11 @@ export class ArkAgentPlanner implements AgentPlanner {
     readonly protocolId?: LlmProtocol
     readonly model?: string
     readonly transport?: LlmTransportSettings
+    /** Where requests go; decides whether the outbound policy treats the model as local. */
+    readonly endpoint?: string
   }) {
     this.#protocol = options.protocol
+    this.#endpoint = options.endpoint ?? ''
     this.#http = options.http
     this.#assets = options.assets
     this.#timeoutMs = options.timeoutMs
@@ -391,7 +395,7 @@ export class ArkAgentPlanner implements AgentPlanner {
     context?: AgentPlannerAttemptContext
   ): Promise<AgentPlan> {
     const request = agentRequestSchema.parse(requestValue)
-    const images = await this.#readAttachments(request)
+    const attachments = this.#protocol.capabilities.vision ? await this.#readAttachments(request) : []
     const transportMode = this.#transport.mode === 'buffered'
       ? 'buffered'
       : this.#transport.mode === 'stream'
@@ -423,7 +427,33 @@ export class ArkAgentPlanner implements AgentPlanner {
     ): Promise<void> => {
       try { await context?.observe?.(event, delivery) } catch { /* observability cannot change Provider semantics */ }
     }
+    const systemContent = systemPrompt(this.#imageProviderId, this.#imageModel, this.#maxImages, this.#imageGenerationAvailable)
+    const userContent = `请为下面的 AI Canvas 状态提交结构化计划：\n${boundedSceneContext(request)}${projectContextSection(context?.projectContext)}${recoveryInstruction(recovery)}`
+    const outbound = context?.outbound === undefined || context.outbound === null
+      ? null
+      : await context.outbound.authorize({
+          providerId: 'openai-compatible-llm',
+          model: this.#model,
+          endpoint: this.#endpoint,
+          dataTypes: [
+            'user_text',
+            'scene_summary',
+            ...(context.projectContext === undefined || context.projectContext === null ? [] : ['project_context']),
+            ...(attachments.length > 0 ? ['reference_image'] : [])
+          ],
+          textBytes: Buffer.byteLength(systemContent, 'utf8') + Buffer.byteLength(userContent, 'utf8'),
+          imageAssetIds: attachments.map((attachment) => attachment.assetId),
+          imageBytes: attachments.reduce((total, attachment) => total + attachment.bytes, 0)
+        })
+    const images = outbound === null || outbound.imagesAllowed
+      ? attachments.map(({ mimeType, base64 }) => ({ mimeType, base64 }))
+      : []
+    let outboundSent = false
     const observeAttempt = async (observation: ArkLlmTransportObservation): Promise<void> => {
+      if (observation.phase === 'connecting' && outbound !== null && !outboundSent) {
+        outboundSent = true
+        try { await context?.outbound?.sent(outbound.recordId) } catch { /* the ledger entry stays prepared */ }
+      }
       await observePlannerEvent({
         type: `provider.attempt.${observation.phase}`,
         payload: {
@@ -451,8 +481,8 @@ export class ArkAgentPlanner implements AgentPlanner {
     }
     const protocolRequest = this.#protocol.buildRequest({
       messages: [
-        { role: 'system', content: systemPrompt(this.#imageProviderId, this.#imageModel, this.#maxImages, this.#imageGenerationAvailable) },
-        { role: 'user', content: `请为下面的 AI Canvas 状态提交结构化计划：\n${boundedSceneContext(request)}${projectContextSection(context?.projectContext)}${recoveryInstruction(recovery)}` }
+        { role: 'system', content: systemContent },
+        { role: 'user', content: userContent }
       ],
       images,
       tools: [{
@@ -561,21 +591,23 @@ export class ArkAgentPlanner implements AgentPlanner {
   }
 
   async #readAttachments(request: AgentRequest): Promise<{
+    assetId: string
     mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
     base64: string
+    bytes: number
   }[]> {
     const assetIds = [...new Set(request.attachments
       .filter((attachment) => attachment.kind === 'asset')
       .map((attachment) => attachment.id))]
       .slice(0, MAX_ATTACHMENT_COUNT)
-    const images: { mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; base64: string }[] = []
+    const images: { assetId: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; base64: string; bytes: number }[] = []
     let total = 0
     for (const assetId of assetIds) {
       const resolved = await this.#assets.resolveAsset(assetId)
       const bytes = await readFile(resolved.filePath)
       if (bytes.length > MAX_ATTACHMENT_BYTES || total + bytes.length > MAX_TOTAL_ATTACHMENT_BYTES) continue
       total += bytes.length
-      images.push({ mimeType: mimeFor(resolved.asset.format), base64: bytes.toString('base64') })
+      images.push({ assetId, mimeType: mimeFor(resolved.asset.format), base64: bytes.toString('base64'), bytes: bytes.length })
     }
     return images
   }

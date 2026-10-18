@@ -43,6 +43,8 @@ import {
 import type { PlannerAdapter } from './planner-adapter'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
 import { createAgentFailureEnvelope } from './agent-failure'
+import { createModelOutboundGate } from './model-outbound-gate'
+import { OutboundContextService } from './outbound-context-service'
 import type { AgentObservableEvent, AgentRecoveryLifecycleEventV1 } from '../../shared/agent-observability'
 
 function surfacedFailureCode(error: unknown, fallback: string): string {
@@ -1237,7 +1239,16 @@ export class PersistentAgentLoop {
             requestCorrelationId,
             deadlineAt: harnessDeadlineAt,
             deadlineCode: 'BUDGET_WALL_TIME',
-            observe: observePlanner
+            observe: observePlanner,
+            outbound: contextManifest === null || this.#contextRepository === null
+              ? null
+              : createModelOutboundGate({
+                  service: new OutboundContextService(this.#contextRepository),
+                  manifest: contextManifest,
+                  turn,
+                  projectId: this.#projectId,
+                  requestCorrelationId
+                })
           }),
           new Promise<never>((_resolve, reject) => {
             deadlineTimer = setTimeout(() => {
