@@ -121,7 +121,7 @@ import { GenerationWorkflowRepository } from './generation-workflow-repository'
 import { GenerationProfileRegistry } from './generation-profiles'
 import { GenerationQueue } from './generation-queue'
 import { ArkSeedreamImageProvider } from './ark-seedream-provider'
-import { ARK_SEEDREAM_CAPABILITIES, ArkSeedreamProtocol } from './ark-seedream-protocol'
+import { ArkSeedreamProtocol, seedreamCapabilitiesFor } from './ark-seedream-protocol'
 import { KrillImageProvider } from './krill-image-provider'
 import { OPENAI_IMAGES_CAPABILITIES, OpenAiImagesProtocol } from './openai-images-protocol'
 import { OpenAiImagesProvider } from './openai-images-provider'
@@ -496,7 +496,7 @@ export class GenerationRuntime {
       return provider
     }
 
-    const capabilities = configuredImageCapabilities(image, ARK_SEEDREAM_CAPABILITIES, executionPolicy)
+    const capabilities = configuredImageCapabilities(image, seedreamCapabilitiesFor(image.defaultModel), executionPolicy)
     const provider = new ArkSeedreamImageProvider({
       label: image.label,
       capabilities,
