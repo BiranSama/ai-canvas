@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import type { AgentModelEvalReport, AgentModelEvalRunResult } from '../../../shared/agent-eval'
 import type { AgentEvalCase } from './case-schema'
 import { EVAL_MOCK_IMAGE_BASE_URL, replayLlmProviderConfig, type EvalModelConfig } from './config'
@@ -153,7 +153,8 @@ export async function runAgentEval(options: AgentEvalRunOptions): Promise<AgentE
       if (collector !== null && options.outputDirectory !== null) {
         const path = join(options.outputDirectory, 'recordings', engine.descriptor.id, evalCase.id, `run-${run}.json`)
         await writeRecording(path, collector.build())
-        recordingPath = relative(options.outputDirectory, path)
+        // Reports name the recording portably; it is copied between machines into tests/agent-eval/recordings.
+        recordingPath = relative(options.outputDirectory, path).split(sep).join('/')
       }
       if (replay !== null && options.mode.kind === 'replay' && options.mode.refresh !== undefined && observation !== null) {
         await options.mode.refresh({ ...replay.refreshed(), engine: { id: engine.descriptor.id, version: engine.descriptor.version } })

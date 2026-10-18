@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createScene, ELEMENT_SCHEMA_VERSION, sceneElementSchema, type Scene, type SceneElement } from '../../src/domain'
@@ -72,7 +72,7 @@ describe('eval model configuration', () => {
 
   it('defaults to three runs per case and validates the run settings', () => {
     expect(loadEvalRunSettings({}, '/repo', new Date('2026-10-18T01:02:03.000Z'))).toMatchObject({
-      runs: 3, caseFilter: [], record: true, outputDirectory: '/repo/test-results/agent-eval/2026-10-18T01-02-03-000Z'
+      runs: 3, caseFilter: [], record: true, outputDirectory: resolve('/repo', 'test-results', 'agent-eval', '2026-10-18T01-02-03-000Z')
     })
     expect(loadEvalRunSettings({ [EVAL_ENV.runs]: '5', [EVAL_ENV.cases]: 'safety, local-edit-01', [EVAL_ENV.record]: '0' }, '/repo'))
       .toMatchObject({ runs: 5, caseFilter: ['safety', 'local-edit-01'], record: false })
