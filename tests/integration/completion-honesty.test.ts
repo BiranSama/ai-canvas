@@ -41,13 +41,14 @@ function withCriterion(plan: AgentPlan, criterion: string | readonly string[]): 
       ? command : { ...command, creativeContext: { ...command.creativeContext, brief } })
   }) }
 }
+// About 0.5 s locally; the Windows runner's first case of this file has needed more than 8 s.
 async function wait(runtime: GenerationRuntime) {
   await expect.poll(async () => {
     const state = await runtime.getAgentHarnessSnapshot()
     const latest = state.turns[0]
     if (latest === undefined || !isTerminalAgentTurnStatus(latest.status)) return false
     return (await runtime.getConversation()).runs.find((run) => run.id === latest.inputMessageId)?.status === 'completed'
-  }, { timeout: 8000 }).toBe(true)
+  }, { timeout: 15_000 }).toBe(true)
   return runtime.getAgentHarnessSnapshot()
 }
 async function createReviewed(h: Awaited<ReturnType<typeof fixture>>, criterion: string, text?: string) {
