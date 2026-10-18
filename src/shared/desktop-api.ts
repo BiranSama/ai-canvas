@@ -15,6 +15,7 @@ import type {
 import type { GenerationJob, GenerationProfileRequest, GenerationProfileSnapshot, GenerationRequest, ProviderCapabilities } from './generation'
 import type { CanvasGenerationInput, CanvasGenerationResult } from './reference'
 import type { CanvasEditInput, CanvasEditResult } from './edit'
+import type { AgentEngine, AgentEngineSetting } from './agent-engine'
 import type {
   GenerationResultFamily,
   GenerationResultFavoriteInput,
@@ -74,6 +75,8 @@ export const DESKTOP_CHANNELS = {
   canvasEdit: 'generation:edit',
   providerSettings: 'provider:settings',
   providerConnectionTest: 'provider:connection-test',
+  agentEngineGet: 'agent:engine-get',
+  agentEngineSet: 'agent:engine-set',
   providerConfigSet: 'provider:config-set',
   providerExecutionPolicySet: 'provider:execution-policy-set',
   providerSecretSet: 'provider:secret-set',
@@ -189,6 +192,8 @@ export interface DesktopApi {
   editFromCanvas(input: CanvasEditInput): Promise<CanvasEditResult>
   getProviderSettings(): Promise<ProviderSettingsSnapshot>
   validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult>
+  getAgentEngine(): Promise<AgentEngineSetting>
+  setAgentEngine(engine: AgentEngine): Promise<AgentEngineSetting>
   setProviderConfig(input: ProviderPublicConfig): Promise<ProviderSettingsSnapshot>
   setProviderExecutionPolicy(input: ProviderExecutionPolicy): Promise<ProviderSettingsSnapshot>
   setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot>

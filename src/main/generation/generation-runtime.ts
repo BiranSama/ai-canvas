@@ -68,7 +68,9 @@ import {
   OutboundContextService
 } from '../agent'
 import type { AgentLoopToolContext } from '../agent'
-import { createMultiStepPlannerAdapter, selectedAgentEngine } from '../agent/multi-step/runtime-adapter'
+import { createMultiStepPlannerAdapter, environmentAgentEngine } from '../agent/multi-step/runtime-adapter'
+import { AgentEngineSettingStore } from '../agent/multi-step/engine-setting-store'
+import type { AgentEngine, AgentEngineSetting } from '../../shared/agent-engine'
 import { projectWorkContextSchema, type ProjectWorkContext } from '../../shared/project-work-context'
 import { blendModeCommandViolation, compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../agent/atomic-scene-tools'
 import { compileDesignDirectionSelection } from '../agent/design-direction-selection'
@@ -156,8 +158,8 @@ export interface GenerationRuntimeOptions {
   readonly projectLibraryDirectory?: string
   /** Replaces the operating-system vault; used by the offline/real-model eval harness only. */
   readonly secretVault?: ProviderSecretVault
-  /** Overrides the AI_CANVAS_AGENT_ENGINE developer switch. */
-  readonly agentEngine?: 'plan-once' | 'multi-step'
+  /** Forces an agent engine over the owner's stored choice and AI_CANVAS_AGENT_ENGINE. */
+  readonly agentEngine?: AgentEngine
 }
 
 type ImageProviderConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -308,7 +310,10 @@ export class GenerationRuntime {
   readonly #providerSettings: ProviderSettingsService
   readonly #providerConfig: FileProviderConfigStore
   readonly #secrets: ProviderSecretVault
-  readonly #agentEngine: 'plan-once' | 'multi-step'
+  /** Forced by the environment or a runtime option; otherwise the stored choice applies. */
+  readonly #forcedAgentEngine: AgentEngine | null
+  readonly #agentEngineSetting: AgentEngineSettingStore
+  #activeAgentEngine: AgentEngine = 'plan-once'
   readonly #executionBindings: ImageExecutionBindings
   readonly #providerUsage: ProviderUsageLedger
   readonly #providerConnection: ProviderConnectionValidator
@@ -349,9 +354,10 @@ export class GenerationRuntime {
     providerConfig: FileProviderConfigStore,
     secrets: ProviderSecretVault,
     providerUsage: ProviderUsageLedger,
-    agentEngine: 'plan-once' | 'multi-step'
+    forcedAgentEngine: AgentEngine | null
   ) {
-    this.#agentEngine = agentEngine
+    this.#forcedAgentEngine = forcedAgentEngine
+    this.#agentEngineSetting = new AgentEngineSettingStore(join(userDataDirectory, 'state', 'agent-engine.json'))
     this.#userDataDirectory = userDataDirectory
     this.#projectLibraryDirectory = projectLibraryDirectory
     this.#librarySettings = new LibrarySettingsStore(
@@ -417,7 +423,7 @@ export class GenerationRuntime {
       providerConfig,
       secrets,
       providerUsage,
-      options.agentEngine ?? selectedAgentEngine()
+      options.agentEngine ?? environmentAgentEngine()
     )
     await runtime.#refreshConfiguredImageProvider()
     await runtime.#activate(project, openedRecent)
@@ -632,7 +638,8 @@ export class GenerationRuntime {
         imageGenerationAvailable
       })
     })
-    const multiStep = this.#agentEngine === 'multi-step'
+    this.#activeAgentEngine = this.#forcedAgentEngine ?? await this.#agentEngineSetting.get()
+    const multiStep = this.#activeAgentEngine === 'multi-step'
       ? createMultiStepPlannerAdapter({
           secrets: this.#secrets,
           config: this.#providerConfig,
@@ -1307,6 +1314,20 @@ export class GenerationRuntime {
 
   getProviderSettings(): Promise<ProviderSettingsSnapshot> {
     return this.#providerSettings.snapshot()
+  }
+
+  async getAgentEngine(): Promise<AgentEngineSetting> {
+    return {
+      selected: this.#forcedAgentEngine ?? await this.#agentEngineSetting.get(),
+      active: this.#activeAgentEngine,
+      forcedByEnvironment: this.#forcedAgentEngine !== null
+    }
+  }
+
+  /** Stored for the next project open; a running turn keeps the engine it started with. */
+  async setAgentEngine(engine: AgentEngine): Promise<AgentEngineSetting> {
+    await this.#agentEngineSetting.set(engine)
+    return this.getAgentEngine()
   }
 
   validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {

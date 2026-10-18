@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { appearanceSettingsUpdateSchema } from '../../shared/appearance-settings'
+import { agentEngineSchema } from '../../shared/agent-engine'
 export {
   generationResultFavoriteInputSchema,
   placeGenerationResultInputSchema
@@ -77,6 +78,7 @@ export const canvasGenerationSchema = canvasGenerationInputSchema
 export const canvasEditSchema = canvasEditInputSchema
 export const providerSecretSetSchema = providerSecretInputSchema
 export const providerConnectionTestSchema = providerConnectionTestInputSchema
+export const agentEngineSetSchema = agentEngineSchema
 export const providerConfigSetSchema = providerPublicConfigSchema
 export const providerExecutionPolicySetSchema = providerExecutionPolicySchema
 export const providerSecretDeleteSchema = configurableProviderIdSchema

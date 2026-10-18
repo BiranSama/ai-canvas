@@ -9,6 +9,7 @@ import type {
   OpticalQuality
 } from '../../../shared/appearance-settings'
 import type { RuntimeInfo } from '../../../shared/desktop-api'
+import type { AgentEngine, AgentEngineSetting } from '../../../shared/agent-engine'
 import type { DiagnosticExportResult } from '../../../shared/diagnostics'
 import type { GenerationProfileSnapshot } from '../../../shared/generation'
 import {
@@ -129,6 +130,7 @@ export function ProviderSettingsSheet({
   const [connectionConfirming, setConnectionConfirming] = useState(false)
   const [connectionScope, setConnectionScope] = useState<'tool_call' | 'agent_loop'>('tool_call')
   const [connectionResult, setConnectionResult] = useState<ProviderConnectionTestResult | null>(null)
+  const [agentEngine, setAgentEngine] = useState<AgentEngineSetting | null>(null)
   const [appearance, setAppearance] = useState<AppearanceSettingsSnapshot>(() => defaultAppearanceSnapshot())
   const [appearanceBusy, setAppearanceBusy] = useState(false)
   const [diagnosticBusy, setDiagnosticBusy] = useState(false)
@@ -164,7 +166,18 @@ export function ProviderSettingsSheet({
       }).catch(() => setAppearance(defaultAppearanceSnapshot()))
     }
     void window.desktop.listGenerationProfiles().then(setProfileSnapshot).catch(() => undefined)
+    if (desktop.getAgentEngine !== undefined) void desktop.getAgentEngine().then(setAgentEngine).catch(() => undefined)
   }, [onClose])
+
+  const chooseAgentEngine = async (engine: AgentEngine): Promise<void> => {
+    try {
+      const value = await window.desktop.setAgentEngine(engine)
+      setAgentEngine(value)
+      setStatus(value.selected === value.active ? 'Agent 引擎设置未变化。' : 'Agent 引擎已保存，重新打开项目后生效。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能保存 Agent 引擎设置。')
+    }
+  }
 
   const updateAppearance = async (changes: Partial<AppearanceSettingsUpdate>): Promise<void> => {
     if (appearanceBusy) return
@@ -717,6 +730,17 @@ export function ProviderSettingsSheet({
                             : `${LLM_PROTOCOL_LABELS[connectionResult.protocol]} · ${connectionResult.model} · 按「${connectionResult.agentLoop.dialect}」方言 · ${connectionResult.requestsUsed} 个请求 · 思考${connectionResult.agentLoop.thinkingObserved ? '已开启' : '未观察到'} · ${connectionResult.agentLoop.visionVerified === null ? '未声明看图' : connectionResult.agentLoop.visionVerified ? '看图正常' : '看图未通过（模型没认出图片颜色）'}`
                           : `${connectionResult.failure.detail} ${connectionResult.failure.nextAction}（本次已提交 ${connectionResult.requestsUsed} 个请求）`}</small>
                       </span>
+                    </div>}
+                    {agentEngine !== null && <div className="provider-engine-setting">
+                      <span><strong>Agent 引擎（开发者）</strong><small>{agentEngine.forcedByEnvironment
+                        ? '已由环境变量 AI_CANVAS_AGENT_ENGINE 指定。'
+                        : agentEngine.selected === agentEngine.active
+                          ? `当前项目使用${agentEngine.active === 'multi-step' ? '多步工具' : '一次规划'}。多步工具会多次调用文字模型，先用「验证多步调用」确认服务支持。`
+                          : '已保存，重新打开项目后生效。'}</small></span>
+                      <select aria-label="Agent 引擎" value={agentEngine.selected} disabled={agentEngine.forcedByEnvironment || busy !== null} onChange={(event) => void chooseAgentEngine(event.currentTarget.value as AgentEngine)}>
+                        <option value="plan-once">一次规划（默认）</option>
+                        <option value="multi-step">多步工具（实验）</option>
+                      </select>
                     </div>}
                   </div>
                 })()}

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { Scene } from '../../../domain'
+import type { AgentEngine } from '../../../shared/agent-engine'
 import { resolveLlmEndpoint, type ProviderConfigFile, type ProviderPublicConfig } from '../../../shared/provider-settings'
 import { ArkHttpClient } from '../../security/ark-http-client'
 import type { ProviderUsageReservation } from '../../security/provider-usage-ledger'
@@ -15,9 +16,10 @@ type ImageConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
-/** Which agent engine runs turns. A developer switch until the eval decides the default. */
-export function selectedAgentEngine(environment: NodeJS.ProcessEnv = process.env): 'plan-once' | 'multi-step' {
-  return environment.AI_CANVAS_AGENT_ENGINE === 'multi-step' ? 'multi-step' : 'plan-once'
+/** An engine forced by AI_CANVAS_AGENT_ENGINE, or null to use the owner's stored choice. */
+export function environmentAgentEngine(environment: NodeJS.ProcessEnv = process.env): AgentEngine | null {
+  const value = environment.AI_CANVAS_AGENT_ENGINE
+  return value === 'multi-step' || value === 'plan-once' ? value : null
 }
 
 function mimeFor(format: AssetMetadata['format']): LlmImage['mimeType'] {

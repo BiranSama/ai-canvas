@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppearanceSettingsSnapshot, AppearanceSettingsUpdate } from '../shared/appearance-settings'
+import type { AgentEngine } from '../shared/agent-engine'
 import { DESKTOP_CHANNELS, DESKTOP_EVENTS, type DesktopApi, type RuntimeInfo } from '../shared/desktop-api'
 import type { GenerationProfileRequest, GenerationRequest } from '../shared/generation'
 import type { GenerationReferencePreviewInput } from '../shared/generation-reference'
@@ -59,6 +60,8 @@ const desktopApi: DesktopApi = Object.freeze({
   editFromCanvas: (input: CanvasEditInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.canvasEdit, input),
   getProviderSettings: () => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSettings),
   validateProviderConnection: (input: ProviderConnectionTestInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConnectionTest, input),
+  getAgentEngine: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineGet),
+  setAgentEngine: (engine: AgentEngine) => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineSet, engine),
   setProviderConfig: (input: ProviderPublicConfig) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConfigSet, input),
   setProviderExecutionPolicy: (input: ProviderExecutionPolicy) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerExecutionPolicySet, input),
   setProviderSecret: (input: ProviderSecretInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretSet, input),
