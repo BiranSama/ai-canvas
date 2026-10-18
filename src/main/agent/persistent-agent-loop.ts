@@ -113,6 +113,8 @@ export interface AgentLoopProjection {
     readonly plan: AgentPlan | null
     readonly outcomes: readonly AgentToolOutcome[]
     readonly assessment: AgentCompletionAssessment
+    /** Every item of the turn, read before the completion assessment was appended. */
+    readonly items: readonly AgentItem[]
   }): Promise<void>
   onTerminal?(input: {
     readonly turn: AgentTurn
@@ -1927,7 +1929,7 @@ export class PersistentAgentLoop {
     })
     await this.#repository.transitionTurn(turn.id, assessment.status, { errorCode: null, errorMessage: null })
     const terminalTurn = await this.#repository.getTurn(turn.id)
-    await this.#projection.onCompleted?.({ turn: terminalTurn, legacyRunId, plan: completionPlan, outcomes, assessment })
+    await this.#projection.onCompleted?.({ turn: terminalTurn, legacyRunId, plan: completionPlan, outcomes, assessment, items: turnItems })
     await this.#repository.appendEvent(turn.threadId, {
       turnId: turn.id,
       itemId: item.id,

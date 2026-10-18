@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Scene } from '../../../domain'
 import type { AgentPlan, AgentToolOutcome, AgentToolPlan } from '../../../shared/agent'
 import type { AgentItem, AgentRunBudget, PlannerStep } from '../../../shared/agent-harness'
+import { estimateModelCostCny, type LlmPricing } from '../../../shared/model-usage'
 import type { LlmProtocol, LlmTransportSettings } from '../../../shared/provider-settings'
 import type { ArkLlmRequest, ArkLlmTransportObservation } from '../../security/ark-http-client'
 import { LlmProtocolError } from '../llm-provider'
@@ -31,6 +32,8 @@ export interface MultiStepModel {
   readonly label: string
   readonly protocolId: LlmProtocol
   readonly endpoint: string
+  /** Prices for the cost estimate; without them only tokens are reported. */
+  readonly pricing?: LlmPricing | null
 }
 
 export interface MultiStepPlannerOptions {
@@ -125,7 +128,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       results: [] as LlmToolResult[],
       usage: [] as LlmUsage[],
       brief: null as string | null,
-      checkpoint: null as ModelTrace['checkpoint']
+      checkpoint: null as ModelTrace['checkpoint'],
+      calls: 0,
+      /** Null once a call cannot be priced. */
+      costCny: 0 as number | null
     }
     const record = (result: LlmToolResult): void => {
       results.set(result.callId, result)
@@ -165,7 +171,9 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           emitted,
           usage: pass.usage,
           brief: pass.brief,
-          checkpoint: pass.checkpoint
+          checkpoint: pass.checkpoint,
+          modelCalls: pass.calls,
+          costCny: pass.calls === 0 ? null : pass.costCny === null ? null : Number(pass.costCny.toFixed(6))
         } satisfies ModelTrace
       },
       modelTurns
@@ -242,7 +250,9 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         maxOutputTokens: model.maxOutputTokens
       }, signal, context, modelTurns, screenshots === 'allowed')
       modelTurns += 1
+      pass.calls += 1
       if (turn.usage !== null) pass.usage.push(turn.usage)
+      pass.costCny = pass.costCny === null || turn.usage === null || model.pricing == null ? null : pass.costCny + estimateModelCostCny(turn.usage, model.pricing)
       if (turn.stopReason === 'content_filter' || turn.stopReason === 'refusal') {
         throw new LlmProtocolError('MODEL_OUTPUT_FILTERED', '供应商因内容策略停止了本次响应；本次没有执行任何工具。')
       }

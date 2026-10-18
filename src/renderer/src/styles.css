@@ -1467,6 +1467,7 @@ select:focus-visible {
 .operation-receipt strong { color: var(--graphite); font-size: 9px; font-weight: 580; }
 .operation-receipt footer { display: flex; min-height: 37px; align-items: center; gap: 10px; justify-content: space-between; padding: 7px 9px 7px 11px; border-top: 1px solid rgba(66,76,88,.075); background: rgba(55,107,255,.035); }
 .operation-receipt footer > span { flex: 1; }
+.operation-receipt .receipt-model-usage { display: block; padding: 6px 11px; border-top: 1px solid rgba(66,76,88,.075); font-variant-numeric: tabular-nums; }
 .operation-receipt button,
 .agent-presence button,
 .preview-heading button { display: flex; align-items: center; border: 0; border-radius: 8px; color: var(--quiet-blue); background: var(--quiet-blue-soft); font-size: 8px; cursor: pointer; }

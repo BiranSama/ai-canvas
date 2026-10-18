@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { AgentItem } from '../../../shared/agent-harness'
+import type { TurnModelUsage } from '../../../shared/model-usage'
 import {
   llmAssistantPartSchema,
   llmNativeReplaySchema,
@@ -49,7 +50,11 @@ export const modelTraceSchema = z.object({
    */
   brief: z.string().max(MAX_STORED_BRIEF_CHARS).nullable().default(null),
   /** Set when this pass replaced the first `assistants` steps of the turn with `text`. */
-  checkpoint: z.object({ assistants: z.number().int().nonnegative(), text: z.string().max(120_000) }).nullable().default(null)
+  checkpoint: z.object({ assistants: z.number().int().nonnegative(), text: z.string().max(120_000) }).nullable().default(null),
+  /** Model calls this pass made, including any whose usage was not reported. */
+  modelCalls: z.number().int().nonnegative().default(0),
+  /** Estimated cost of those calls; null without a price or when a call reported no usage. */
+  costCny: z.number().nonnegative().nullable().default(null)
 })
 
 export type ModelTrace = z.infer<typeof modelTraceSchema>
@@ -125,4 +130,24 @@ export function sumUsage(entries: readonly LlmUsage[]): LlmUsage {
     outputTokens: total.outputTokens + entry.outputTokens,
     reasoningTokens: total.reasoningTokens === null && entry.reasoningTokens === null ? null : (total.reasoningTokens ?? 0) + (entry.reasoningTokens ?? 0)
   }), { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningTokens: null })
+}
+
+/** Token usage and estimated cost of every model call of a multi-step turn, or null when it made none. */
+export function turnModelUsage(items: readonly AgentItem[]): TurnModelUsage | null {
+  const passes = items.flatMap((item) => {
+    const trace = traceOf(item)
+    // Traces written before calls were counted still list their usage.
+    const calls = trace === null ? 0 : Math.max(trace.modelCalls, trace.usage.length)
+    return trace === null || calls === 0 ? [] : [{ trace, calls }]
+  })
+  if (passes.length === 0) return null
+  const usage = sumUsage(passes.flatMap(({ trace }) => trace.usage))
+  const costs = passes.map(({ trace }) => trace.costCny)
+  return {
+    calls: passes.reduce((total, pass) => total + pass.calls, 0),
+    inputTokens: usage.inputTokens,
+    cachedInputTokens: usage.cachedInputTokens,
+    outputTokens: usage.outputTokens,
+    estimatedCostCny: costs.every((cost): cost is number => cost !== null) ? Number(costs.reduce((total, cost) => total + cost, 0).toFixed(6)) : null
+  }
 }

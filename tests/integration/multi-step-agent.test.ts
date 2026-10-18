@@ -87,6 +87,8 @@ describe('multi-step agent engine', () => {
     expect(run.failureCodes).toEqual([])
     expect(observation.turns.at(-1)).toMatchObject({ status: 'completed', modelCalls: 3, toolSteps: 3 })
     expect(observation.turns.at(-1)!.replyText).toContain('标题「晨雾」')
+    // The receipt reports the turn's text-model usage; the eval config sets no price, so there is no estimate.
+    expect(observation.turns.at(-1)!.modelUsage).toEqual({ calls: 3, inputTokens: 3_000, cachedInputTokens: 0, outputTokens: 300, estimatedCostCny: null })
 
     const final = observation.scenes.final
     expect(final.canvas).toMatchObject({ aspectWidth: 4, aspectHeight: 5, backgroundColor: '#F1EFEA' })

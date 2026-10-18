@@ -4,9 +4,10 @@ import { GENERIC_DIALECT } from '../../src/main/agent/llm/dialects'
 import { ResponsesTurnProtocol } from '../../src/main/agent/llm/responses-turn'
 import { checkpointText, estimateRequestTokens, estimateTextTokens } from '../../src/main/agent/multi-step/context-budget'
 import { MultiStepPlannerAdapter, type MultiStepPlannerOptions } from '../../src/main/agent/multi-step/multi-step-planner'
-import type { ModelTrace } from '../../src/main/agent/multi-step/trace'
+import { turnModelUsage, type ModelTrace } from '../../src/main/agent/multi-step/trace'
 import type { PlannerInput } from '../../src/main/agent/planner-adapter'
 import { agentRequestSchema } from '../../src/shared/agent'
+import type { LlmPricing } from '../../src/shared/model-usage'
 import type { AgentItem } from '../../src/shared/agent-harness'
 
 type Item = Record<string, unknown>
@@ -17,7 +18,7 @@ function uuid(value: number): string {
   return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`
 }
 
-function planner(requests: Item[], options: Partial<MultiStepPlannerOptions> = {}): MultiStepPlannerAdapter {
+function planner(requests: Item[], options: Partial<MultiStepPlannerOptions> = {}, pricing: LlmPricing | null = null): MultiStepPlannerAdapter {
   const scene = createScene({ id: uuid(2), projectId: PROJECT, now: NOW })
   return new MultiStepPlannerAdapter({
     scene: () => scene,
@@ -27,7 +28,10 @@ function planner(requests: Item[], options: Partial<MultiStepPlannerOptions> = {
       http: {
         postLlmJson: async (request) => {
           requests.push(request.body as Item)
-          return { id: `r${requests.length}`, status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '好了。' }] }] }
+          return {
+            id: `r${requests.length}`, status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '好了。' }] }],
+            usage: { input_tokens: 10_000, input_tokens_details: { cached_tokens: 4_000 }, output_tokens: 1_000 }
+          }
         },
         postEventStream: async () => { throw new Error('not used') }
       },
@@ -36,7 +40,8 @@ function planner(requests: Item[], options: Partial<MultiStepPlannerOptions> = {
       maxOutputTokens: 8_192,
       label: 'Fixture',
       protocolId: 'openai-responses',
-      endpoint: 'https://llm.example.test/v1/responses'
+      endpoint: 'https://llm.example.test/v1/responses',
+      pricing
     }),
     ...options
   })
@@ -145,5 +150,22 @@ describe('multi-step context', () => {
     expect(text).toContain('只列出最近 40 步')
     expect(text).not.toContain('查看了 c5\n')
     expect(text).toContain('查看了 c45')
+  })
+
+  it('records calls and an estimated cost per pass and sums them for the turn', async () => {
+    const signal = new AbortController().signal
+    const priced = (await planner([], {}, { inputPerMillionCny: 2, cachedInputPerMillionCny: 0.5, outputPerMillionCny: 8 }).next(input([]), signal)).step.trace as ModelTrace
+    // (6,000 uncached × 2 + 4,000 cached × 0.5 + 1,000 output × 8) per million tokens.
+    expect(priced).toMatchObject({ modelCalls: 1, costCny: 0.022 })
+    const unpriced = (await planner([]).next(input([]), signal)).step.trace as ModelTrace
+    expect(unpriced).toMatchObject({ modelCalls: 1, costCny: null })
+
+    expect(turnModelUsage([planItem(1, priced), planItem(2, priced)])).toEqual({
+      calls: 2, inputTokens: 20_000, cachedInputTokens: 8_000, outputTokens: 2_000, estimatedCostCny: 0.044
+    })
+    expect(turnModelUsage([planItem(1, priced), planItem(2, unpriced)])?.estimatedCostCny).toBeNull()
+    // A pass that made no call, such as one resuming an approved step, changes nothing.
+    expect(turnModelUsage([planItem(1, priced), planItem(2, {})])).toMatchObject({ calls: 1, estimatedCostCny: 0.022 })
+    expect(turnModelUsage([])).toBeNull()
   })
 })

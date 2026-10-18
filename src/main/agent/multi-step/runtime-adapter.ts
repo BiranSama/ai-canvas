@@ -91,7 +91,8 @@ export function createMultiStepPlannerAdapter(options: {
         maxOutputTokens: Math.max(llm.maxOutputTokens, 8_192),
         label: llm.label,
         protocolId: llm.protocol,
-        endpoint: resolveLlmEndpoint(llm)
+        endpoint: resolveLlmEndpoint(llm),
+        pricing: llm.pricing
       }
     },
     generation: async () => {

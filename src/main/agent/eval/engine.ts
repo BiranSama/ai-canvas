@@ -1,5 +1,6 @@
 import type { Canvas, CreativeContext, Scene, SceneElement, SceneRelation } from '../../../domain'
 import type { ProviderPublicConfig } from '../../../shared/provider-settings'
+import type { TurnModelUsage } from '../../../shared/model-usage'
 import type { AgentEvalCase } from './case-schema'
 import type { EvalNetwork, EvalRequestLogEntry } from './network'
 
@@ -67,6 +68,8 @@ export interface EvalTurnObservation {
   readonly decisions: readonly EvalDecisionObservation[]
   /** The assistant's replies and receipts for this turn. */
   readonly replyText: string
+  /** Text-model usage the turn's receipt reports, when the engine records it. */
+  readonly modelUsage: TurnModelUsage | null
   /** Copy of the decisions the user was asked to make in this turn. */
   readonly decisionText: string
   readonly startedSeq: number

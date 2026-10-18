@@ -45,6 +45,7 @@ import type { ActivityLedgerRepository } from './activity-ledger-repository'
 import { RedactedLogger, redactSensitive, type DiagnosticLogger } from '../security/redacted-logger'
 import type { AgentToolExecutorShadow } from './agent-tool-executor-shadow'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
+import { turnModelUsage } from './multi-step/trace'
 
 export interface AgentRuntimeOptions {
   readonly projectId: string
@@ -506,9 +507,10 @@ export class AgentRuntime {
           outcome
         )
       },
-      onCompleted: async ({ legacyRunId, plan: projectedPlan, outcomes, assessment }) => {
+      onCompleted: async ({ legacyRunId, plan: projectedPlan, outcomes, assessment, items }) => {
         const plan = projectedPlan ?? await this.#repository.getPlan(legacyRunId)
         const plainReply = assessment.facts?.operationStatus === 'not_requested' && assessment.design === undefined
+        const modelUsage = turnModelUsage(items)
         const receipt: OperationReceipt | null = plainReply ? null : {
           ...(assessment.facts === undefined ? {} : { completion: assessment.facts }),
           summary: plan?.summary ?? assessment.summary,
@@ -517,6 +519,7 @@ export class AgentRuntime {
           jobId: outcomes.find((outcome) => outcome.jobId !== null)?.jobId ?? null,
           nextAction: assessment.nextAction,
           undoable: outcomes.some((outcome) => outcome.ok && outcome.batchId !== null),
+          ...(modelUsage === null ? {} : { modelUsage }),
           ...(plan?.designContract === undefined ? {} : {
             designReview: {
               briefId: plan.designContract.brief.id,

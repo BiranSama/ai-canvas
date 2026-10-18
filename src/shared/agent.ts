@@ -5,6 +5,7 @@ import { generationRequestSchema } from './generation'
 import { agentFailureEnvelopeSchema } from './agent-recovery'
 import { atomicAgentToolPlanSchemas } from './agent-atomic-tools'
 import { agentResultReferenceSchema } from './agent-result-reference'
+import type { TurnModelUsage } from './model-usage'
 
 export const agentRunStatusSchema = z.enum([
   'queued',
@@ -336,6 +337,8 @@ export interface OperationReceipt {
   readonly jobId: string | null
   readonly nextAction: string | null
   readonly undoable: boolean
+  /** Text-model calls of the turn, when the engine records them. */
+  readonly modelUsage?: TurnModelUsage
   readonly designReview?: {
     readonly briefId?: string
     readonly directions: readonly {

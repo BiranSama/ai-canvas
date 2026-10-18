@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { llmPricingSchema } from './model-usage'
 
 export const configurableProviderIdSchema = z.enum(['openai-compatible-llm', 'image-provider'])
 
@@ -83,7 +84,9 @@ const llmProviderConfigV4Schema = legacyLlmProviderConfigSchema.extend({
 })
 
 export const llmProviderConfigSchema = llmProviderConfigV4Schema.extend({
-  transport: llmTransportSettingsSchema
+  transport: llmTransportSettingsSchema,
+  /** Optional prices for the per-turn cost estimate; null shows tokens only. */
+  pricing: llmPricingSchema.nullable().default(null)
 }).superRefine((value, context) => {
   const timeoutFields = [
     ['transport.connectTimeoutMs', value.transport.connectTimeoutMs],
@@ -413,7 +416,8 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
         idleTimeoutMs: 30_000
       },
       concurrency: 1,
-      capabilities: { streaming: true, toolCalling: true, vision: true }
+      capabilities: { streaming: true, toolCalling: true, vision: true },
+      pricing: null
     },
     {
       id: 'image-provider',

@@ -40,6 +40,16 @@ describe('Provider v5 configuration contracts', () => {
     expect(DEFAULT_PROVIDER_CONFIG.providers[1]).toMatchObject({ kind: 'image', protocol: 'ark-seedream' })
   })
 
+  it('reads a v5 file saved before prices existed and keeps a saved price', () => {
+    const saved = structuredClone(DEFAULT_PROVIDER_CONFIG) as unknown as { providers: Array<Record<string, unknown>> }
+    delete saved.providers[0]!.pricing
+    expect(providerConfigFileSchema.parse(saved).providers[0]).toMatchObject({ kind: 'llm', pricing: null })
+    saved.providers[0]!.pricing = { inputPerMillionCny: 2, cachedInputPerMillionCny: 0.5, outputPerMillionCny: 8 }
+    expect(providerConfigFileSchema.parse(saved).providers[0]).toMatchObject({ pricing: { inputPerMillionCny: 2, cachedInputPerMillionCny: 0.5, outputPerMillionCny: 8 } })
+    saved.providers[0]!.pricing = { inputPerMillionCny: -1, cachedInputPerMillionCny: null, outputPerMillionCny: 8 }
+    expect(providerConfigFileSchema.safeParse(saved).success).toBe(false)
+  })
+
   it('migrates known legacy image endpoints without changing their public values', () => {
     const ark = providerConfigFileSchema.parse(asLegacyV3('https://ark.cn-beijing.volces.com/api/v3'))
     const task = providerConfigFileSchema.parse(asLegacyV3('https://api.krill-ai.net/v1'))

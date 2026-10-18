@@ -213,7 +213,8 @@ async function runTurn(
   await waitForJobs(runtime, deadline)
   await network.settle()
   const [conversation, finalHarness] = await Promise.all([runtime.getConversation(), runtime.getAgentHarnessSnapshot()])
-  const replies = conversation.messages.filter((message) => message.runId === run.id && message.role === 'assistant').map(messageText)
+  const assistantMessages = conversation.messages.filter((message) => message.runId === run.id && message.role === 'assistant')
+  const replies = assistantMessages.map(messageText)
   const endedSeq = network.seq
   return {
     index,
@@ -226,6 +227,7 @@ async function runTurn(
     modelCalls: network.entries().filter((entry) => entry.route === 'llm' && entry.seq > startedSeq && entry.seq <= endedSeq).length,
     decisions,
     replyText: replies.join('\n'),
+    modelUsage: [...assistantMessages].reverse().find((message) => message.receipt?.modelUsage !== undefined)?.receipt?.modelUsage ?? null,
     decisionText: decisionCopy.join('\n'),
     startedSeq,
     endedSeq,

@@ -190,7 +190,7 @@ function observation(overrides: Partial<EvalObservation> = {}): EvalObservation 
     scenes: { caseStart: scene, afterSetupTurns: [], beforeTurn: scene, final: scene },
     turns: [{
       index: 0, role: 'evaluated', text: '请求', status: 'completed', errorCode: null, errorMessage: null, toolSteps: 0, modelCalls: 1,
-      decisions: [], replyText: '已完成。', decisionText: '', startedSeq: 0, endedSeq: 3, durationMs: 10
+      decisions: [], replyText: '已完成。', modelUsage: null, decisionText: '', startedSeq: 0, endedSeq: 3, durationMs: 10
     }],
     network: [{ seq: 1, route: 'llm', method: 'POST', target: 'responses', status: 200, startedAtMs: 0, durationMs: 5, requestBytes: 10, responseBytes: 10, usage: { inputTokens: 1_000_000, outputTokens: 100_000 }, error: null }],
     jobs: [],

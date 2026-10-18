@@ -12,6 +12,7 @@ import type { RuntimeInfo } from '../../../shared/desktop-api'
 import type { AgentEngine, AgentEngineSetting } from '../../../shared/agent-engine'
 import type { DiagnosticExportResult } from '../../../shared/diagnostics'
 import type { GenerationProfileSnapshot } from '../../../shared/generation'
+import type { LlmPricing } from '../../../shared/model-usage'
 import {
   providerPublicConfigSchema,
   resolveImageEndpoint,
@@ -68,6 +69,18 @@ const LLM_IMAGE_DETAIL_LABELS: Record<LlmImageDetail, string> = {
   auto: '自动',
   low: '低成本 · 512px',
   original: '保留原图细节'
+}
+
+const LLM_PRICE_FIELDS = [
+  ['inputPerMillionCny', '输入'],
+  ['cachedInputPerMillionCny', '缓存命中输入'],
+  ['outputPerMillionCny', '输出（含思考）']
+] as const satisfies readonly (readonly [keyof LlmPricing, string])[]
+
+/** A price typed into an empty set starts it; fields not yet typed count as free, except cached input, which follows input. */
+function withLlmPrice(pricing: LlmPricing | null, field: keyof LlmPricing, value: number | null): LlmPricing | null {
+  if (pricing === null && value === null) return null
+  return { inputPerMillionCny: 0, cachedInputPerMillionCny: null, outputPerMillionCny: 0, ...pricing, [field]: value ?? (field === 'cachedInputPerMillionCny' ? null : 0) }
 }
 
 const IMAGE_PROTOCOL_CAPABILITIES: Record<ImageProtocol, ReadonlySet<keyof Extract<ProviderPublicConfig, { kind: 'image' }>['capabilities']>> = {
@@ -643,6 +656,20 @@ export function ProviderSettingsSheet({
                         ? `能力声明为${draft.capabilities.streaming ? '支持' : '不支持'}流式，因此会使用${draft.capabilities.streaming ? '流式 SSE' : '完整 JSON 响应'}。失败后不会自动切换并重发 POST。`
                         : '响应方式在发送前唯一确定；失败后不会自动换协议或重复 POST。'}
                   </p>
+                </details>}
+
+                {draft.kind === 'llm' && <details className="provider-transport-advanced" data-testid="llm-pricing">
+                  <summary><span>价格</span><small>{draft.pricing === null ? '未设置 · 回执只显示用量' : '用于估算每轮费用'}</small></summary>
+                  <div className="provider-public-grid">
+                    {LLM_PRICE_FIELDS.map(([field, label]) => <label key={field}><span>{label}（元 / 百万 tokens）</span><input aria-label={`LLM Provider ${label}价格`} type="number" min={0} max={10000} step={0.01}
+                      placeholder={field === 'cachedInputPerMillionCny' ? '同输入' : '未设置'} value={draft.pricing?.[field] ?? ''} onChange={(event) => {
+                        const raw = event.currentTarget.value
+                        updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: withLlmPrice(current.pricing, field, raw === '' ? null : Number(raw)) } : current)
+                      }} /></label>)}
+                  </div>
+                  <p className="provider-transport-note">按供应商价目填写。回执里的金额是按 token 用量算的估算，以供应商账单为准。{draft.pricing !== null && <button type="button" onClick={() => {
+                    updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: null } : current)
+                  }}>清除价格</button>}</p>
                 </details>}
 
                 <div className="provider-capabilities" aria-label={`${prefix} 能力`}>
