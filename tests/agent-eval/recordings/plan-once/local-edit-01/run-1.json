@@ -1,0 +1,47 @@
+{
+  "format": "ai-canvas-agent-eval-recording",
+  "formatVersion": 1,
+  "source": "hand-written",
+  "caseId": "local-edit-01",
+  "run": 1,
+  "engine": {
+    "id": "plan-once",
+    "version": 1
+  },
+  "promptFingerprint": "p1-68d950267f5fb28e",
+  "llm": {
+    "protocol": "ark-responses",
+    "transport": "buffered"
+  },
+  "recordedAt": "2026-10-18T13:20:38.287Z",
+  "note": "Hand-written Ark Responses reply (buffered JSON) that shrinks the title by 20%. Request shapes are stamped from the current engine with AI_CANVAS_EVAL_REFRESH_RECORDINGS=1.",
+  "exchanges": [
+    {
+      "index": 0,
+      "request": {
+        "bodySha256": "ff8a616df62d9cb7cc1b20912afa919572449afbd7ada87e42b946b755ff8bb4",
+        "normalizedBodySha256": "60fec26cca7deb3fd3eb70bc51ed1234889cfde75a6a706f8f66ee70d31c7124",
+        "shape": {
+          "endpoint": "responses",
+          "method": "POST",
+          "stream": false,
+          "toolNames": [
+            "submitAgentPlan"
+          ],
+          "toolChoice": "\"auto\"",
+          "messageRoles": [
+            "user"
+          ],
+          "hasImages": false,
+          "instructionsSha256": "0675ad770fc771a02cd1d36ca2b2b04388243fc28a1be1c5c28b2c944b6b5d53",
+          "toolsSha256": "8765d802894fbb493b6e9c84111173478b660a3fa99ad077a2c21b6216d72f93"
+        }
+      },
+      "response": {
+        "status": 200,
+        "contentType": "application/json",
+        "body": "{\"id\": \"resp-eval-local-edit-01\", \"object\": \"response\", \"status\": \"completed\", \"output\": [{\"type\": \"function_call\", \"id\": \"fc-local-edit-01\", \"call_id\": \"call-local-edit-01\", \"name\": \"submitAgentPlan\", \"arguments\": \"{\\\"summary\\\": \\\"主标题字号缩小 20%\\\", \\\"response\\\": \\\"已把主标题字号从 48 缩小到 38.4，其他元素保持不变。\\\", \\\"nextAction\\\": null, \\\"tools\\\": [{\\\"kind\\\": \\\"scene.update_elements\\\", \\\"expectedSceneRevision\\\": 1, \\\"summary\\\": \\\"主标题字号缩小 20%\\\", \\\"updates\\\": [{\\\"elementId\\\": \\\"37000000-0000-4000-8000-000000000015\\\", \\\"changes\\\": {\\\"fontSize\\\": 38.4}}]}]}\", \"status\": \"completed\"}], \"usage\": {\"input_tokens\": 5200, \"output_tokens\": 180, \"total_tokens\": 5380}}"
+      }
+    }
+  ]
+}

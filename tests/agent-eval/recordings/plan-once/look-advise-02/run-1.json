@@ -1,0 +1,47 @@
+{
+  "format": "ai-canvas-agent-eval-recording",
+  "formatVersion": 1,
+  "source": "hand-written",
+  "caseId": "look-advise-02",
+  "run": 1,
+  "engine": {
+    "id": "plan-once",
+    "version": 1
+  },
+  "promptFingerprint": "p1-68d950267f5fb28e",
+  "llm": {
+    "protocol": "ark-responses",
+    "transport": "stream"
+  },
+  "recordedAt": "2026-10-18T13:20:38.485Z",
+  "note": "Hand-written Ark Responses SSE stream that answers with layout advice and no tools. Request shapes are stamped from the current engine with AI_CANVAS_EVAL_REFRESH_RECORDINGS=1.",
+  "exchanges": [
+    {
+      "index": 0,
+      "request": {
+        "bodySha256": "438ecfef4243e67e57de46287752842fabe7edca6e4b86778a3df136917c4e07",
+        "normalizedBodySha256": "e7cb543947d54323f5138e601b0262de7855ed46675b4956092becc42e679694",
+        "shape": {
+          "endpoint": "responses",
+          "method": "POST",
+          "stream": true,
+          "toolNames": [
+            "submitAgentPlan"
+          ],
+          "toolChoice": "\"auto\"",
+          "messageRoles": [
+            "user"
+          ],
+          "hasImages": false,
+          "instructionsSha256": "0675ad770fc771a02cd1d36ca2b2b04388243fc28a1be1c5c28b2c944b6b5d53",
+          "toolsSha256": "8765d802894fbb493b6e9c84111173478b660a3fa99ad077a2c21b6216d72f93"
+        }
+      },
+      "response": {
+        "status": 200,
+        "contentType": "text/event-stream; charset=utf-8",
+        "body": "event: response.created\ndata: {\"type\": \"response.created\", \"response\": {\"id\": \"resp-eval-look-advise-02\", \"status\": \"in_progress\"}}\n\nevent: response.output_item.added\ndata: {\"type\": \"response.output_item.added\", \"output_index\": 0, \"item\": {\"type\": \"function_call\", \"id\": \"fc-look-advise-02\", \"call_id\": \"call-look-advise-02\", \"name\": \"submitAgentPlan\", \"arguments\": \"\"}}\n\nevent: response.function_call_arguments.delta\ndata: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc-look-advise-02\", \"output_index\": 0, \"delta\": \"{\\\"summary\\\": \\\"给出版式改进建议\\\", \\\"response\\\": \\\"整体层级清楚：主标题 MORNING RITUAL 在上方，陶瓷咖啡杯居中。可以考虑三点：一是标题略大，可稍微缩小并加大字距，让顶部留白更透气；二\"}\n\nevent: response.function_call_arguments.delta\ndata: {\"type\": \"response.function_call_arguments.delta\", \"item_id\": \"fc-look-advise-02\", \"output_index\": 0, \"delta\": \"是杯碟和桌面边界离底边较近，主体整体上移少许，视觉重心会更稳；三是晨间侧光可以再暖一些，与标题颜色呼应。需要的话告诉我先调整哪一项。\\\", \\\"nextAction\\\": \\\"告诉我想先调整哪一项。\\\", \\\"tools\\\": []}\"}\n\nevent: response.function_call_arguments.done\ndata: {\"type\": \"response.function_call_arguments.done\", \"item_id\": \"fc-look-advise-02\", \"output_index\": 0, \"arguments\": \"{\\\"summary\\\": \\\"给出版式改进建议\\\", \\\"response\\\": \\\"整体层级清楚：主标题 MORNING RITUAL 在上方，陶瓷咖啡杯居中。可以考虑三点：一是标题略大，可稍微缩小并加大字距，让顶部留白更透气；二是杯碟和桌面边界离底边较近，主体整体上移少许，视觉重心会更稳；三是晨间侧光可以再暖一些，与标题颜色呼应。需要的话告诉我先调整哪一项。\\\", \\\"nextAction\\\": \\\"告诉我想先调整哪一项。\\\", \\\"tools\\\": []}\"}\n\nevent: response.completed\ndata: {\"type\": \"response.completed\", \"response\": {\"id\": \"resp-eval-look-advise-02\", \"status\": \"completed\", \"usage\": {\"input_tokens\": 4800, \"output_tokens\": 210, \"total_tokens\": 5010}}}\n\n"
+      }
+    }
+  ]
+}
