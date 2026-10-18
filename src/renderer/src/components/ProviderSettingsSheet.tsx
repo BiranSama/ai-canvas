@@ -127,6 +127,7 @@ export function ProviderSettingsSheet({
   const [libraryBusy, setLibraryBusy] = useState(false)
   const [migrationSummary, setMigrationSummary] = useState<string | null>(null)
   const [connectionConfirming, setConnectionConfirming] = useState(false)
+  const [connectionScope, setConnectionScope] = useState<'tool_call' | 'agent_loop'>('tool_call')
   const [connectionResult, setConnectionResult] = useState<ProviderConnectionTestResult | null>(null)
   const [appearance, setAppearance] = useState<AppearanceSettingsSnapshot>(() => defaultAppearanceSnapshot())
   const [appearanceBusy, setAppearanceBusy] = useState(false)
@@ -219,11 +220,12 @@ export function ProviderSettingsSheet({
     try {
       const result = await window.desktop.validateProviderConnection({
         providerId: 'openai-compatible-llm',
-        confirmed: true
+        confirmed: true,
+        scope: connectionScope
       })
       setConnectionResult(result)
       setStatus(result.ok
-        ? '连接与结构化工具调用均已验证。'
+        ? result.agentLoop === null ? '连接与结构化工具调用均已验证。' : '多步工具调用已验证：思考内容和工具结果都能交回。'
         : `${result.failure.title}：${result.failure.nextAction}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '连接验证未完成；没有自动重试。')
@@ -692,20 +694,27 @@ export function ProviderSettingsSheet({
                   return <div className="provider-connection-check">
                     <div className="provider-connection-heading">
                       <span><strong>连接与工具调用</strong><small>{draftSaved ? '使用上方已保存配置' : '先保存更改，再验证连接'}</small></span>
-                      <button type="button" disabled={!canValidate || busy !== null} onClick={() => setConnectionConfirming(true)}>验证工具调用</button>
+                      <span className="provider-connection-actions">
+                        <button type="button" disabled={!canValidate || busy !== null} onClick={() => { setConnectionScope('tool_call'); setConnectionConfirming(true) }}>验证工具调用</button>
+                        <button type="button" disabled={!canValidate || busy !== null} onClick={() => { setConnectionScope('agent_loop'); setConnectionConfirming(true) }}>验证多步调用</button>
+                      </span>
                     </div>
                     {connectionConfirming && <div className="provider-connection-confirm" role="alert">
                       <AlertCircle size={16} />
-                      <span><strong>将发出 1 个真实文字请求</strong><small>不生成图片；费用预留上限 ¥0.05；失败后不会自动重试。</small></span>
+                      {connectionScope === 'tool_call'
+                        ? <span><strong>将发出 1 个真实文字请求</strong><small>不生成图片；费用预留上限 ¥0.05；失败后不会自动重试。</small></span>
+                        : <span><strong>将发出 2 个真实文字请求</strong><small>开着思考调用工具，再交回思考内容和工具结果{draft.capabilities.vision ? '（附一张 16×16 的小图）' : ''}；不生成图片；每个请求费用预留上限 ¥0.05；失败后不会自动重试。</small></span>}
                       <button type="button" onClick={() => setConnectionConfirming(false)}>取消</button>
                       <button type="button" className="settings-save" onClick={() => void validateConnection()}>确认验证</button>
                     </div>}
                     {connectionResult !== null && <div className={`provider-connection-result${connectionResult.ok ? ' is-success' : ' is-failure'}`} role="status">
                       {connectionResult.ok ? <Check size={16} /> : <AlertCircle size={16} />}
                       <span>
-                        <strong>{connectionResult.ok ? '连接正常，工具调用可用' : connectionResult.failure.title}</strong>
+                        <strong>{connectionResult.ok ? connectionResult.agentLoop === null ? '连接正常，工具调用可用' : '多步工具调用可用' : connectionResult.failure.title}</strong>
                         <small>{connectionResult.ok
-                          ? `${LLM_PROTOCOL_LABELS[connectionResult.protocol]} · ${connectionResult.model} · 1 个请求`
+                          ? connectionResult.agentLoop === null
+                            ? `${LLM_PROTOCOL_LABELS[connectionResult.protocol]} · ${connectionResult.model} · 1 个请求`
+                            : `${LLM_PROTOCOL_LABELS[connectionResult.protocol]} · ${connectionResult.model} · 按「${connectionResult.agentLoop.dialect}」方言 · ${connectionResult.requestsUsed} 个请求 · 思考${connectionResult.agentLoop.thinkingObserved ? '已开启' : '未观察到'} · ${connectionResult.agentLoop.visionVerified === null ? '未声明看图' : connectionResult.agentLoop.visionVerified ? '看图正常' : '看图未通过（模型没认出图片颜色）'}`
                           : `${connectionResult.failure.detail} ${connectionResult.failure.nextAction}（本次已提交 ${connectionResult.requestsUsed} 个请求）`}</small>
                       </span>
                     </div>}

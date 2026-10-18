@@ -2148,6 +2148,7 @@ select:focus-visible {
 .provider-connection-heading button,
 .provider-connection-confirm button { min-height: 36px; padding: 0 12px; border: 1px solid rgba(73,103,139,.13); border-radius: 10px; color: #4c6380; background: rgba(255,255,255,.3); font: inherit; font-size: 9px; cursor: pointer; }
 .provider-connection-heading button:disabled { opacity: .42; cursor: default; }
+.provider-connection-heading > .provider-connection-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .provider-connection-confirm { display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid rgba(179,130,68,.15); border-radius: 12px; color: #8a6a43; background: rgba(222,187,134,.085); }
 .provider-connection-result { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid rgba(68,126,91,.14); border-radius: 12px; color: #53735e; background: rgba(80,142,103,.055); }
 .provider-connection-result.is-failure { color: #965d55; border-color: rgba(166,80,71,.15); background: rgba(166,80,71,.055); }

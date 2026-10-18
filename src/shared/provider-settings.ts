@@ -278,7 +278,9 @@ export const providerSettingsSnapshotSchema = z.object({
 
 export const providerConnectionTestInputSchema = z.object({
   providerId: z.literal('openai-compatible-llm'),
-  confirmed: z.literal(true)
+  confirmed: z.literal(true),
+  /** `agent_loop` runs two steps with thinking and the tool result sent back, as the multi-step agent does. */
+  scope: z.enum(['tool_call', 'agent_loop']).default('tool_call')
 }).strict()
 
 const providerConnectionFailureSchema = z.object({
@@ -297,9 +299,15 @@ const providerConnectionTestBaseSchema = z.object({
   model: z.string().trim().max(160),
   endpoint: z.string().max(2_048),
   checkedAt: z.string().datetime(),
-  requestsUsed: z.number().int().min(0).max(1),
+  requestsUsed: z.number().int().min(0).max(2),
   generatedImages: z.literal(0),
-  costCeilingCny: z.number().min(0).max(10)
+  costCeilingCny: z.number().min(0).max(10),
+  agentLoop: z.object({
+    dialect: z.string().trim().min(1).max(64),
+    thinkingObserved: z.boolean(),
+    /** Null when the model is not declared to see images. */
+    visionVerified: z.boolean().nullable()
+  }).nullable().default(null)
 })
 
 export const providerConnectionTestResultSchema = z.discriminatedUnion('ok', [
@@ -327,7 +335,7 @@ export type ProviderPublicConfig = z.infer<typeof providerPublicConfigSchema>
 export type ProviderConfigFile = z.infer<typeof providerConfigFileSchema>
 export type ProviderExecutionPolicy = z.infer<typeof providerExecutionPolicySchema>
 export type ProviderSettingsSnapshot = z.infer<typeof providerSettingsSnapshotSchema>
-export type ProviderConnectionTestInput = z.infer<typeof providerConnectionTestInputSchema>
+export type ProviderConnectionTestInput = z.input<typeof providerConnectionTestInputSchema>
 export type ProviderConnectionTestResult = z.infer<typeof providerConnectionTestResultSchema>
 
 export function resolveLlmProtocolEndpoint(baseUrl: string, protocol: z.infer<typeof llmProtocolSchema>): string {
