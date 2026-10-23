@@ -41,6 +41,7 @@ import {
   ContextCompactor,
   RECENT_CONVERSATION_ITEM_LIMIT,
   contextSourceHash,
+  isConversationItem,
   type DirectiveConflict
 } from './context-builder'
 import type { PlannerAdapter } from './planner-adapter'
@@ -2079,9 +2080,7 @@ export class PersistentAgentLoop {
     const existing = taskMarker === null
       ? allExisting
       : allExisting.filter((compaction) => compaction.summary.startsWith(taskMarker))
-    const completedMessages = items.filter((item) =>
-      item.status === 'completed' && (item.type === 'user_message' || item.type === 'assistant_message')
-    )
+    const completedMessages = items.filter(isConversationItem)
     if (completedMessages.length <= RECENT_CONVERSATION_ITEM_LIMIT) return existing.slice(0, 1)
 
     const compactableMessageIds = new Set(
