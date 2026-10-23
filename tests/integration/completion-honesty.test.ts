@@ -41,15 +41,25 @@ function withCriterion(plan: AgentPlan, criterion: string | readonly string[]): 
       ? command : { ...command, creativeContext: { ...command.creativeContext, brief } })
   }) }
 }
-// About 0.5 s locally; the Windows runner's first case of this file has needed more than 8 s.
+// About 0.5 s locally. A turn that ends any other way fails at once with its state, and a timeout
+// names the last state seen, so a slow runner and a turn that went wrong read differently.
 async function wait(runtime: GenerationRuntime) {
-  await expect.poll(async () => {
-    const state = await runtime.getAgentHarnessSnapshot()
-    const latest = state.turns[0]
-    if (latest === undefined || !isTerminalAgentTurnStatus(latest.status)) return false
-    return (await runtime.getConversation()).runs.find((run) => run.id === latest.inputMessageId)?.status === 'completed'
-  }, { timeout: 15_000 }).toBe(true)
-  return runtime.getAgentHarnessSnapshot()
+  const deadline = Date.now() + 15_000
+  let seen = 'no turn yet'
+  while (Date.now() < deadline) {
+    const latest = (await runtime.getAgentHarnessSnapshot()).turns[0]
+    if (latest !== undefined) {
+      const run = (await runtime.getConversation()).runs.find((candidate) => candidate.id === latest.inputMessageId)
+      seen = `turn ${latest.status}${latest.errorCode === null ? '' : ` (${latest.errorCode}: ${latest.errorMessage ?? ''})`}, run ${run?.status ?? 'missing'}`
+      if (isTerminalAgentTurnStatus(latest.status) && run?.status === 'completed') return runtime.getAgentHarnessSnapshot()
+      // The run is projected after the turn; only a run that itself ended differently is a failure.
+      if (isTerminalAgentTurnStatus(latest.status) && run !== undefined && ['failed', 'cancelled', 'timed_out', 'interrupted'].includes(run.status)) {
+        throw new Error(`The turn ended without completing: ${seen}`)
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error(`The turn did not finish in 15 s; last seen: ${seen}`)
 }
 async function createReviewed(h: Awaited<ReturnType<typeof fixture>>, criterion: string, text?: string) {
   const input = request(h.runtime, text)
