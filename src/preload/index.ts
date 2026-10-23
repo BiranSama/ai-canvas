@@ -59,6 +59,7 @@ const desktopApi: DesktopApi = Object.freeze({
   readGenerationAsset: (assetId: string, thumbnail = true, projectId?: string) =>
     ipcRenderer.invoke(DESKTOP_CHANNELS.generationAsset, { assetId, thumbnail, projectId }),
   generateFromCanvas: (input: CanvasGenerationInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.canvasGeneration, input),
+  startUnifiedRender: (input: { readonly requirement: string; readonly count: number }) => ipcRenderer.invoke(DESKTOP_CHANNELS.unifiedRender, input),
   editFromCanvas: (input: CanvasEditInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.canvasEdit, input),
   getProviderSettings: () => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSettings),
   validateProviderConnection: (input: ProviderConnectionTestInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConnectionTest, input),

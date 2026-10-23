@@ -33,6 +33,7 @@ import { useWorkspaceStore } from '../store/workspace-store'
 import { CanvasSizeControl } from './CanvasSizeControl'
 import { FontPicker } from './FontPicker'
 import { ImageBlendSection } from './ImageBlendSection'
+import { UnifiedRenderSection } from './UnifiedRenderSection'
 import { ImeSafeInput, ImeSafeTextarea } from './ImeSafeTextField'
 import { simplePropertiesFor, type SimplePropertyDefinition } from '../inspector/property-schema'
 
@@ -79,6 +80,7 @@ function CanvasProperties({ canvas }: { canvas: Canvas }): React.JSX.Element {
         <span>整体风格</span>
         <ImeSafeTextarea value={canvas.globalStyle} onCommit={(value) => update({ globalStyle: value })} rows={3} />
       </label>
+      <UnifiedRenderSection />
     </div>
   )
 }

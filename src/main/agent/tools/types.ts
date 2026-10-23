@@ -49,6 +49,8 @@ export interface AgentToolContext {
     readonly summary?: string
     /** Whether the service can repaint part of an image (a mask or a marked region). */
     readonly localEdits?: boolean
+    /** Whether the service takes reference images. */
+    readonly references?: boolean
   } | null
   readonly activeJobId: string | null
   readonly sourceMessageId: string | null

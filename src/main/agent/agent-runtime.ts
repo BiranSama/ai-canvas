@@ -97,7 +97,9 @@ export function receiptItem(plan: AgentPlan['tools'][number], outcome: AgentTool
     return { object: '生成任务', action: '创建图片生成', impact: outcome.ok ? '已进入项目任务队列' : failedImpact }
   }
   if (plan.kind === 'canvas_generation') {
-    return { object: '当前画布', action: '编译参考并生成完整图', impact: outcome.ok ? '参考资产与任务已保存' : failedImpact }
+    return plan.mode === 'unified'
+      ? { object: '当前画布', action: '统一重绘除文字外的画面', impact: outcome.ok ? '画布未改变，放回后原图层保留在下面' : failedImpact }
+      : { object: '当前画布', action: '编译参考并生成完整图', impact: outcome.ok ? '参考资产与任务已保存' : failedImpact }
   }
   if (plan.kind === 'canvas_edit') {
     return plan.mode === 'in-context'

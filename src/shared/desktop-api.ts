@@ -13,7 +13,7 @@ import type {
   UpdateProjectMemoryInput
 } from './agent-context'
 import type { GenerationJob, GenerationProfileRequest, GenerationProfileSnapshot, GenerationRequest, ProviderCapabilities } from './generation'
-import type { CanvasGenerationInput, CanvasGenerationResult } from './reference'
+import type { CanvasGenerationInput, CanvasGenerationResult, UnifiedRenderResult } from './reference'
 import type { CanvasEditInput, CanvasEditResult } from './edit'
 import type { AgentEngine, AgentEngineSetting } from './agent-engine'
 import type {
@@ -60,6 +60,7 @@ export const DESKTOP_CHANNELS = {
   runtimeInfo: 'desktop:runtime-info',
   localFonts: 'desktop:local-fonts',
   imageToneMatch: 'scene:image-tone-match',
+  unifiedRender: 'generation:unified-render',
   appearanceSettings: 'appearance:settings',
   appearanceSettingsSet: 'appearance:settings-set',
   diagnosticExport: 'diagnostic:export',
@@ -200,6 +201,8 @@ export interface DesktopApi {
   placeGenerationResult(input: PlaceGenerationResultInput): Promise<PlaceGenerationResultReceipt>
   readGenerationAsset(assetId: string, thumbnail?: boolean, projectId?: string): Promise<string>
   generateFromCanvas(input: CanvasGenerationInput): Promise<CanvasGenerationResult>
+  /** Redraws every layer but text as one picture on the default image service; the owner confirmed the cost first. */
+  startUnifiedRender(input: { readonly requirement: string; readonly count: number }): Promise<UnifiedRenderResult>
   editFromCanvas(input: CanvasEditInput): Promise<CanvasEditResult>
   getProviderSettings(): Promise<ProviderSettingsSnapshot>
   validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult>

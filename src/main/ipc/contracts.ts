@@ -61,6 +61,11 @@ export const diagnosticExportSchema = diagnosticExportInputSchema
 
 export const generationJobIdSchema = z.string().min(1).max(200)
 
+export const unifiedRenderStartSchema = z.object({
+  requirement: z.string().trim().max(2_000),
+  count: z.number().int().min(1).max(4)
+}).strict()
+
 export const imageToneMatchSchema = z.object({
   elementId: z.string().uuid(),
   strength: z.number().finite().min(0).max(1)

@@ -49,8 +49,12 @@ import { canvasEditInputSchema, canvasEditResultSchema, type CanvasEditInput, ty
 import {
   canvasGenerationInputSchema,
   canvasGenerationResultSchema,
+  unifiedRenderInputSchema,
+  unifiedRenderResultSchema,
   type CanvasGenerationInput,
-  type CanvasGenerationResult
+  type CanvasGenerationResult,
+  type UnifiedRenderInput,
+  type UnifiedRenderResult
 } from '../../shared/reference'
 import {
   AgentRuntime,
@@ -79,6 +83,7 @@ import { EditMaskCompiler } from '../edit'
 import { extractLayer, inContextLayerJob, layerRegion, layersBelow, regionMask, regionTransform, type LayerRegion } from '../edit/layer-in-context'
 import { subScene } from '../reference/sub-scene'
 import { measureToneMatch, type ToneMeasurement } from '../edit/tone-match'
+import { unifiedPlacementCommands, unifiedRenderCover, unifiedRenderJob } from '../edit/unified-render'
 import type { AssetMetadata } from '../storage/project-repository'
 import { buildTransientAnnotationMasks } from '../../shared/ephemeral-annotation'
 import { ProviderSettingsService } from '../security/provider-settings-service'
@@ -90,7 +95,7 @@ import { ArkHttpClient } from '../security/ark-http-client'
 import { KrillHttpTransport } from '../security/krill-http-transport'
 import { ProviderUsageLedger } from '../security/provider-usage-ledger'
 import { ProviderConnectionValidator } from '../security/provider-connection-validator'
-import { DEFAULT_PROVIDER_EXECUTION_POLICY, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
+import { DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
@@ -1914,6 +1919,146 @@ export class GenerationRuntime {
     })
   }
 
+  /**
+   * Redraws the picture as one image: every exported layer except text is
+   * rendered and sent as a reference, with the composition kept and light,
+   * perspective and material made consistent. Placing the result lays it
+   * over those layers and keeps the text on top.
+   */
+  async unifiedRender(
+    inputValue: UnifiedRenderInput,
+    workflowInvocationId: string | null = null,
+    beforeDispatch?: (request: ImageTaskRequest) => Promise<void>,
+    deferActivation = false,
+    agentScope?: AgentGenerationAuthority
+  ): Promise<UnifiedRenderResult> {
+    const input = unifiedRenderInputSchema.parse(inputValue)
+    this.#assertRequestedProject(input.scene.projectId)
+    const owner = this.#project
+    return this.#providerSettings.withStableConfiguration(async (config) => {
+    this.#assertGenerationProject(owner)
+    const inputHash = executionInputHash(input)
+    const identity = workflowInvocationId !== null ? `tool:${workflowInvocationId}`
+      : input.sourceMessageId !== null ? `unified-message:${input.sourceMessageId}:${inputHash}` : `manual:${randomUUID()}`
+    const existing = await this.#existingCompiledInvocation(identity, inputHash, deferActivation, agentScope)
+    if (existing !== null) {
+      const saved = existing.request.parameters
+      return unifiedRenderResultSchema.parse({ jobId: existing.id, jobStatus: existing.status, sourceAssetId: saved.sourceAssetId, coveredElementIds: saved.coveredElementIds })
+    }
+    const scene = this.#sceneService.state().scene
+    if (input.scene.id !== scene.id || input.scene.revision !== scene.revision) {
+      throw new ProviderError('REFERENCE_REVIEW_REQUIRED', '画布已修改，请核对当前版本后重新提交。', 'validating')
+    }
+    const coveredElementIds = unifiedRenderCover(scene)
+    if (coveredElementIds.length === 0) throw new Error('画布上还没有可以统一重绘的图片或形状；文字不参与重绘。')
+    const { profiles, providers } = await this.#profileEnvironment(config)
+    const requirement = input.requirement === '' ? '' : `${input.requirement.slice(0, 7_000)}\n`
+    const prompt = `把参考图重新绘制成一张完整统一的画面。${requirement}严格保持构图：每个元素的位置、大小、形状和主要颜色都不变；统一光线方向、阴影、透视、材质和颗粒感，让各部分像一次拍摄或一次绘制出来的。画面里不要出现任何文字、字母或水印。`
+    const draft = {
+      prompt,
+      negativePrompt: '文字，字母，水印，拼贴感，贴纸边缘',
+      aspect: { width: scene.canvas.aspectWidth, height: scene.canvas.aspectHeight },
+      quantity: input.count,
+      profileId: input.profileId,
+      referenceResultIds: [] as string[],
+      sourceSceneRevision: scene.revision,
+      referenceMode: 'visual' as const,
+      variationInstruction: '',
+      preserveConstraints: '保持构图、元素位置和主要颜色',
+      expandedSections: [] as ('parameters' | 'references' | 'advanced')[]
+    }
+    const preflight = profiles.compile({
+      profileId: input.profileId,
+      confirmed: input.confirmed,
+      operation: 'generate',
+      draft,
+      outputWidth: scene.canvas.outputWidth,
+      outputHeight: scene.canvas.outputHeight,
+      references: [],
+      parameters: {},
+      sourceMessageId: input.sourceMessageId,
+      parentResultId: null,
+      modelOverride: input.providerId === 'mock' ? input.model : null
+    })
+    if (preflight.providerId !== input.providerId) throw new Error('统一渲染档位与请求供应商不一致。')
+    const provider = providers.get(preflight.providerId)
+    if (!provider.capabilities.imageReferences) {
+      throw new ProviderError('IMAGE_REFERENCE_UNSUPPORTED', `${provider.label} 不接受参考图，不能统一渲染。`, 'validating')
+    }
+    const covered = subScene(scene, new Set(coveredElementIds))
+    const rendered = await new CompositeReferenceRenderer(async (assetId) => {
+      try {
+        return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+      } catch {
+        return null
+      }
+    }).render({ ...covered, canvas: { ...covered.canvas, transparent: false } }, 'final')
+    const source = await this.#importDerivedImage(owner, await sharp(rendered.buffer).png().toBuffer(), 'reference', `unified-source:${randomUUID()}`)
+    const referenceInput = { projectId: scene.projectId, source: { kind: 'images' as const, assetIds: [source.id] },
+      profileId: input.profileId, modelOverride: input.providerId === 'mock' ? input.model : null, referenceMode: 'visual' as const }
+    const referencePreview = await this.#resolveReference(referenceInput, config, owner)
+    const request = profiles.compile({
+      profileId: input.profileId,
+      confirmed: input.confirmed,
+      operation: 'reference',
+      draft,
+      outputWidth: scene.canvas.outputWidth,
+      outputHeight: scene.canvas.outputHeight,
+      references: [{ assetId: source.id, intent: 'composition', strength: 0.9 }],
+      parameters: {
+        mode: 'unified-render',
+        originalRequirement: input.requirement,
+        sourceAssetId: source.id,
+        coveredElementIds,
+        referenceSourceSnapshot: { version: 1, source: referencePreview.source, signature: referencePreview.signature,
+          summary: '除文字外的整张画面', sceneRevision: scene.revision, assetIds: [source.id] },
+        invocationInputHash: inputHash,
+        ...(workflowInvocationId === null ? {} : { workflowInvocationId })
+      },
+      sourceMessageId: input.sourceMessageId,
+      parentResultId: null,
+      modelOverride: input.providerId === 'mock' ? input.model : null
+    })
+    await beforeDispatch?.(request)
+    this.#assertGenerationProject(owner)
+    if (this.#sceneService.state().scene.revision !== scene.revision) {
+      throw new ProviderError('REFERENCE_REVIEW_REQUIRED', '画布在准备统一渲染时发生变化，请重新提交。', 'validating')
+    }
+    const job = await this.#enqueueWorkflowConfigured(request, {
+      operation: 'canvas',
+      ...(agentScope === undefined ? {} : { agentScope }),
+      sourceSceneRevision: scene.revision,
+      promptPackage: null,
+      deferActivation,
+      idempotencyKey: identity
+    }, config, owner)
+    return unifiedRenderResultSchema.parse({ jobId: job.id, jobStatus: job.status, sourceAssetId: source.id, coveredElementIds })
+    })
+  }
+
+  /** A unified render the owner started from the panel, on the default image service, already confirmed there. */
+  async startUnifiedRender(input: { readonly requirement: string; readonly count: number }): Promise<UnifiedRenderResult> {
+    const owner = this.#project
+    const service = await this.#providerSettings.withStableConfiguration(async (config) => {
+      this.#assertGenerationProject(owner)
+      const image = defaultImageProviderConfig(config)
+      if (image === undefined || image.protocol === 'unconfigured' || image.baseUrl === '' || image.defaultModel === '') return null
+      const { profiles } = await this.#profileEnvironment(config)
+      return { providerId: image.id, model: image.defaultModel, profileId: this.#profileId(image.id, 'reference', 'final', profiles) }
+    })
+    if (service === null) throw new Error('还没有配置生图服务；先在设置里配置，再统一重绘。')
+    return this.unifiedRender({
+      scene: this.#sceneService.state().scene,
+      requirement: input.requirement,
+      providerId: service.providerId,
+      model: service.model,
+      count: input.count,
+      profileId: service.profileId,
+      confirmed: true,
+      sourceMessageId: null
+    })
+  }
+
   cancel(jobId: string): Promise<GenerationJob> {
     return this.#queue.cancel(jobId)
   }
@@ -1996,6 +2141,8 @@ export class GenerationRuntime {
       .flatMap((family) => family.members)
       .find((member) => member.resultId === match.result.id)
     this.#assertGenerationProject(owner)
+    // A unified render covers the whole canvas, above the layers it redrew and below the text.
+    const unified = layer === null && target === undefined ? unifiedRenderJob(match.job.request.parameters) : null
     const canvasAspect = current.canvas.outputWidth / current.canvas.outputHeight
     const imageAspect = asset.width / asset.height
     const maxWidth = 0.78
@@ -2006,9 +2153,11 @@ export class GenerationRuntime {
       id: input.placementId,
       version: ELEMENT_SCHEMA_VERSION,
       type: 'image',
-      name: `生成结果 ${match.result.variantIndex + 1}`,
-      description: `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`,
-      transform: layerTransform ?? { x: (1 - width) / 2, y: (1 - height) / 2, width, height, rotation: 0 },
+      name: unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一渲染 ${match.result.variantIndex + 1}`,
+      description: unified === null
+        ? `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`
+        : `由 ${match.job.providerId}/${match.job.model} 统一重绘；原来的图层保留在它下面，隐藏它就能看到。`,
+      transform: unified !== null ? { x: 0, y: 0, width: 1, height: 1, rotation: 0 } : layerTransform ?? { x: (1 - width) / 2, y: (1 - height) / 2, width, height, rotation: 0 },
       zIndex: current.elements.length,
       opacity: 1,
       blendMode: 'normal',
@@ -2025,7 +2174,7 @@ export class GenerationRuntime {
       },
       assetId: asset.id,
       crop: { x: 0, y: 0, width: 1, height: 1 },
-      fit: layerTransform === null ? 'contain' : 'fill',
+      fit: unified !== null ? 'cover' : layerTransform === null ? 'contain' : 'fill',
       referenceRole: 'general'
     }
     const mutation = await this.#sceneService.execute({
@@ -2033,8 +2182,8 @@ export class GenerationRuntime {
       batch: {
         id: input.placementId,
         origin: input.origin,
-        summary: target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
-        commands: target === undefined ? [{ kind: 'element.add', element }] : [
+        summary: unified !== null ? '放入统一渲染' : target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
+        commands: unified !== null ? unifiedPlacementCommands(current, element, unified.coveredElementIds) : target === undefined ? [{ kind: 'element.add', element }] : [
           { kind: 'element.set-image', elementId: target.id, assetId: asset.id, provenance: element.provenance! },
           // The cut-out covers the element's box and the band it fades across.
           ...(layerTransform === null ? [] : [{
@@ -2450,6 +2599,30 @@ export class GenerationRuntime {
         modelOverride: tool.request.model
       }, { deferActivation: true, agentScope: context })
       return { toolIndex: context.toolIndex, ok: true, batchId: null, jobId: job.id, affectedElementIds: [], message: '图片生成任务已创建。' }
+    }
+    if (tool.kind === 'canvas_generation' && tool.mode === 'unified') {
+      const profileId = await this.#profileIdForInvocation(tool.providerId, 'reference', context.toolCallItemId, 'final')
+      this.#assertGenerationProject(owner)
+      const render = await this.unifiedRender({
+        scene: sceneService.state().scene,
+        requirement: tool.originalRequirement,
+        providerId: tool.providerId,
+        model: tool.model,
+        count: tool.count,
+        profileId,
+        confirmed: tool.providerId !== 'mock',
+        sourceMessageId: context.sourceMessageId
+      }, context.toolCallItemId, async (request) => {
+        await this.#prepareImageOutbound(context, outboundContextService, request)
+      }, true, context)
+      return {
+        toolIndex: context.toolIndex,
+        ok: true,
+        batchId: null,
+        jobId: render.jobId,
+        affectedElementIds: [],
+        message: `统一渲染任务已创建，重绘 ${render.coveredElementIds.length} 个图层，文字不参与；画布保持不变，放回后原图层留在下面。`
+      }
     }
     if (tool.kind === 'canvas_generation') {
       const operation = 'reference' as const

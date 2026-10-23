@@ -1327,6 +1327,16 @@ select:focus-visible {
 .blend-tone-buttons button.is-quiet { border-color: transparent; color: var(--faint-slate); background: transparent; }
 .blend-tone-buttons button:disabled { cursor: progress; opacity: .6; }
 .field-note.is-problem { color: #9a5852; }
+.unified-render-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--hairline); }
+.unified-render-start,
+.unified-render-confirm button { height: 32px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: 9px; color: var(--graphite); background: var(--field); font-size: 12px; cursor: pointer; }
+.unified-render-start { width: 100%; margin-top: 10px; }
+.unified-render-start:disabled { cursor: not-allowed; opacity: .55; }
+.unified-render-confirm { margin-top: 10px; padding: 10px 12px; border-radius: 10px; background: var(--quiet-blue-soft); color: var(--graphite); font-size: 11px; line-height: 1.5; }
+.unified-render-confirm p { margin: 0 0 8px; }
+.unified-render-confirm div { display: flex; justify-content: flex-end; gap: 6px; }
+.unified-render-confirm button.is-primary { border-color: var(--quiet-blue); color: #fff; background: var(--quiet-blue); }
+.unified-render-again { margin-left: 6px; border: 0; color: var(--quiet-blue); background: transparent; font-size: inherit; cursor: pointer; }
 .field-grid { display: grid; gap: 7px; }
 .field-grid.two-columns { grid-template-columns: 1fr 1fr; }
 .compact-field { display: grid; height: 29px; grid-template-columns: 28px minmax(0,1fr); align-items: center; }

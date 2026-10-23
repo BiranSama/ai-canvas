@@ -51,7 +51,8 @@ import {
   designReviewAcceptSchema,
   diagnosticExportSchema,
   sceneHistorySchema,
-  imageToneMatchSchema
+  imageToneMatchSchema,
+  unifiedRenderStartSchema
 } from './contracts'
 
 let subscribedRuntime: Promise<GenerationRuntime> | null = null
@@ -191,6 +192,7 @@ export function registerDesktopIpc(
     const parsed = generationAssetSchema.parse(input)
     return (await generationRuntime).readAssetDataUrl(parsed.assetId, parsed.thumbnail, parsed.projectId)
   })
+  ipcMain.handle(DESKTOP_CHANNELS.unifiedRender, async (_event, input: unknown) => (await generationRuntime).startUnifiedRender(unifiedRenderStartSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.canvasGeneration, async (_event, input: unknown) => {
     return (await generationRuntime).generateFromCanvas(canvasGenerationSchema.parse(input))
   })

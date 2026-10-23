@@ -226,7 +226,9 @@ export const canvasGenerationToolSchema = z.object({
   model: z.string().min(1).default('mock-balanced'),
   count: z.number().int().min(1).max(4).default(1),
   referenceMode: z.enum(['visual', 'structure', 'hybrid']).default('hybrid'),
-  sourceMessageId: z.string().min(1).nullable().default(null)
+  sourceMessageId: z.string().min(1).nullable().default(null),
+  /** Left out to generate from the canvas; unified redraws every layer but text as one picture. */
+  mode: z.enum(['standard', 'unified']).optional()
 })
 
 export const canvasEditToolSchema = z.object({

@@ -257,6 +257,22 @@ describe('generate a layer', () => {
   })
 })
 
+describe('unified render', () => {
+  it('redraws the whole picture when there is something to redraw and the service takes references', async () => {
+    const harness = new Harness()
+    harness.generation = { providerId: 'image-provider', model: 'seedream', maxImages: 4, references: true }
+    const call = async (args: unknown) => (await prepareAgentToolCall({ callId: 'u', name: 'generate', argumentsText: JSON.stringify(args), arguments: args as Record<string, unknown>, argumentsError: null }, harness.context())).step
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    expect(await call({ scope: 'unified', brief: '统一成清晨柔光' })).toMatchObject({ kind: 'answer', result: { ok: false, summary: '画布上还没有可以统一重绘的图片或形状。' } })
+    await harness.call('add_shape', { shape: 'rectangle', box: [0, 0, 100, 100], color: '#335577' })
+    expect(await call({ scope: 'unified', brief: '统一成清晨柔光', count: 2 })).toMatchObject({
+      kind: 'execute', plan: { kind: 'canvas_generation', mode: 'unified', originalRequirement: '统一成清晨柔光', providerId: 'image-provider', count: 2, referenceMode: 'visual' }
+    })
+    harness.generation = { ...harness.generation, references: false }
+    expect(await call({ scope: 'unified', brief: 'x' })).toMatchObject({ kind: 'answer', result: { ok: false, summary: '当前生图服务不接受参考图，不能统一重绘。' } })
+  })
+})
+
 describe('blend', () => {
   it('matches tone, fades edges and adds a shadow as layer effects, keeping the asset', async () => {
     const harness = new Harness()

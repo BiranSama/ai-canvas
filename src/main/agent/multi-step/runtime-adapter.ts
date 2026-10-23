@@ -120,6 +120,7 @@ export function createMultiStepPlannerAdapter(options: {
         model: image.defaultModel,
         maxImages,
         localEdits: edits,
+        references,
         summary: `${image.label}（${image.defaultModel}），每次最多 ${maxImages} 张${image.pricePerImageCny === null ? '' : `，约 ¥${image.pricePerImageCny.toFixed(2)}/张`}；${references ? '可以用画布作参考图' : '不接受参考图，只能按文字生成'}；${edits ? image.protocol === 'ark-seedream' ? '局部修改用标注图引导' : '局部修改用蒙版' : '不支持局部修改'}。`
       }
     },

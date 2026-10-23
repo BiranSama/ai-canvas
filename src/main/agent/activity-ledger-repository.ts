@@ -203,9 +203,9 @@ function toolProjection(tool: AgentPlan['tools'][number]): Pick<CreateActivityIn
   const count = tool.kind === 'generation' ? tool.request.count : tool.count
   return {
     kind: 'tool',
-    label: tool.kind === 'canvas_generation' ? '编译画布并生成' : '创建生成任务',
+    label: tool.kind === 'canvas_generation' ? tool.mode === 'unified' ? '统一重绘整张画面' : '编译画布并生成' : '创建生成任务',
     objectLabel: '图片生成',
-    actionLabel: tool.kind === 'canvas_generation' ? '编译参考图与语义提示' : '提交文生图任务',
+    actionLabel: tool.kind === 'canvas_generation' ? tool.mode === 'unified' ? '把除文字外的画面交给生图模型统一重绘' : '编译参考图与语义提示' : '提交文生图任务',
     impactLabel: `将创建 ${count} 张图片`,
     scopeLabel: tool.kind === 'generation'
       ? `${tool.request.aspectWidth}:${tool.request.aspectHeight} · ${tool.request.model}`

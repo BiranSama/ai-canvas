@@ -6,7 +6,7 @@ import { formatBox, transformToBox, typeLabel } from '../tools/geometry'
 import type { ElementRefs } from '../tools/refs'
 import type { AgentToolContext, GenerationResultEntry, ManualLibrary } from '../tools/types'
 
-export const MULTI_STEP_PROMPT_VERSION = 'multi-step-6'
+export const MULTI_STEP_PROMPT_VERSION = 'multi-step-7'
 
 /**
  * Fixed for the whole session so providers can cache it. Per-turn facts go in
@@ -40,6 +40,7 @@ export function multiStepSystemPrompt(manuals: ManualLibrary | null): string {
     '- 生成前先用 look 的 reference 模式看一眼参考图；能局部修改就不要整张重画。',
     '- 要单独生成或替换某个主体时，先放主体占位，再用 generate 的 layer 模式：生图模型看着它下面的画面画这一块，放回后光线和色调与周围一致。不要单独生成一整张图再塞进占位框，那样会很突兀。',
     '- 画布上的图片和周围不协调（色调、明暗不一致，边缘生硬，主体像浮在上面）时，先用 blend 调色调、羽化边缘或加投影，不花钱、可撤销；看过仍不行再考虑重新生成。',
+    '- 画面拼好了但整体不像一张图（光线、质感各不相同）时，可以建议用 generate 的 unified 模式统一重绘；它会花钱，文字不参与、留在最上层。',
     '- 用户说「先不要生成」时，一律不调用生成工具。',
     '',
     '## 规则和记忆',
