@@ -52,8 +52,12 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
     await window.mouse.up()
     await expect(composer).toHaveAttribute('data-island-interacting', 'false')
     const restingFilter = await composer.evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).backdropFilter ?? '')
-    expect(restingFilter).toContain('blur(22px)')
-    expect(restingFilter).toContain('#ai-liquid-glass-fine')
+    // Panels people read and type in rest on an even frost; refraction stays on the tools island.
+    expect(restingFilter).toContain('blur(30px)')
+    expect(restingFilter).not.toContain('#ai-liquid-glass')
+    const toolsFilter = await window.locator('[data-island-id="tools"]').evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).backdropFilter ?? '')
+    // Fine quality, and with it refraction, needs eight or more cores.
+    if (await window.locator('html').getAttribute('data-optical-quality') === 'fine') expect(toolsFilter).toContain('#ai-liquid-glass-fine')
     expect(await window.evaluate(() => localStorage.getItem('ai-canvas.glass-islands.v1'))).not.toBe(layoutBeforeDrag)
 
     await inspector.getByRole('button', { name: '收起检查器' }).evaluate((button: { click(): void }) => button.click())
