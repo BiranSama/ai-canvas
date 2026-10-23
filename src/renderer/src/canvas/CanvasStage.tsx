@@ -1,6 +1,6 @@
 import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
-import { AlignCenterHorizontal, AlignCenterVertical, Check, Circle as CircleIcon, Copy, Crop, Group as GroupIcon, Lock, Minus, Square, Trash2, Type as TypeIcon, Ungroup } from 'lucide-react'
+import { AlignCenterHorizontal, AlignCenterVertical, Check, Circle as CircleIcon, Copy, Crop, Group as GroupIcon, Lock, Minus, Spline, Square, Trash2, Type as TypeIcon, Ungroup } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -19,13 +19,14 @@ import {
   Label,
   Layer,
   Line,
+  Path,
   Rect,
   Stage,
   Tag,
   Text,
   Transformer
 } from 'react-konva'
-import { ELEMENT_SCHEMA_VERSION, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
+import { ELEMENT_SCHEMA_VERSION, pathInBox, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
 import type { EphemeralAnnotationRegion } from '../../../shared/agent'
 import { blendModeLabel, blendModeToCanvasOperation, resolveBlendMode } from '../../../shared/blend-mode'
 import {
@@ -290,6 +291,9 @@ function ElementVisual({ element, width, height, outputScale }: { element: Scene
         </Group>
       )
     case 'shape':
+      if (element.shape === 'path' && element.path !== undefined) {
+        return <Path data={pathInBox(element.path, width, height)} fill={element.fill} {...(element.stroke === null ? {} : { stroke: element.stroke })} strokeWidth={element.strokeWidth * Math.min(width, height)} lineJoin="round" lineCap="round" />
+      }
       if (element.shape === 'ellipse') {
         return <Ellipse x={width / 2} y={height / 2} radiusX={width / 2} radiusY={height / 2} fill={element.fill} {...(element.stroke === null ? {} : { stroke: element.stroke })} strokeWidth={element.strokeWidth * Math.min(width, height)} />
       }
@@ -1770,7 +1774,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     cancelShapeRadiusGesture()
     cancelShapeLineGesture()
     if (element.shape === shape) return
-    void updateElement(element.id, { shape }, `将“${element.name}”改为${shape === 'rectangle' ? '矩形' : shape === 'ellipse' ? '椭圆' : '直线'}`)
+    void updateElement(element.id, { shape }, `将“${element.name}”改为${shape === 'rectangle' ? '矩形' : shape === 'ellipse' ? '椭圆' : shape === 'path' ? '自由形状' : '直线'}`)
   }, [cancelShapeLineGesture, cancelShapeRadiusGesture, updateElement])
 
   const selectionDefaultsToRatio = (
@@ -2254,6 +2258,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
             <button type="button" className={shapeEditElement.shape === 'rectangle' ? 'is-active' : ''} aria-label="矩形" aria-pressed={shapeEditElement.shape === 'rectangle'} title="矩形" onClick={() => changeShapeKind(shapeEditElement, 'rectangle')}><Square size={15} /></button>
             <button type="button" className={shapeEditElement.shape === 'ellipse' ? 'is-active' : ''} aria-label="椭圆" aria-pressed={shapeEditElement.shape === 'ellipse'} title="椭圆" onClick={() => changeShapeKind(shapeEditElement, 'ellipse')}><CircleIcon size={15} /></button>
             <button type="button" className={shapeEditElement.shape === 'line' ? 'is-active' : ''} aria-label="直线" aria-pressed={shapeEditElement.shape === 'line'} title="直线" onClick={() => changeShapeKind(shapeEditElement, 'line')}><Minus size={16} /></button>
+            {/* A shape keeps its outline when switched to another kind, so it can switch back. */}
+            {shapeEditElement.path !== undefined && <button type="button" className={shapeEditElement.shape === 'path' ? 'is-active' : ''} aria-label="自由形状" aria-pressed={shapeEditElement.shape === 'path'} title="自由形状" onClick={() => changeShapeKind(shapeEditElement, 'path')}><Spline size={15} /></button>}
           </div>
           <span className="shape-toolbar-divider" aria-hidden="true" />
           <label className="shape-color-well" title="填充">

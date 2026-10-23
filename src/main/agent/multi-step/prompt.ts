@@ -6,7 +6,7 @@ import { formatBox, transformToBox, typeLabel } from '../tools/geometry'
 import type { ElementRefs } from '../tools/refs'
 import type { AgentToolContext, GenerationResultEntry, ManualLibrary } from '../tools/types'
 
-export const MULTI_STEP_PROMPT_VERSION = 'multi-step-5'
+export const MULTI_STEP_PROMPT_VERSION = 'multi-step-6'
 
 /**
  * Fixed for the whole session so providers can cache it. Per-turn facts go in
@@ -33,6 +33,7 @@ export function multiStepSystemPrompt(manuals: ManualLibrary | null): string {
     '- 对比足够：浅底用深色字，深底用浅色字；同一画面的字体不超过两种。',
     '- 中文排版：标题字间距可略大，正文行高 1.5–1.8，避免一行只剩一个字。',
     '- 做成可编辑的部件：主体用 add_subject 占位，文字用 add_text，光影用 add_light，不要把所有内容画成一张图。',
+    '- 叶子、波浪、徽章、对话框、简单图标这类轮廓，用 add_shape 的 path 画成矢量，清晰、可改、不花钱；复杂写实的主体才交给生图。',
     '',
     '## 花钱的原则',
     '- generate 和 edit_image 会产生费用，只在用户明确要求生成图片时调用。',

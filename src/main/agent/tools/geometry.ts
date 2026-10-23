@@ -81,7 +81,8 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
       ...(element.stroke === null ? [] : [`描边 ${element.stroke}`]),
       ...(element.shadowColor === null ? [] : [`阴影 ${element.shadowColor}`]))
   } else if (element.type === 'shape') {
-    facts.push(`形状 ${element.shape}`, `填充 ${element.fill}`, ...(element.stroke === null ? [] : [`描边 ${element.stroke}`]),
+    facts.push(`形状 ${element.shape}`, ...(element.shape === 'path' && element.path !== undefined ? [`路径 ${element.path.length > 160 ? `${element.path.slice(0, 160)}…（共 ${element.path.length} 字符）` : element.path}`] : []),
+      `填充 ${element.fill}`, ...(element.stroke === null ? [] : [`描边 ${element.stroke}`]),
       ...(element.cornerRadius === 0 ? [] : [`圆角 ${element.cornerRadius}`]))
   } else if (element.type === 'image') {
     const effects = element.effects

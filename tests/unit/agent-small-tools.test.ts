@@ -299,6 +299,29 @@ describe('blend', () => {
   })
 })
 
+describe('free-form shapes', () => {
+  it('draws an outline from SVG path syntax, filling closed ones and stroking open ones', async () => {
+    const harness = new Harness()
+    const leaf = await harness.call('add_shape', { shape: 'path', box: [10, 10, 20, 30], path: 'M50 0 C80 30 80 70 50 100 C20 70 20 30 50 0 Z', color: '#4A7A4A', name: '叶子' })
+    expect(leaf.result).toMatchObject({ ok: true })
+    expect(harness.scene.elements[0]).toMatchObject({
+      type: 'shape', shape: 'path', path: 'M50 0C80 30 80 70 50 100C20 70 20 30 50 0Z', fill: '#4A7A4A', stroke: null, strokeWidth: 0, name: '叶子'
+    })
+    await harness.call('add_shape', { shape: 'path', box: [0, 60, 100, 10], path: 'M0 50 Q25 0 50 50 T100 50', stroke: '#2B5D8A' })
+    expect(harness.scene.elements[1]).toMatchObject({ fill: '#00000000', stroke: '#2B5D8A', strokeWidth: 0.02 })
+
+    expect((await harness.call('add_shape', { shape: 'path', box: [0, 0, 10, 10] })).result).toMatchObject({ ok: false, summary: 'shape=path 需要 path。' })
+    expect((await harness.call('add_shape', { shape: 'path', box: [0, 0, 10, 10], path: 'L1 1' })).result).toMatchObject({ ok: false, summary: '路径无法使用：路径要以 M 开头。' })
+
+    // An existing rectangle can be redrawn as an outline.
+    await harness.call('add_shape', { shape: 'rectangle', box: [40, 40, 20, 20] })
+    await harness.call('update', { targets: ['E3'], set: { path: 'M0 0 L100 0 L50 100 Z' } })
+    expect(harness.scene.elements[2]).toMatchObject({ shape: 'path', path: 'M0 0L100 0L50 100Z' })
+    const facts = (await harness.call('inspect', { targets: ['E3'] })).result.details?.join('\n') ?? ''
+    expect(facts).toContain('路径 M0 0L100 0L50 100Z')
+  })
+})
+
 describe('fonts', () => {
   const FONTS = [
     { family: 'Microsoft YaHei', localName: '微软雅黑', styles: ['Regular', 'Bold'], chinese: true },

@@ -8,19 +8,19 @@
     "id": "plan-once",
     "version": 1
   },
-  "promptFingerprint": "p1-30c1a7bbcb5687f6",
+  "promptFingerprint": "p1-21b3f80487dd5a48",
   "llm": {
     "protocol": "ark-responses",
     "transport": "stream"
   },
-  "recordedAt": "2026-10-23T19:00:36.175Z",
+  "recordedAt": "2026-10-23T19:12:54.605Z",
   "note": "Hand-written Ark Responses SSE stream that answers with layout advice and no tools. Request shapes are stamped from the current engine with AI_CANVAS_EVAL_REFRESH_RECORDINGS=1.",
   "exchanges": [
     {
       "index": 0,
       "request": {
-        "bodySha256": "41f6378f62ef3f7060ce2be78e269c15ab1ee7174a3432bf91e7d4a60c527fea",
-        "normalizedBodySha256": "88b2129703877a5a34c4caacfdb07b146412f54336c527f00f5c78f7f0a825c5",
+        "bodySha256": "583025396e69c78e07be178c587735fba3180a1ca66bb5f18c4e313bd3575614",
+        "normalizedBodySha256": "16c8faeddd7f7c6935289a8935203bc87efd64bf56901bf913641802ba535bc2",
         "shape": {
           "endpoint": "responses",
           "method": "POST",
@@ -34,7 +34,7 @@
           ],
           "hasImages": false,
           "instructionsSha256": "0675ad770fc771a02cd1d36ca2b2b04388243fc28a1be1c5c28b2c944b6b5d53",
-          "toolsSha256": "8caad2e110555a998554c864ec1b69a48c91e63d6201cca76d89ff79ac70d34f"
+          "toolsSha256": "0c51898e6f285d77d08d017938181ebe766a8d44e61df3574c647a23d8060486"
         }
       },
       "response": {

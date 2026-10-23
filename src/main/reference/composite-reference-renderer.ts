@@ -1,5 +1,5 @@
 import sharp from 'sharp'
-import { sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
+import { pathInBox, sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
@@ -14,6 +14,16 @@ export interface CompositeRenderResult {
 
 function escapeXml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;')
+}
+
+/** An SVG paint for a canvas colour: #RRGGBBAA as rgba(), and fully transparent as none. */
+export function svgPaint(color: string): string {
+  const match = /^#([\da-f]{6})([\da-f]{2})$/i.exec(color)
+  if (match === null) return escapeXml(color)
+  const alpha = parseInt(match[2]!, 16) / 255
+  if (alpha === 0) return 'none'
+  const rgb = match[1]!
+  return `rgba(${parseInt(rgb.slice(0, 2), 16)},${parseInt(rgb.slice(2, 4), 16)},${parseInt(rgb.slice(4, 6), 16)},${Number(alpha.toFixed(3))})`
 }
 
 function finite(value: number): string {
@@ -170,6 +180,10 @@ async function elementSvg(
     const fill = escapeXml(element.fill)
     const stroke = element.stroke === null ? 'none' : escapeXml(element.stroke)
     const strokeWidth = Math.max(0, element.strokeWidth * Math.min(width, height))
+    if (element.shape === 'path' && element.path !== undefined) {
+      const ownWidth = Math.max(0, element.strokeWidth * Math.min(box.w, box.h))
+      return `${groupStart}<path d="${pathInBox(element.path, box.w, box.h, box.x, box.y)}" fill="${svgPaint(element.fill)}" stroke="${element.stroke === null ? 'none' : svgPaint(element.stroke)}" stroke-width="${finite(ownWidth)}" stroke-linejoin="round" stroke-linecap="round"/>${groupEnd}`
+    }
     if (element.shape === 'ellipse') return `${groupStart}<ellipse cx="${finite(box.x + box.w / 2)}" cy="${finite(box.y + box.h / 2)}" rx="${finite(box.w / 2)}" ry="${finite(box.h / 2)}" fill="${fill}" stroke="${stroke}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`
     if (element.shape === 'line') return `${groupStart}<line x1="${finite(box.x)}" y1="${finite(box.y + box.h / 2)}" x2="${finite(box.x + box.w)}" y2="${finite(box.y + box.h / 2)}" stroke="${stroke === 'none' ? fill : stroke}" stroke-width="${finite(Math.max(1, strokeWidth))}"/>${groupEnd}`
     return `${groupStart}<rect x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" rx="${finite(Math.min(box.w, box.h) * element.cornerRadius)}" fill="${fill}" stroke="${stroke}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`

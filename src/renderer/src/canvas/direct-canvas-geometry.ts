@@ -12,7 +12,7 @@ interface CanvasViewportSize {
 
 export type ShapeEditAnchor = 'top-left' | 'top-center' | 'top-right' | 'middle-left' | 'middle-right' | 'bottom-left' | 'bottom-center' | 'bottom-right'
 
-export function shapeEditAnchors(shape: 'rectangle' | 'ellipse' | 'line'): readonly ShapeEditAnchor[] {
+export function shapeEditAnchors(shape: 'rectangle' | 'ellipse' | 'line' | 'path'): readonly ShapeEditAnchor[] {
   if (shape === 'line') return ['middle-left', 'middle-right']
   if (shape === 'ellipse') return ['top-center', 'middle-left', 'middle-right', 'bottom-center']
   return ['top-left', 'top-center', 'top-right', 'middle-left', 'middle-right', 'bottom-left', 'bottom-center', 'bottom-right']

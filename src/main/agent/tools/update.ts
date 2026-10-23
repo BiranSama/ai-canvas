@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { SceneElement } from '../../../domain'
+import { normalizeSvgPath, type SceneElement } from '../../../domain'
 import type { sceneElementChangesSchema } from '../../../shared/agent-atomic-tools'
 import { boxToTransform, colorSchema, percentBoxSchema } from './geometry'
 import { sceneWrite } from './scene-write'
@@ -28,7 +28,8 @@ const setSchema = z.object({
   visible: z.boolean().optional(),
   locked: z.boolean().optional(),
   subject: z.string().min(1).max(1_000).optional().describe('主体占位的主体描述'),
-  intensity: z.number().min(0).max(1).optional().describe('光的强度')
+  intensity: z.number().min(0).max(1).optional().describe('光的强度'),
+  path: z.string().min(1).max(20_000).optional().describe('改成这条 SVG 路径的自由形状，坐标是框里的 0–100')
 }).strict()
 
 type SetArgs = z.infer<typeof setSchema>
@@ -40,6 +41,7 @@ function changesFor(element: SceneElement, set: SetArgs): Changes | string {
   if (textOnly.length > 0 && element.type !== 'text') return `${textOnly.join('、')} 只能用于文字对象。`
   if (set.subject !== undefined && element.type !== 'placeholder') return 'subject 只能用于主体占位。'
   if (set.intensity !== undefined && element.type !== 'light') return 'intensity 只能用于光。'
+  if (set.path !== undefined && element.type !== 'shape') return 'path 只能用于形状。'
   if (set.color !== undefined && !['text', 'shape', 'light'].includes(element.type)) return 'color 只能用于文字、形状和光。'
   if (set.stroke !== undefined && !['text', 'shape'].includes(element.type)) return 'stroke 只能用于文字和形状。'
   if (set.box !== undefined && (set.move !== undefined || set.scale !== undefined)) return 'box 不能和 move、scale 同时使用。'
@@ -89,6 +91,12 @@ function changesFor(element: SceneElement, set: SetArgs): Changes | string {
     if (set.stroke !== undefined) {
       changes.stroke = set.stroke
       changes.strokeWidth = set.stroke === null ? 0 : Math.max(element.strokeWidth, 0.004)
+    }
+    if (set.path !== undefined) {
+      const normalized = normalizeSvgPath(set.path)
+      if ('error' in normalized) return `路径无法使用：${normalized.error}`
+      changes.shape = 'path'
+      changes.path = normalized.path
     }
   } else if (element.type === 'light') {
     if (set.color !== undefined) changes.color = set.color

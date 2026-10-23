@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseSvgPath } from './svg-path'
 import { creativeContextSchema, elementControlIntentSchema, elementProvenanceSchema, textVisualWeightSchema } from '../creative/schema'
 
 export const SCENE_SCHEMA_VERSION = 1 as const
@@ -131,7 +132,9 @@ export const sketchElementSchema = z.object({
 export const shapeElementSchema = z.object({
   ...elementBaseShape,
   type: z.literal('shape'),
-  shape: z.enum(['rectangle', 'ellipse', 'line']),
+  shape: z.enum(['rectangle', 'ellipse', 'line', 'path']),
+  /** For a path: its outline in the shape's box, 0–100 per axis, normalized (see svg-path). */
+  path: z.string().min(1).max(60_000).optional(),
   fill: colorSchema,
   stroke: colorSchema.nullable(),
   strokeWidth: finiteNumber.min(0).max(1),
@@ -265,6 +268,13 @@ export const sceneSchema = sceneBaseSchema.superRefine((scene, context) => {
             message: 'Every group child must exist and point back to the group.'
           })
         }
+      }
+    }
+
+    if (element.type === 'shape' && element.shape === 'path') {
+      const parsed = element.path === undefined ? { error: 'A path shape needs path data.' } : parseSvgPath(element.path)
+      if ('error' in parsed) {
+        context.addIssue({ code: 'custom', path: ['elements', index, 'path'], message: parsed.error })
       }
     }
 
