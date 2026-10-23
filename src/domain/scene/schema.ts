@@ -54,6 +54,24 @@ const elementBaseShape = {
   provenance: elementProvenanceSchema.optional()
 }
 
+export const imageEffectsSchema = z.object({
+  /** Per channel r, g, b: value × gain + offset, offset in 0–255 units. */
+  colorMatch: z.object({
+    gain: z.tuple([finiteNumber.min(0.5).max(2), finiteNumber.min(0.5).max(2), finiteNumber.min(0.5).max(2)]),
+    offset: z.tuple([finiteNumber.min(-128).max(128), finiteNumber.min(-128).max(128), finiteNumber.min(-128).max(128)])
+  }).nullable().default(null),
+  /** Width of the fade at the image's edges, as a share of its shorter side. */
+  feather: finiteNumber.min(0).max(0.5).default(0),
+  /** A soft shadow cast by the image's opaque parts; sizes are shares of its shorter side. */
+  shadow: z.object({
+    color: colorSchema,
+    opacity: finiteNumber.min(0).max(1),
+    blur: finiteNumber.min(0).max(0.5),
+    offsetX: finiteNumber.min(-0.5).max(0.5),
+    offsetY: finiteNumber.min(-0.5).max(0.5)
+  }).nullable().default(null)
+})
+
 export const imageElementSchema = z.object({
   ...elementBaseShape,
   type: z.literal('image'),
@@ -65,7 +83,9 @@ export const imageElementSchema = z.object({
     height: finiteNumber.positive().max(1)
   }),
   fit: z.enum(['cover', 'contain', 'fill']),
-  referenceRole: z.enum(['subject', 'style', 'composition', 'color', 'material', 'general'])
+  referenceRole: z.enum(['subject', 'style', 'composition', 'color', 'material', 'general']),
+  /** Layer effects that blend the image into the picture; the asset itself is never changed. */
+  effects: imageEffectsSchema.optional()
 })
 
 export const textElementSchema = z.object({
@@ -300,5 +320,6 @@ export type Scene = z.infer<typeof sceneSchema>
 export type SceneElement = z.infer<typeof sceneElementSchema>
 export type SceneRelation = z.infer<typeof sceneRelationSchema>
 export type BlendMode = z.infer<typeof blendModeSchema>
+export type ImageEffects = z.infer<typeof imageEffectsSchema>
 export type NormalizedTransform = z.infer<typeof normalizedTransformSchema>
 export type Canvas = z.infer<typeof canvasSchema>

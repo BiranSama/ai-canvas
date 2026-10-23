@@ -1317,6 +1317,16 @@ select:focus-visible {
 .font-picker-empty { margin: 14px 8px; color: var(--faint-slate); font-size: 11px; }
 .font-picker-popover footer { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-top: 1px solid var(--hairline); color: var(--faint-slate); font-size: 10px; }
 .font-picker-popover footer button { display: inline-flex; align-items: center; gap: 4px; border: 0; color: var(--muted-slate); background: transparent; font-size: 10px; cursor: pointer; }
+.image-blend-section .blend-row { display: grid; min-height: 32px; grid-template-columns: 64px minmax(0, 1fr) 36px; align-items: center; gap: 8px; color: var(--muted-slate); font-size: 11px; }
+.image-blend-section .blend-row[role="group"] { grid-template-columns: 64px minmax(0, 1fr); }
+.image-blend-section .blend-row input[type="range"] { width: 100%; accent-color: var(--quiet-blue); }
+.image-blend-section .blend-row output { color: var(--faint-slate); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+.blend-tone-buttons { display: flex; gap: 5px; }
+.blend-tone-buttons button { min-width: 34px; height: 28px; padding: 0 9px; border: 1px solid var(--hairline); border-radius: 8px; color: var(--graphite); background: var(--field); font-size: 11px; cursor: pointer; }
+.blend-tone-buttons button:hover:not(:disabled) { border-color: rgba(55,107,255,.28); color: var(--quiet-blue); }
+.blend-tone-buttons button.is-quiet { border-color: transparent; color: var(--faint-slate); background: transparent; }
+.blend-tone-buttons button:disabled { cursor: progress; opacity: .6; }
+.field-note.is-problem { color: #9a5852; }
 .field-grid { display: grid; gap: 7px; }
 .field-grid.two-columns { grid-template-columns: 1fr 1fr; }
 .compact-field { display: grid; height: 29px; grid-template-columns: 28px minmax(0,1fr); align-items: center; }

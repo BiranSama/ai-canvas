@@ -32,6 +32,7 @@ import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode
 import { useWorkspaceStore } from '../store/workspace-store'
 import { CanvasSizeControl } from './CanvasSizeControl'
 import { FontPicker } from './FontPicker'
+import { ImageBlendSection } from './ImageBlendSection'
 import { ImeSafeInput, ImeSafeTextarea } from './ImeSafeTextField'
 import { simplePropertiesFor, type SimplePropertyDefinition } from '../inspector/property-schema'
 
@@ -402,6 +403,9 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
           <label className="wide-field"><span>参考角色</span><select value={element.referenceRole} onChange={(event) => updateElement(element.id, { referenceRole: event.currentTarget.value })}><option value="general">普通元素</option><option value="subject">主体参考</option><option value="style">风格参考</option><option value="composition">构图参考</option><option value="color">色彩参考</option><option value="material">材质参考</option></select></label>
           <p className="field-note">双击画布图片会打开此属性入口；裁切框将在后续高级编辑中继续扩展。</p>
         </div>
+      )}
+      {element.type === 'image' && showSection('融入画面 融合 色调 羽化 投影 阴影 blend tone feather shadow') && (
+        <ImageBlendSection element={element} onChange={(effects) => updateElement(element.id, { effects })} />
       )}
       {element.type === 'sketch' && showSection('草图 参考强度 最终导出 sketch fidelity visible') && (
         <div className="inspector-section">

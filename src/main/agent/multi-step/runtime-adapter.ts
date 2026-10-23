@@ -12,6 +12,7 @@ import { openAiImagesCapabilitiesFor, seedreamCapabilitiesFor, TASK_IMAGES_CAPAB
 import type { ProviderCapabilities } from '../../../shared/generation'
 import { MultiStepPlannerAdapter, type MultiStepModel } from './multi-step-planner'
 import { SceneLooker } from './scene-looker'
+import { measureToneMatch } from '../../edit/tone-match'
 import { localFontCatalog } from '../../fonts/local-font-catalog'
 import type { LocalFontFamily } from '../../../shared/local-fonts'
 
@@ -64,17 +65,24 @@ export function createMultiStepPlannerAdapter(options: {
     if (bytes.length > MAX_IMAGE_BYTES) return null
     return { image: { mimeType: mimeFor(resolved.asset.format), base64: bytes.toString('base64') }, bytes: bytes.length }
   }
+  const resolveAssetPath = async (assetId: string): Promise<string | null> => {
+    try {
+      return (await options.assets.resolveAsset(assetId)).filePath
+    } catch {
+      return null
+    }
+  }
   return new MultiStepPlannerAdapter({
     scene: options.scene,
     manuals: BUILT_IN_MANUALS,
     fonts: options.fonts ?? (() => localFontCatalog.list()),
-    looker: new SceneLooker(async (assetId) => {
-      try {
-        return (await options.assets.resolveAsset(assetId)).filePath
-      } catch {
-        return null
-      }
-    }),
+    measureTone: async (elementId, strength) => {
+      const scene = options.scene()
+      const element = scene.elements.find((candidate) => candidate.id === elementId)
+      if (element?.type !== 'image') return null
+      return measureToneMatch(scene, element, resolveAssetPath, strength).catch(() => null)
+    },
+    looker: new SceneLooker(resolveAssetPath),
     model: async (): Promise<MultiStepModel> => {
       const { llm } = await providers()
       if (llm === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !await options.secrets.has('openai-compatible-llm')) {

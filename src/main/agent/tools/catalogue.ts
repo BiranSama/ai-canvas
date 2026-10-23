@@ -17,6 +17,7 @@ import { inspectTool } from './inspect'
 import { loadManualTool } from './load-manual'
 import { lookTool } from './look'
 import { placeResultTool } from './place-result'
+import { blendTool } from './blend'
 import { rememberTool } from './remember'
 import { removeTool } from './remove'
 import { reorderTool } from './reorder'
@@ -31,7 +32,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec<never>[] = [
   lookTool, inspectTool, viewResultTool,
   setCanvasTool, addTextTool, addShapeTool, updateTool, arrangeTool, reorderTool, groupTool, removeTool,
   addSubjectTool, addLightTool, addMaskTool, undoTool,
-  generateTool, editImageTool, placeResultTool, cancelGenerationTool,
+  generateTool, editImageTool, placeResultTool, blendTool, cancelGenerationTool,
   askUserTool, rememberTool, loadManualTool
 ] as readonly AgentToolSpec<unknown>[] as readonly AgentToolSpec<never>[]
 

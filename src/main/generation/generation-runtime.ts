@@ -78,6 +78,7 @@ import { compileDesignDirectionSelection } from '../agent/design-direction-selec
 import { EditMaskCompiler } from '../edit'
 import { extractLayer, inContextLayerJob, layerRegion, layersBelow, regionMask, regionTransform, type LayerRegion } from '../edit/layer-in-context'
 import { subScene } from '../reference/sub-scene'
+import { measureToneMatch, type ToneMeasurement } from '../edit/tone-match'
 import type { AssetMetadata } from '../storage/project-repository'
 import { buildTransientAnnotationMasks } from '../../shared/ephemeral-annotation'
 import { ProviderSettingsService } from '../security/provider-settings-service'
@@ -1166,6 +1167,23 @@ export class GenerationRuntime {
     } finally {
       await rm(stagingPath, { force: true })
     }
+  }
+
+  /** The colour shift that moves an image on the canvas part of the way towards the picture around it. */
+  async matchImageTone(input: { readonly elementId: string; readonly strength: number }): Promise<ToneMeasurement | null> {
+    const owner = this.#project
+    const scene = this.#sceneService.state().scene
+    const element = scene.elements.find((candidate) => candidate.id === input.elementId)
+    if (element?.type !== 'image') return null
+    const measured = await measureToneMatch(scene, element, async (assetId) => {
+      try {
+        return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+      } catch {
+        return null
+      }
+    }, input.strength)
+    this.#assertGenerationProject(owner)
+    return measured
   }
 
   getSceneAuthorityState(): ReturnType<SceneService['state']> {

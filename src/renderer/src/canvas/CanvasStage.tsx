@@ -60,6 +60,7 @@ import {
   type SnapGuide
 } from './direct-canvas-geometry'
 import { SemanticSketchVisual } from './SemanticSketchVisual'
+import { drawRect, renderImageEffects } from './image-effects'
 
 interface Size {
   width: number
@@ -189,6 +190,13 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   useSyncExternalStore(subscribeRuntimeAssets, getRuntimeAssetVersion, getRuntimeAssetVersion)
   const assetUrl = getRuntimeAssetUrl(element.assetId)
   const image = useHtmlImage(assetUrl)
+  const shownWidth = Math.round(width)
+  const shownHeight = Math.round(height)
+  const effected = useMemo(
+    () => image === null ? null : renderImageEffects(image, element, shownWidth, shownHeight),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
+    [image, element.crop, element.fit, element.effects, shownWidth, shownHeight]
+  )
   if (image === null) {
     const missing = isRuntimeAssetMissing(element.assetId)
     const loading = isRuntimeAssetLoading(element.assetId)
@@ -206,39 +214,30 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
       </Group>
     )
   }
-  const cropX = image.width * element.crop.x
-  const cropY = image.height * element.crop.y
-  const cropWidth = image.width * element.crop.width
-  const cropHeight = image.height * element.crop.height
-  const sourceRatio = cropWidth / cropHeight
-  const targetRatio = width / height
-  let drawWidth = width
-  let drawHeight = height
-  let x = 0
-  let y = 0
-  if (element.fit !== 'fill') {
-    const contain = element.fit === 'contain'
-    const useWidth = contain ? sourceRatio > targetRatio : sourceRatio < targetRatio
-    if (useWidth) {
-      drawHeight = width / sourceRatio
-      y = (height - drawHeight) / 2
-    } else {
-      drawWidth = height * sourceRatio
-      x = (width - drawWidth) / 2
-    }
+  if (effected !== null) {
+    // Drawn at the shown size; scaled back to the box while a resize is between whole pixels.
+    const scaleX = width / effected.drawn.width
+    const scaleY = height / effected.drawn.height
+    return (
+      <Group>
+        {effected.shadow !== null && <KonvaImage image={effected.shadow.canvas} x={effected.shadow.x * scaleX} y={effected.shadow.y * scaleY} scaleX={scaleX} scaleY={scaleY} listening={false} />}
+        <KonvaImage image={effected.drawn} width={width} height={height} />
+      </Group>
+    )
   }
+  const { crop, draw } = drawRect(image, element, width, height)
   return (
     <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
       <KonvaImage
         image={image}
-        x={x}
-        y={y}
-        width={drawWidth}
-        height={drawHeight}
-        cropX={cropX}
-        cropY={cropY}
-        cropWidth={cropWidth}
-        cropHeight={cropHeight}
+        x={draw.x}
+        y={draw.y}
+        width={draw.width}
+        height={draw.height}
+        cropX={crop.x}
+        cropY={crop.y}
+        cropWidth={crop.width}
+        cropHeight={crop.height}
       />
     </Group>
   )

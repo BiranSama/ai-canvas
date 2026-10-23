@@ -84,7 +84,13 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
     facts.push(`形状 ${element.shape}`, `填充 ${element.fill}`, ...(element.stroke === null ? [] : [`描边 ${element.stroke}`]),
       ...(element.cornerRadius === 0 ? [] : [`圆角 ${element.cornerRadius}`]))
   } else if (element.type === 'image') {
-    facts.push(`适配 ${element.fit}`, `参考用途 ${element.referenceRole}`)
+    const effects = element.effects
+    const blend = effects === undefined ? [] : [
+      ...(effects.colorMatch === null ? [] : ['色调已匹配周围']),
+      ...(effects.feather === 0 ? [] : [`边缘羽化 ${round1(effects.feather * 100)}%`]),
+      ...(effects.shadow === null ? [] : [`投影浓度 ${effects.shadow.opacity}`])
+    ]
+    facts.push(`适配 ${element.fit}`, `参考用途 ${element.referenceRole}`, ...(blend.length === 0 ? [] : [`融合：${blend.join('、')}`]))
   } else if (element.type === 'placeholder') {
     facts.push(`主体「${element.subject}」`, ...(element.pose === '' ? [] : [`姿态 ${element.pose}`]))
   } else if (element.type === 'light') {

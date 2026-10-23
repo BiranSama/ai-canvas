@@ -1,3 +1,4 @@
+import type { ToneMeasurement } from '../../edit/tone-match'
 import type { LocalFontFamily } from '../../../shared/local-fonts'
 import type { z } from 'zod'
 import type { Scene, SceneElement } from '../../../domain'
@@ -62,6 +63,8 @@ export interface AgentToolContext {
   readonly screenshots?: 'allowed' | 'ask' | 'declined'
   readonly manuals?: ManualLibrary | null
   readonly readAsset?: ((assetId: string) => Promise<LlmImage>) | null
+  /** Measures how far an image's colour sits from the picture around it; null when Main cannot render here. */
+  readonly measureTone?: ((elementId: string, strength: number) => Promise<ToneMeasurement | null>) | null
   /** Font families installed on this computer; empty when unknown, and then any name is accepted. */
   readonly fonts?: readonly LocalFontFamily[]
 }

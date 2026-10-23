@@ -54,10 +54,12 @@ import type { DiagnosticExportResult } from './diagnostics'
 import type { ProjectWorkContext } from './project-work-context'
 import type { GenerationReferencePreviewInput, GenerationReferencePreview } from './generation-reference'
 import type { LocalFontFamily } from './local-fonts'
+import type { ImageEffects } from '../domain'
 
 export const DESKTOP_CHANNELS = {
   runtimeInfo: 'desktop:runtime-info',
   localFonts: 'desktop:local-fonts',
+  imageToneMatch: 'scene:image-tone-match',
   appearanceSettings: 'appearance:settings',
   appearanceSettingsSet: 'appearance:settings-set',
   diagnosticExport: 'diagnostic:export',
@@ -179,6 +181,8 @@ export interface DesktopApi {
   getRuntimeInfo(): Promise<RuntimeInfo>
   /** Font families installed on this computer, scanned once per run unless asked to rescan. */
   listLocalFonts(rescan?: boolean): Promise<readonly LocalFontFamily[]>
+  /** How to shift an image's colour part of the way (strength 0–1) towards the picture around it; null when it cannot be measured. */
+  matchImageTone(input: { readonly elementId: string; readonly strength: number }): Promise<{ readonly colorMatch: NonNullable<ImageEffects['colorMatch']>; readonly opaque: boolean } | null>
   getAppearanceSettings(): Promise<AppearanceSettingsSnapshot>
   setAppearanceSettings(input: AppearanceSettingsUpdate): Promise<AppearanceSettingsSnapshot>
   exportDiagnostics(): Promise<DiagnosticExportResult>

@@ -1,5 +1,6 @@
 import sharp from 'sharp'
-import { sceneSchema, type Scene, type SceneElement } from '../../domain'
+import { sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
+import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
 import { layoutTextLines } from './text-layout'
@@ -45,6 +46,36 @@ async function imageDataUri(path: string | Buffer, element: Extract<SceneElement
   return `data:image/png;base64,${cropped.toString('base64')}`
 }
 
+/**
+ * The image drawn into its box with its effects applied, and its shadow
+ * beneath, as the canvas draws them.
+ */
+async function imageWithEffects(
+  uri: string,
+  element: Extract<SceneElement, { type: 'image' }>,
+  effects: ImageEffects,
+  box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+): Promise<string> {
+  const width = Math.max(1, Math.round(box.w))
+  const height = Math.max(1, Math.round(box.h))
+  const pixels = await sharp(Buffer.from(uri.slice(uri.indexOf(',') + 1), 'base64'))
+    .resize(width, height, { fit: element.fit, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .ensureAlpha()
+    .raw()
+    .toBuffer()
+  applyImageEffects(pixels, width, height, effects)
+  const drawn = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer()
+  let shadow = ''
+  if (effects.shadow !== null && effects.shadow.opacity > 0) {
+    const geometry = shadowGeometry(effects.shadow, width, height)
+    const silhouette = sharp(Buffer.from(shadowSilhouette(pixels, width, height, effects.shadow)), { raw: { width, height, channels: 4 } })
+      .extend({ top: geometry.padding, bottom: geometry.padding, left: geometry.padding, right: geometry.padding, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    const blurred = await (geometry.sigma >= 0.3 ? silhouette.blur(geometry.sigma) : silhouette).png().toBuffer()
+    shadow = `<image x="${finite(box.x - geometry.padding + geometry.offsetX)}" y="${finite(box.y - geometry.padding + geometry.offsetY)}" width="${width + geometry.padding * 2}" height="${height + geometry.padding * 2}" href="data:image/png;base64,${blurred.toString('base64')}" preserveAspectRatio="none"/>`
+  }
+  return `${shadow}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="data:image/png;base64,${drawn.toString('base64')}" preserveAspectRatio="none"/>`
+}
+
 function transform(element: SceneElement, width: number, height: number): { x: number; y: number; w: number; h: number; rotate: string } {
   const x = element.transform.x * width
   const y = element.transform.y * height
@@ -78,6 +109,7 @@ async function elementSvg(
     }
     try {
       const uri = await imageDataUri(path, element)
+      if (hasVisibleEffects(element.effects)) return `${groupStart}${await imageWithEffects(uri, element, element.effects, box)}${groupEnd}`
       const aspect = element.fit === 'cover' ? 'xMidYMid slice' : element.fit === 'contain' ? 'xMidYMid meet' : 'none'
       return `${groupStart}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="${uri}" preserveAspectRatio="${aspect}"/>${groupEnd}`
     } catch {

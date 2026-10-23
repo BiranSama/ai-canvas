@@ -68,8 +68,8 @@ class Harness {
 describe('small agent tools', () => {
   it('keeps the whole catalogue small, uniquely named and valid for every protocol', () => {
     const definitions = llmToolDefinitions(AGENT_TOOLS as never)
-    expect(definitions).toHaveLength(22)
-    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(22)
+    expect(definitions).toHaveLength(23)
+    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(23)
     for (const definition of definitions) expect(definition.name).toMatch(/^[a-z_]{1,64}$/)
     expect(JSON.stringify(definitions).length).toBeLessThan(20_000)
   })
@@ -254,6 +254,48 @@ describe('generate a layer', () => {
     expect((await call({ scope: 'layer', target: 'E2', brief: 'x' })).step).toMatchObject({ kind: 'answer', result: { ok: false, summary: 'E2 不是主体占位或图片。' } })
     harness.generation = { ...harness.generation, localEdits: false }
     expect((await call({ scope: 'layer', target: 'E1', brief: 'x' })).step).toMatchObject({ kind: 'answer', result: { ok: false, summary: '当前生图服务不支持局部重画。' } })
+  })
+})
+
+describe('blend', () => {
+  it('matches tone, fades edges and adds a shadow as layer effects, keeping the asset', async () => {
+    const harness = new Harness()
+    const image = {
+      id: '00000000-0000-4000-8000-000000000501', version: 1, type: 'image', name: '香水瓶', description: '',
+      transform: { x: 0.3, y: 0.3, width: 0.4, height: 0.4, rotation: 0 }, zIndex: 0, opacity: 1, blendMode: 'normal', visible: true, locked: false,
+      groupId: null, semanticRole: 'content', referencePolicy: 'include', assetId: '00000000-0000-4000-8000-000000000502',
+      crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general'
+    } as const
+    harness.scene = { ...harness.scene, elements: [image] }
+    harness.refs.sync(harness.scene)
+    const measured: [string, number][] = []
+    const context = (opaque: boolean): AgentToolContext => ({
+      ...harness.context(),
+      measureTone: async (elementId, strength) => {
+        measured.push([elementId, strength])
+        return { colorMatch: { gain: [1, 1, 1], offset: [-6, 2, 9] }, opaque }
+      }
+    })
+    const blend = async (args: Record<string, unknown>, opaque = true) => (await prepareAgentToolCall({ callId: 'b', name: 'blend', argumentsText: JSON.stringify(args), arguments: args, argumentsError: null }, context(opaque))).step
+    const changes = (step: Awaited<ReturnType<typeof blend>>) => step.kind === 'execute' && step.plan.kind === 'scene.update_elements' ? step.plan.updates[0]!.changes : null
+
+    // Only the target: moderate tone, and a little feather for an opaque picture.
+    const defaults = await blend({ target: 'E1' })
+    expect(changes(defaults)).toEqual({ effects: { colorMatch: { gain: [1, 1, 1], offset: [-6, 2, 9] }, feather: 0.04, shadow: null } })
+    expect(measured).toEqual([[image.id, 0.4]])
+    // A cut-out gets no feather by default; a shadow is asked for explicitly.
+    expect(changes(await blend({ target: 'E1' }, false))).toMatchObject({ effects: { feather: 0 } })
+    expect(changes(await blend({ target: 'E1', shadow: 0.5 }))).toEqual({ effects: { colorMatch: null, feather: 0, shadow: { color: '#000000', opacity: 0.275, blur: 0.04, offsetX: 0, offsetY: 0.025 } } })
+
+    // The plan is a valid scene write; later calls build on what is set and 0 removes.
+    const executed = new CommandBus(harness.scene, { now: () => NOW }).execute({ id: harness.newId(), origin: 'agent', summary: 'blend', commands: compile(agentToolPlanSchema.parse((defaults as { plan: AgentToolPlan }).plan)) })
+    if (!executed.ok) throw new Error(JSON.stringify(executed.error))
+    harness.scene = executed.scene
+    expect(harness.scene.elements[0]).toMatchObject({ assetId: image.assetId, effects: { feather: 0.04 } })
+    expect(changes(await blend({ target: 'E1', tone: 0, feather: 0.1 }))).toEqual({ effects: { colorMatch: null, feather: 0.1, shadow: null } })
+
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    expect(await blend({ target: 'E2' })).toMatchObject({ kind: 'answer', result: { ok: false, summary: 'E2 不是图片。' } })
   })
 })
 

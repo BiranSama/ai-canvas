@@ -60,6 +60,11 @@ export const appearanceSettingsSetSchema = appearanceSettingsUpdateSchema
 export const diagnosticExportSchema = diagnosticExportInputSchema
 
 export const generationJobIdSchema = z.string().min(1).max(200)
+
+export const imageToneMatchSchema = z.object({
+  elementId: z.string().uuid(),
+  strength: z.number().finite().min(0).max(1)
+}).strict()
 export const generationEnqueueSchema = generationRequestSchema
 export const generationProfileEnqueueSchema = generationProfileRequestSchema
 export const generationRetrySchema = z.object({
