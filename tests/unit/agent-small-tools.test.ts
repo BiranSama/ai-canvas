@@ -241,6 +241,22 @@ describe('look', () => {
   })
 })
 
+describe('generate a layer', () => {
+  it('redraws one placeholder in context when the service can repaint part of an image', async () => {
+    const harness = new Harness()
+    harness.generation = { providerId: 'image-provider', model: 'seedream', maxImages: 4, localEdits: true }
+    await harness.call('add_subject', { subject: '香水瓶', box: [30, 30, 40, 40] })
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    const call = (args: unknown) => prepareAgentToolCall({ callId: 'g', name: 'generate', argumentsText: JSON.stringify(args), arguments: args as Record<string, unknown>, argumentsError: null }, harness.context())
+    const { step } = await call({ scope: 'layer', target: 'E1', brief: '磨砂玻璃香水瓶，清晨侧光' })
+    expect(step).toMatchObject({ kind: 'execute', plan: { kind: 'canvas_edit', mode: 'in-context', prompt: '磨砂玻璃香水瓶，清晨侧光', providerId: 'image-provider', count: 1 } })
+    expect((await call({ scope: 'layer', brief: 'x' })).step).toMatchObject({ kind: 'answer', result: { ok: false, summary: 'scope=layer 需要 target。' } })
+    expect((await call({ scope: 'layer', target: 'E2', brief: 'x' })).step).toMatchObject({ kind: 'answer', result: { ok: false, summary: 'E2 不是主体占位或图片。' } })
+    harness.generation = { ...harness.generation, localEdits: false }
+    expect((await call({ scope: 'layer', target: 'E1', brief: 'x' })).step).toMatchObject({ kind: 'answer', result: { ok: false, summary: '当前生图服务不支持局部重画。' } })
+  })
+})
+
 describe('fonts', () => {
   const FONTS = [
     { family: 'Microsoft YaHei', localName: '微软雅黑', styles: ['Regular', 'Bold'], chinese: true },

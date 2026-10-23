@@ -46,6 +46,8 @@ export interface AgentToolContext {
     readonly maxImages: number
     /** What the model can do, in one line for the turn brief. */
     readonly summary?: string
+    /** Whether the service can repaint part of an image (a mask or a marked region). */
+    readonly localEdits?: boolean
   } | null
   readonly activeJobId: string | null
   readonly sourceMessageId: string | null

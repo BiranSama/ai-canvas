@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import sharp from 'sharp'
 import { summarizeGenerationCosts } from '../../shared/generation-cost'
 import { generationReferencePreviewInputSchema, type GenerationReferencePreviewInput, type GenerationReferencePreview, type GenerationReferenceSource } from '../../shared/generation-reference'
 import { resolveGenerationReference } from '../reference/generation-reference-source'
@@ -7,7 +8,7 @@ import { lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { AgentPlan, AgentRequest, AgentRun, AgentToolOutcome, AgentToolPlan, ConversationSnapshot, SceneSummary } from '../../shared/agent'
 import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../shared/agent'
-import { ELEMENT_SCHEMA_VERSION, type Scene, type SceneElement } from '../../domain'
+import { ELEMENT_SCHEMA_VERSION, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 import type { AgentEvent, AgentHarnessSnapshot, AgentMode, AgentTaskDispatch, TaskRelation, TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
@@ -75,6 +76,9 @@ import { projectWorkContextSchema, type ProjectWorkContext } from '../../shared/
 import { blendModeCommandViolation, compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../agent/atomic-scene-tools'
 import { compileDesignDirectionSelection } from '../agent/design-direction-selection'
 import { EditMaskCompiler } from '../edit'
+import { extractLayer, inContextLayerJob, layerRegion, layersBelow, regionMask, regionTransform, type LayerRegion } from '../edit/layer-in-context'
+import { subScene } from '../reference/sub-scene'
+import type { AssetMetadata } from '../storage/project-repository'
 import { buildTransientAnnotationMasks } from '../../shared/ephemeral-annotation'
 import { ProviderSettingsService } from '../security/provider-settings-service'
 import { FileProviderConfigStore } from '../security/provider-config-store'
@@ -107,7 +111,7 @@ import type {
   RecentProjectSummary,
   WorkspaceBootstrap
 } from '../../shared/project'
-import { ReferenceCompiler } from '../reference'
+import { CompositeReferenceRenderer, ReferenceCompiler } from '../reference'
 import { SceneService } from '../scene'
 import { ProjectWorkspace, type OpenProjectResult } from '../storage/project-workspace'
 import { RecentProjectsStore } from '../storage/recent-projects-store'
@@ -1150,6 +1154,20 @@ export class GenerationRuntime {
     }
   }
 
+  /** Stores an image Main made itself (a render, a mask, a cut-out layer) as a project asset. */
+  async #importDerivedImage(owner: OpenProjectResult, bytes: Buffer, sourceType: AssetMetadata['sourceType'], sourceId: string): Promise<AssetMetadata> {
+    const stagingDirectory = join(this.#userDataDirectory, 'derived-staging')
+    await mkdir(stagingDirectory, { recursive: true })
+    const stagingPath = join(stagingDirectory, `${randomUUID()}.png`)
+    await writeFile(stagingPath, bytes, { flag: 'wx' })
+    try {
+      this.#assertGenerationProject(owner)
+      return await owner.workspace.assets.importImage({ sourcePath: stagingPath, sourceType, sourceId })
+    } finally {
+      await rm(stagingPath, { force: true })
+    }
+  }
+
   getSceneAuthorityState(): ReturnType<SceneService['state']> {
     return this.#sceneService.state()
   }
@@ -1746,8 +1764,11 @@ export class GenerationRuntime {
     input = { ...input, scene: transientMasks.length === 0 ? authoritativeScene
       : { ...authoritativeScene, elements: [...authoritativeScene.elements, ...transientMasks] } }
     const { profiles, providers } = await this.#profileEnvironment(config)
+    const editPrompt = input.mode === 'in-context'
+      ? `在标出的区域里画出：${input.prompt.slice(0, 7_900)}\n和周围画面保持一致的光线方向、色温、透视和质感，边缘自然融入背景。`
+      : input.prompt
     const profileDraft = {
-      prompt: input.prompt,
+      prompt: editPrompt,
       negativePrompt: input.negativePrompt,
       aspect: { width: input.scene.canvas.aspectWidth, height: input.scene.canvas.aspectHeight },
       quantity: input.count,
@@ -1755,8 +1776,8 @@ export class GenerationRuntime {
       referenceResultIds: input.parentResultId === null ? [] : [input.parentResultId],
       sourceSceneRevision: input.scene.revision,
       referenceMode: 'hybrid' as const,
-      variationInstruction: input.prompt,
-      preserveConstraints: '蒙版外区域保持不变',
+      variationInstruction: editPrompt,
+      preserveConstraints: input.mode === 'in-context' ? '标出区域以外的画面保持原样' : '蒙版外区域保持不变',
       expandedSections: [] as ('parameters' | 'references' | 'advanced')[]
     }
     const preflight = profiles.compile({
@@ -1778,15 +1799,41 @@ export class GenerationRuntime {
       throw new Error(`${provider.label} 不支持蒙版局部编辑，请切换到支持该能力的供应商。`)
     }
     const target = input.scene.elements.find((element) => element.id === input.targetElementId)
-    if (target?.type !== 'image') throw new Error('局部修改需要先选择一个图片元素。')
-    const source = await owner.workspace.assets.getAsset(target.assetId)
+    const inContext = input.mode === 'in-context'
+    let source: AssetMetadata
+    let inContextMask: { readonly asset: AssetMetadata; readonly width: number; readonly height: number; readonly contributingMaskIds: readonly string[] } | null = null
+    let region: LayerRegion | null = null
+    if (inContext) {
+      if (target?.type !== 'image' && target?.type !== 'placeholder') throw new Error('按区域生成需要一张图片或一个主体占位。')
+      if (target.locked || input.scene.elements.some((element) => element.type === 'mask' && element.mode === 'protect' && element.targetElementId === target.id)) {
+        throw new Error('这个对象已锁定或有保护蒙版，不能按区域重画。')
+      }
+      region = layerRegion(input.scene, target)
+      if (region === null) throw new Error('这个对象不在画布范围内，无法按区域生成。')
+      // The picture the new content has to sit in: every layer beneath the target, as it will be exported.
+      const below = subScene(input.scene, layersBelow(input.scene, target))
+      const rendered = await new CompositeReferenceRenderer(async (assetId) => {
+        try {
+          return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+        } catch {
+          return null
+        }
+      }).render({ ...below, canvas: { ...below.canvas, transparent: false } }, 'final')
+      const invocation = randomUUID()
+      source = await this.#importDerivedImage(owner, await sharp(rendered.buffer).png().toBuffer(), 'reference', `layer-source:${invocation}`)
+      const maskAsset = await this.#importDerivedImage(owner, await regionMask(region), 'reference', `mask:${invocation}`)
+      inContextMask = { asset: maskAsset, width: maskAsset.width, height: maskAsset.height, contributingMaskIds: [] }
+    } else {
+      if (target?.type !== 'image') throw new Error('局部修改需要先选择一个图片元素。')
+      source = await owner.workspace.assets.getAsset(target.assetId)
+    }
     const referenceInput = { projectId: input.scene.projectId, source: { kind: 'images' as const, assetIds: [source.id] },
       profileId: input.profileId, modelOverride: input.providerId === 'mock' ? input.model : null, referenceMode: 'visual' as const }
     const referencePreview = await this.#resolveReference(referenceInput, config, owner)
-    if (input.parentResultId !== null && !(await this.#repository.listJobs(owner.workspace.metadata.id)).some((job) => job.results.some((result) => result.id === input.parentResultId && result.assetId === source.id))) {
+    if (!inContext && input.parentResultId !== null && !(await this.#repository.listJobs(owner.workspace.metadata.id)).some((job) => job.results.some((result) => result.id === input.parentResultId && result.assetId === source.id))) {
       throw new ProviderError('REFERENCE_SOURCE_CONFLICT', '局部修改的来源结果与选中图片不一致。', 'validating')
     }
-    const mask = await editMaskCompiler.compile(input.scene, target.id, source)
+    const mask = inContextMask ?? await editMaskCompiler.compile(input.scene, target!.id, source)
     this.#assertGenerationProject(owner)
     const profileRequest = profiles.compile({
       profileId: input.profileId,
@@ -1800,14 +1847,15 @@ export class GenerationRuntime {
         { assetId: mask.asset.id, intent: 'mask', strength: 1 }
       ],
       parameters: {
-        mode: 'local-edit',
+        mode: inContext ? 'layer-in-context' : 'local-edit',
         originalRequirement: input.prompt,
-        targetElementId: target.id,
+        targetElementId: target!.id,
         sourceAssetId: source.id,
         maskAssetId: mask.asset.id,
         contributingMaskIds: mask.contributingMaskIds,
+        ...(region === null ? {} : { layerRegion: region }),
         referenceSourceSnapshot: { version: 1, source: referencePreview.source, signature: referencePreview.signature,
-          summary: '选中的图片与当前画布蒙版', sceneRevision: authoritativeScene.revision, assetIds: [source.id, mask.asset.id] },
+          summary: inContext ? '目标下方的画面与要重画的区域' : '选中的图片与当前画布蒙版', sceneRevision: authoritativeScene.revision, assetIds: [source.id, mask.asset.id] },
         sourceDimensions: { width: source.width, height: source.height },
         maskDimensions: { width: mask.width, height: mask.height },
         invocationInputHash: inputHash,
@@ -1882,7 +1930,11 @@ export class GenerationRuntime {
       throw new AgentToolExecutorError('SCENE_REVISION_STALE',
         `The plan expected scene revision ${expectedSceneRevision}, but revision ${current.revision} is current.`, true)
     }
-    const target = targetElementId === undefined ? undefined : current.elements.find((element) => element.id === targetElementId)
+    // An in-context result goes back into the element it was drawn for unless another target is named.
+    const layer = inContextLayerJob(match.job.request.parameters)
+    const layerTarget = layer === null || targetElementId !== undefined ? undefined
+      : current.elements.find((element) => element.id === layer.targetElementId && (element.type === 'image' || element.type === 'placeholder'))
+    const target = layerTarget ?? (targetElementId === undefined ? undefined : current.elements.find((element) => element.id === targetElementId))
     if (targetElementId !== undefined && (target === undefined || (target.type !== 'image' && target.type !== 'placeholder'))) {
       throw new AgentToolExecutorError('TOOL_SCOPE_DENIED', '要替换的图片或占位已经不存在，未修改画布。', true)
     }
@@ -1892,10 +1944,12 @@ export class GenerationRuntime {
     if (target !== undefined && current.elements.some((element) => element.type === 'mask' && element.targetElementId === target.id && element.mode === 'protect')) {
       throw new AgentToolExecutorError('SCENE_ELEMENT_PROTECTED', '要替换的对象有保护蒙版，未修改画布。', true)
     }
-    const existing = target?.type === 'image' && target.assetId === match.result.assetId
-      ? target : current.elements.find((element) => element.id === input.placementId)
+    // A cut-out layer is a derived asset; its provenance names the result it came from.
+    const placedFrom = (element: SceneElement | undefined): boolean => element?.type === 'image'
+      && (element.assetId === match.result.assetId || (layer !== null && element.provenance?.sourceAssetId === match.result.assetId))
+    const existing = placedFrom(target) ? target : current.elements.find((element) => element.id === input.placementId)
     if (existing !== undefined) {
-      if (existing.type !== 'image' || existing.assetId !== match.result.assetId) {
+      if (!placedFrom(existing)) {
         throw new Error('The placement id is already bound to a different canvas element.')
       }
       return placeGenerationResultReceiptSchema.parse({
@@ -1908,7 +1962,17 @@ export class GenerationRuntime {
         reused: true
       })
     }
-    const asset = await this.#project.workspace.assets.getAsset(match.result.assetId)
+    let asset = await this.#project.workspace.assets.getAsset(match.result.assetId)
+    let layerTransform: NormalizedTransform | null = null
+    if (layer !== null) {
+      const [result, source] = await Promise.all([
+        owner.workspace.assets.resolveAsset(match.result.assetId),
+        owner.workspace.assets.resolveAsset(layer.sourceAssetId)
+      ])
+      const cutOut = await extractLayer(await readFile(result.filePath), await readFile(source.filePath), layer.region)
+      asset = await this.#importDerivedImage(owner, cutOut, 'generated', `layer:${match.result.id}`)
+      layerTransform = regionTransform(layer.region)
+    }
     this.#assertGenerationProject(owner)
     const lineage = (await this.resultFamilies())
       .flatMap((family) => family.members)
@@ -1926,7 +1990,7 @@ export class GenerationRuntime {
       type: 'image',
       name: `生成结果 ${match.result.variantIndex + 1}`,
       description: `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`,
-      transform: { x: (1 - width) / 2, y: (1 - height) / 2, width, height, rotation: 0 },
+      transform: layerTransform ?? { x: (1 - width) / 2, y: (1 - height) / 2, width, height, rotation: 0 },
       zIndex: current.elements.length,
       opacity: 1,
       blendMode: 'normal',
@@ -1941,9 +2005,9 @@ export class GenerationRuntime {
         sourceDirectionId: lineage?.sourceDirectionId ?? null,
         sourceAssetId: match.result.assetId
       },
-      assetId: match.result.assetId,
+      assetId: asset.id,
       crop: { x: 0, y: 0, width: 1, height: 1 },
-      fit: 'contain',
+      fit: layerTransform === null ? 'contain' : 'fill',
       referenceRole: 'general'
     }
     const mutation = await this.#sceneService.execute({
@@ -1952,9 +2016,14 @@ export class GenerationRuntime {
         id: input.placementId,
         origin: input.origin,
         summary: target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
-        commands: target === undefined ? [{ kind: 'element.add', element }] : [{
-          kind: 'element.set-image', elementId: target.id, assetId: match.result.assetId, provenance: element.provenance!
-        }]
+        commands: target === undefined ? [{ kind: 'element.add', element }] : [
+          { kind: 'element.set-image', elementId: target.id, assetId: asset.id, provenance: element.provenance! },
+          // The cut-out covers the element's box and the band it fades across.
+          ...(layerTransform === null ? [] : [{
+            kind: 'element.update' as const, elementId: target.id,
+            changes: { transform: layerTransform, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill' }
+          }])
+        ]
       }
     }, signal)
     if (!mutation.ok) throw new Error(`${mutation.error.code}: ${mutation.error.message}`)
@@ -2393,13 +2462,17 @@ export class GenerationRuntime {
     if (tool.kind === 'canvas_edit') {
       const scene = sceneService.state().scene
       const target = scene.elements.find((element) => element.id === tool.targetElementId)
-      if (target?.type !== 'image') throw new Error('局部修改目标不是可用的图片元素。')
-      const parentResult = (await this.listJobs()).flatMap((job) => job.results).find((result) => result.assetId === target.assetId)
+      const inContext = tool.mode === 'in-context'
+      if (inContext ? target?.type !== 'image' && target?.type !== 'placeholder' : target?.type !== 'image') {
+        throw new Error(inContext ? '按区域生成的目标不是可用的图片或主体占位。' : '局部修改目标不是可用的图片元素。')
+      }
+      const parentResult = inContext || target?.type !== 'image' ? undefined
+        : (await this.listJobs()).flatMap((job) => job.results).find((result) => result.assetId === target.assetId)
       const profileId = await this.#profileIdForInvocation(tool.providerId, 'edit', context.toolCallItemId, 'final')
       this.#assertGenerationProject(owner)
       const edit = await this.editFromCanvas({
         scene,
-        targetElementId: target.id,
+        targetElementId: target!.id,
         prompt: tool.prompt,
         negativePrompt: '',
         providerId: tool.providerId,
@@ -2408,7 +2481,8 @@ export class GenerationRuntime {
         profileId,
         confirmed: tool.providerId !== 'mock',
         sourceMessageId: context.sourceMessageId,
-        parentResultId: parentResult?.id ?? null
+        parentResultId: parentResult?.id ?? null,
+        mode: inContext ? 'in-context' : 'mask'
       }, context.toolCallItemId, async (request) => {
         await this.#prepareImageOutbound(context, outboundContextService, request)
       }, true, context, tool.ephemeralAnnotation)
@@ -2417,8 +2491,8 @@ export class GenerationRuntime {
         ok: true,
         batchId: null,
         jobId: edit.jobId,
-        affectedElementIds: [target.id],
-        message: '局部修改任务已创建，源图保持不变。'
+        affectedElementIds: [target!.id],
+        message: inContext ? '按区域生成的任务已创建，画布保持不变，放回时会裁出这一块并融入画面。' : '局部修改任务已创建，源图保持不变。'
       }
     }
     const job = await this.cancel(tool.jobId)

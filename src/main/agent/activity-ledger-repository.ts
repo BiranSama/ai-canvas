@@ -123,13 +123,14 @@ function toolProjection(tool: AgentPlan['tools'][number]): Pick<CreateActivityIn
     }
   }
   if (tool.kind === 'canvas_edit') {
+    const inContext = tool.mode === 'in-context'
     return {
       kind: 'tool',
-      label: '创建局部修改',
-      objectLabel: '选中图片',
-      actionLabel: '编译本轮圈选并创建编辑任务',
-      impactLabel: '源图保持不变，结果另存为新版本',
-      scopeLabel: '当前选区',
+      label: inContext ? '按区域重画' : '创建局部修改',
+      objectLabel: inContext ? '目标区域' : '选中图片',
+      actionLabel: inContext ? '参照下方画面重画这一块' : '编译本轮圈选并创建编辑任务',
+      impactLabel: inContext ? '画布保持不变，放回时裁出并融入画面' : '源图保持不变，结果另存为新版本',
+      scopeLabel: inContext ? '目标所在的区域' : '当前选区',
       budgetImpact: { requests: 1, images: tool.count, maxCny: 0 }
     }
   }

@@ -237,7 +237,9 @@ export const canvasEditToolSchema = z.object({
   model: z.string().min(1).default('mock-balanced'),
   count: z.number().int().min(1).max(4).default(1),
   sourceMessageId: z.string().min(1).nullable().default(null),
-  ephemeralAnnotation: ephemeralAnnotationSchema.nullable().default(null)
+  ephemeralAnnotation: ephemeralAnnotationSchema.nullable().default(null),
+  /** Left out for a mask edit; in-context redraws the target's box within the picture beneath it. */
+  mode: z.enum(['mask', 'in-context']).optional()
 })
 
 export const cancelGenerationToolSchema = z.object({

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { Scene, SceneElement } from '../../../domain'
+import { subScene } from '../../reference/sub-scene'
 import { boundsOf, elementFacts, percentBoxSchema, type PercentBox } from './geometry'
 import { answer, defineTool, rejected, type AgentToolContext, type AgentToolResult } from './types'
 
@@ -49,16 +50,10 @@ function isolate(scene: Scene, root: SceneElement): { readonly scene: Scene; rea
       }
     }
   }
-  const elements = scene.elements.filter((element) => ids.has(element.id)).map((element, index) => ({
-    ...element,
-    zIndex: index,
-    visible: true,
-    groupId: element.groupId !== null && ids.has(element.groupId) ? element.groupId : null,
-    ...(element.type === 'light' ? { targetElementIds: element.targetElementIds.filter((id) => ids.has(id)) } : {})
-  }) as SceneElement)
+  const isolated = subScene(scene, ids, { visible: true })
   return {
-    scene: { ...scene, canvas: { ...scene.canvas, transparent: true }, elements, relations: [] },
-    members: elements.filter((element) => element.type !== 'group')
+    scene: { ...isolated, canvas: { ...scene.canvas, transparent: true } },
+    members: isolated.elements.filter((element) => element.type !== 'group')
   }
 }
 

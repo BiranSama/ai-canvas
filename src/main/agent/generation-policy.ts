@@ -17,7 +17,8 @@ export class GenerationPolicy {
     if (!hasGeneration) return false
     if (hasNegatedGenerationInstruction(request.text)) return true
     if (request.autoGenerate) return false
-    if (plan.tools.some((tool) => tool.kind === 'canvas_edit')) return false
+    // A mask drawn on an image already says to repaint it; redrawing a region in context is new generation.
+    if (plan.tools.some((tool) => tool.kind === 'canvas_edit' && tool.mode !== 'in-context')) return false
     return !hasExplicitGenerationInstruction(request.text)
   }
 }

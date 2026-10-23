@@ -100,7 +100,9 @@ export function receiptItem(plan: AgentPlan['tools'][number], outcome: AgentTool
     return { object: '当前画布', action: '编译参考并生成完整图', impact: outcome.ok ? '参考资产与任务已保存' : failedImpact }
   }
   if (plan.kind === 'canvas_edit') {
-    return { object: '选中图片', action: '按蒙版创建局部修改', impact: outcome.ok ? '源图、蒙版与新版本均已保留' : failedImpact }
+    return plan.mode === 'in-context'
+      ? { object: '目标区域', action: '参照下方画面重画这一块', impact: outcome.ok ? '画布未改变，放回时裁出并融入画面' : failedImpact }
+      : { object: '选中图片', action: '按蒙版创建局部修改', impact: outcome.ok ? '源图、蒙版与新版本均已保留' : failedImpact }
   }
   if (plan.kind === 'memory_candidate') {
     return { object: '项目记忆', action: '提出候选', impact: outcome.ok ? '等待用户确认，不会静默进入长期上下文' : '没有创建记忆候选' }
