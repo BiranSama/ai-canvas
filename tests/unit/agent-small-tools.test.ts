@@ -9,7 +9,7 @@ import {
   prepareAgentToolCall
 } from '../../src/main/agent/tools/catalogue'
 import { ElementRefs } from '../../src/main/agent/tools/refs'
-import { formatToolResult, type AgentToolContext, type AgentToolResult } from '../../src/main/agent/tools/types'
+import { formatToolResult, type AgentToolContext, type AgentToolResult, type LookRequest } from '../../src/main/agent/tools/types'
 
 const NOW = '2026-10-18T00:00:00.000Z'
 
@@ -191,6 +191,53 @@ describe('look', () => {
     expect(step).toMatchObject({ kind: 'answer', result: { ok: true, summary: '当前文字模型不能看图，这是画面的文字描述。' } })
     const details = step.kind === 'answer' ? step.result.details ?? [] : []
     expect(details).toContain('E1 和 E2 重叠约 100%')
+  })
+
+  it('shows one layer on its own, hidden or not, cropped to it on transparency', async () => {
+    const harness = new Harness()
+    await harness.call('add_subject', { subject: '香水瓶', box: [20, 20, 60, 60] })
+    await harness.call('add_text', { content: '晨雾', role: 'title', box: [30, 10, 40, 10] })
+    await harness.call('update', { targets: ['E2'], set: { visible: false } })
+    const seen: { scene: Scene; request: LookRequest }[] = []
+    const looker = { look: async (scene: Scene, request: LookRequest) => {
+      seen.push({ scene, request })
+      return { mimeType: 'image/jpeg' as const, base64: 'AA==' }
+    } }
+    const look = (args: Record<string, unknown>) => prepareAgentToolCall(
+      { callId: 'l', name: 'look', argumentsText: JSON.stringify(args), arguments: args, argumentsError: null },
+      { ...harness.context(), looker, vision: true, screenshots: 'allowed' }
+    )
+
+    const { step } = await look({ target: 'E2' })
+    expect(step).toMatchObject({ kind: 'answer', result: { ok: true, summary: expect.stringContaining('它在画布上是隐藏的') } })
+    const [{ scene, request }] = seen as [typeof seen[number]]
+    expect(scene.canvas.transparent).toBe(true)
+    expect(scene.elements.map((element) => [element.type, element.visible, element.zIndex])).toEqual([['text', true, 0]])
+    expect(request).toMatchObject({ mode: 'canvas', background: 'checker' })
+    expect(request.region?.map((value) => Math.round(value))).toEqual([27, 7, 46, 16])
+    // The real scene is untouched.
+    expect(harness.scene.elements.find((element) => element.type === 'text')?.visible).toBe(false)
+
+    expect((await look({ target: 'E2', region: [0, 0, 50, 50] })).step).toMatchObject({ kind: 'answer', result: { ok: false } })
+    expect((await look({ target: 'E9' })).step).toMatchObject({ kind: 'answer', result: { ok: false, summary: expect.stringContaining('没有对象 E9') } })
+    const described = await prepareAgentToolCall(
+      { callId: 'l', name: 'look', argumentsText: '', arguments: { target: 'E2' }, argumentsError: null },
+      { ...harness.context(), looker, vision: false }
+    )
+    expect(described.step).toMatchObject({ kind: 'answer', result: { details: [expect.stringContaining('隐藏')] } })
+  })
+
+  it('draws an isolated layer over grey and white squares', async () => {
+    const { SceneLooker } = await import('../../src/main/agent/multi-step/scene-looker')
+    const base = createScene({ id: ids(1)(), projectId: '00000000-0000-4000-8000-000000000002', now: NOW })
+    const scene = { ...base, canvas: { ...base.canvas, transparent: true } }
+    const image = await new SceneLooker(async () => null).look(scene, { region: null, mode: 'canvas', background: 'checker' })
+    const { default: sharp } = await import('sharp')
+    const { data, info } = await sharp(Buffer.from(image.base64, 'base64')).raw().toBuffer({ resolveWithObject: true })
+    const at = (x: number, y: number) => data[(y * info.width + x) * info.channels]!
+    // One light square and one darker square of the checker.
+    expect(at(2, 2)).toBeLessThan(230)
+    expect(at(18, 2)).toBeGreaterThan(245)
   })
 })
 

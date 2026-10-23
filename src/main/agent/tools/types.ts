@@ -16,6 +16,8 @@ export interface LookRequest {
   /** Percent box [x, y, w, h] of the canvas, or null for the whole canvas. */
   readonly region: readonly [number, number, number, number] | null
   readonly mode: 'canvas' | 'reference'
+  /** Checker when the scene holds one layer on a transparent canvas, so its own edges stay visible. */
+  readonly background?: 'white' | 'checker'
 }
 
 /** Renders what the agent "sees"; provided by the main process (work package 5). */

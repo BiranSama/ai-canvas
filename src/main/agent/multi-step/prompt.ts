@@ -5,7 +5,7 @@ import { formatBox, transformToBox, typeLabel } from '../tools/geometry'
 import type { ElementRefs } from '../tools/refs'
 import type { AgentToolContext, GenerationResultEntry, ManualLibrary } from '../tools/types'
 
-export const MULTI_STEP_PROMPT_VERSION = 'multi-step-2'
+export const MULTI_STEP_PROMPT_VERSION = 'multi-step-3'
 
 /**
  * Fixed for the whole session so providers can cache it. Per-turn facts go in
@@ -22,6 +22,7 @@ export function multiStepSystemPrompt(manuals: ManualLibrary | null): string {
     '- 按比例改（「缩小 20%」「往上挪一点」）用 update 的 scale 或 move；需要确切数值时先 inspect。',
     '- 第一条消息里的画布是本轮开始时（或较早步骤压缩时）的样子；之后的变化以工具结果为准，拿不准就 inspect 或 look。',
     '- 只改用户提到的对象和属性，其他对象一律不动。',
+    '- 标着「隐藏」的对象不出现在画面、成图和生图参考里。用户没提到就不要显示、修改或删除它们；要看它们的样子，用 look 的 target 单独看。',
     '- 工具返回「未执行」时按建议修正后再试；同一个错误不要原样重复。改坏了用 undo 撤销再换做法。',
     '- 完成后用一两句话汇报做了什么、做了哪些假设，然后结束，不再调用工具。',
     '',

@@ -35,11 +35,18 @@ export class SceneLooker implements CanvasLooker {
       }).toBuffer())
     }
     // A region is enlarged to the same long edge so small text stays legible.
-    const buffer = await image
-      .resize({ width: LONG_EDGE, height: LONG_EDGE, fit: 'inside', withoutEnlargement: request.region === null })
-      .flatten({ background: '#ffffff' })
-      .jpeg({ quality: 85 })
-      .toBuffer()
+    const resized = image.resize({ width: LONG_EDGE, height: LONG_EDGE, fit: 'inside', withoutEnlargement: request.region === null })
+    const buffer = request.background === 'checker'
+      ? await sharp(await onChecker(await resized.png().toBuffer())).jpeg({ quality: 85 }).toBuffer()
+      : await resized.flatten({ background: '#ffffff' }).jpeg({ quality: 85 }).toBuffer()
     return { mimeType: 'image/jpeg', base64: buffer.toString('base64') }
   }
+}
+
+/** The grey and white squares editors use for transparency. */
+async function onChecker(image: Buffer): Promise<Buffer> {
+  const { width = 1, height = 1 } = await sharp(image).metadata()
+  const cell = 12
+  const checker = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><defs><pattern id="c" width="${cell * 2}" height="${cell * 2}" patternUnits="userSpaceOnUse"><rect width="${cell * 2}" height="${cell * 2}" fill="#ffffff"/><rect width="${cell}" height="${cell}" fill="#d6d6d6"/><rect x="${cell}" y="${cell}" width="${cell}" height="${cell}" fill="#d6d6d6"/></pattern></defs><rect width="100%" height="100%" fill="url(#c)"/></svg>`
+  return sharp(Buffer.from(checker)).composite([{ input: image }]).png().toBuffer()
 }
