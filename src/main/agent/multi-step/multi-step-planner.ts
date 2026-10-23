@@ -1,3 +1,4 @@
+import type { LocalFontFamily } from '../../../shared/local-fonts'
 import { randomUUID } from 'node:crypto'
 import type { Scene } from '../../../domain'
 import type { AgentPlan, AgentToolOutcome, AgentToolPlan } from '../../../shared/agent'
@@ -44,6 +45,8 @@ export interface MultiStepPlannerOptions {
   readonly readAsset?: ((assetId: string) => Promise<LlmImage>) | null
   readonly looker?: CanvasLooker | null
   readonly manuals?: ManualLibrary | null
+  /** Font families installed on this computer, listed in the brief and checked by the text tools. */
+  readonly fonts?: (() => Promise<readonly LocalFontFamily[]>) | null
   readonly newId?: () => string
   /** Model calls one pass may make while it answers read-only tools itself. */
   readonly maxModelCallsPerPass?: number
@@ -157,7 +160,8 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       vision: model.protocol.capabilities.vision,
       screenshots,
       manuals: this.#options.manuals ?? null,
-      readAsset: this.#options.readAsset ?? null
+      readAsset: this.#options.readAsset ?? null,
+      fonts: await this.#options.fonts?.().catch(() => []) ?? []
     }
     const finish = (step: PlannerStep, emitted: ModelTrace['emitted'], modelTurns: number): PlannerStepResult => ({
       step: {
@@ -351,7 +355,8 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       refs,
       results: toolContext.results,
       projectContext: context?.projectContext ?? null,
-      generation: toolContext.generation
+      generation: toolContext.generation,
+      fonts: toolContext.fonts ?? []
     })
   }
 

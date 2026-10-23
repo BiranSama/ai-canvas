@@ -3,6 +3,7 @@ import type { SceneElement } from '../../../domain'
 import type { sceneElementChangesSchema } from '../../../shared/agent-atomic-tools'
 import { boxToTransform, colorSchema, percentBoxSchema } from './geometry'
 import { sceneWrite } from './scene-write'
+import { resolveFontName } from './fonts'
 import { defineTool, rejected, resolveTargets } from './types'
 
 type Changes = z.output<typeof sceneElementChangesSchema>
@@ -14,7 +15,7 @@ const setSchema = z.object({
   rotation: z.number().min(-360).max(360).optional().describe('旋转角度'),
   name: z.string().min(1).max(120).optional(),
   content: z.string().max(2_000).optional().describe('文字内容'),
-  font: z.string().min(1).max(120).optional(),
+  font: z.string().min(1).max(120).optional().describe('本机字体的中文名或英文名'),
   size: z.number().min(8).max(512).optional().describe('字号'),
   weight: z.number().int().min(100).max(900).optional(),
   color: colorSchema.optional().describe('文字、形状填充或光的颜色'),
@@ -113,11 +114,14 @@ export const updateTool = defineTool({
   registryName: 'scene.update_elements',
   describe: (args) => `修改 ${args.targets.join('、')}`,
   prepare(args, context) {
-    const targets = resolveTargets(args.targets, context, { allowLocked: onlyUnlocks(args.set) })
+    const font = args.set.font === undefined ? null : resolveFontName(args.set.font, context)
+    if (font !== null && 'problem' in font) return rejected(font.problem, font.hint)
+    const set = font === null ? args.set : { ...args.set, font: font.family }
+    const targets = resolveTargets(args.targets, context, { allowLocked: onlyUnlocks(set) })
     if (typeof targets === 'string') return rejected(targets, targets.includes('锁定') ? '先确认是否真的要改锁定的对象；需要时用 update 设 locked=false。' : undefined)
     const updates = []
     for (const element of targets) {
-      const changes = changesFor(element, args.set)
+      const changes = changesFor(element, set)
       if (typeof changes === 'string') return rejected(`${context.refs.ref(element.id)}「${element.name}」：${changes}`)
       updates.push({ elementId: element.id, changes })
     }

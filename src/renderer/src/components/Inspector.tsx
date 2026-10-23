@@ -31,6 +31,7 @@ import type { Canvas, SceneElement } from '../../../domain'
 import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { CanvasSizeControl } from './CanvasSizeControl'
+import { FontPicker } from './FontPicker'
 import { ImeSafeInput, ImeSafeTextarea } from './ImeSafeTextField'
 import { simplePropertiesFor, type SimplePropertyDefinition } from '../inspector/property-schema'
 
@@ -332,7 +333,7 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
           {showSection('排版 字体 字号 字重 对齐 换行 字距 行距 颜色 typography font align color') && <details className="inspector-section text-typography-section advanced-section" open>
             <summary>排版</summary>
             <p className="section-kicker">排版</p>
-            <label className="wide-field"><span>字体参考</span><ImeSafeInput value={element.fontFamily} onCommit={(value) => updateElement(element.id, { fontFamily: value.trim() || 'Segoe UI Variable' })} /></label>
+            <div className="wide-field"><span>字体</span><FontPicker value={element.fontFamily} onChange={(family) => updateElement(element.id, { fontFamily: family.trim() || 'Segoe UI Variable' })} /></div>
             <div className="field-grid two-columns">
               <NumberField label="字号 px" value={element.fontSize} step={1} onChange={(value) => updateElement(element.id, { fontSize: Math.min(512, Math.max(8, value)) })} />
               <label className="wide-field"><span>字重</span><select aria-label="字重" value={element.fontWeight} onChange={(event) => updateElement(element.id, { fontWeight: Number(event.currentTarget.value) })}>{[300, 400, 500, 600, 700, 800].map((weight) => <option key={weight} value={weight}>{weight}</option>)}</select></label>

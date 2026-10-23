@@ -53,9 +53,11 @@ import type { DesignDirectionSelectionInput, DesignDirectionSelectionResult } fr
 import type { DiagnosticExportResult } from './diagnostics'
 import type { ProjectWorkContext } from './project-work-context'
 import type { GenerationReferencePreviewInput, GenerationReferencePreview } from './generation-reference'
+import type { LocalFontFamily } from './local-fonts'
 
 export const DESKTOP_CHANNELS = {
   runtimeInfo: 'desktop:runtime-info',
+  localFonts: 'desktop:local-fonts',
   appearanceSettings: 'appearance:settings',
   appearanceSettingsSet: 'appearance:settings-set',
   diagnosticExport: 'diagnostic:export',
@@ -175,6 +177,8 @@ export interface GenerationProviderInfo {
 export interface DesktopApi {
   onWindowClosing(listener: () => Promise<void>): () => void
   getRuntimeInfo(): Promise<RuntimeInfo>
+  /** Font families installed on this computer, scanned once per run unless asked to rescan. */
+  listLocalFonts(rescan?: boolean): Promise<readonly LocalFontFamily[]>
   getAppearanceSettings(): Promise<AppearanceSettingsSnapshot>
   setAppearanceSettings(input: AppearanceSettingsUpdate): Promise<AppearanceSettingsSnapshot>
   exportDiagnostics(): Promise<DiagnosticExportResult>

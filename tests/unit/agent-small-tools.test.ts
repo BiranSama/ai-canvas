@@ -241,6 +241,45 @@ describe('look', () => {
   })
 })
 
+describe('fonts', () => {
+  const FONTS = [
+    { family: 'Microsoft YaHei', localName: '微软雅黑', styles: ['Regular', 'Bold'], chinese: true },
+    { family: 'Georgia', localName: null, styles: ['Regular'], chinese: false }
+  ]
+
+  it('stores the English family for a font named either way and refuses one the computer lacks', async () => {
+    const harness = new Harness()
+    const withFonts = { ...harness.context(), fonts: FONTS }
+    const call = (name: string, args: unknown, context: AgentToolContext = withFonts) => prepareAgentToolCall(
+      { callId: 'f', name, argumentsText: JSON.stringify(args), arguments: args as Record<string, unknown>, argumentsError: null }, context
+    )
+    const added = await call('add_text', { content: '晨雾', role: 'title', font: '微软雅黑' })
+    expect(added.step.kind === 'execute' && JSON.stringify(added.step.plan)).toContain('"fontFamily":"Microsoft YaHei"')
+    expect((await call('add_text', { content: '晨雾', role: 'title', font: '方正兰亭' })).step).toMatchObject({
+      kind: 'answer', result: { ok: false, summary: '这台电脑上没有字体「方正兰亭」。', hint: expect.stringContaining('用第一条消息里「本机字体」') }
+    })
+    expect((await call('add_text', { content: '晨雾', role: 'title', font: 'Microsoft' })).step).toMatchObject({
+      kind: 'answer', result: { ok: false, hint: '相近的有：微软雅黑 (Microsoft YaHei)。' }
+    })
+    // Unknown fonts on this computer: the name is used as given.
+    const unknown = await call('add_text', { content: '晨雾', role: 'title', font: 'Some Font' }, harness.context())
+    expect(unknown.step.kind === 'execute' && JSON.stringify(unknown.step.plan)).toContain('"fontFamily":"Some Font"')
+
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    const updated = await call('update', { targets: ['E1'], set: { font: 'georgia' } }, { ...harness.context(), fonts: FONTS })
+    expect(updated.step.kind === 'execute' && JSON.stringify(updated.step.plan)).toContain('"fontFamily":"Georgia"')
+  })
+
+  it('lists the fonts in the turn brief, Chinese ones first', async () => {
+    const { multiStepTurnBrief } = await import('../../src/main/agent/multi-step/prompt')
+    const harness = new Harness()
+    const brief = multiStepTurnBrief({
+      request: { text: '换个字体', selectedIds: [] } as never, scene: harness.scene, refs: harness.refs, results: [], projectContext: null, fonts: FONTS
+    })
+    expect(brief).toContain('本机字体（文字工具的 font 用这里的中文名或英文名）：\n- 中文：微软雅黑 (Microsoft YaHei)\n- 其他：Georgia')
+  })
+})
+
 describe('load_manual', () => {
   it('serves the built-in manuals on demand and names them in the system prompt', async () => {
     const { BUILT_IN_MANUALS } = await import('../../src/main/agent/manuals')

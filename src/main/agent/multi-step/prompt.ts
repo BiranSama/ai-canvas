@@ -1,3 +1,4 @@
+import { fontLabel, type LocalFontFamily } from '../../../shared/local-fonts'
 import type { Scene } from '../../../domain'
 import type { AgentRequest } from '../../../shared/agent'
 import type { PlannerProjectContext } from '../context-builder'
@@ -67,6 +68,21 @@ function elementLine(scene: Scene, refs: ElementRefs, index: number): string {
 }
 
 const MAX_SUMMARY_ELEMENTS = 80
+const MAX_LISTED_CHINESE_FONTS = 40
+const MAX_LISTED_OTHER_FONTS = 30
+
+/** The computer's fonts by name, Chinese ones first; a long list is cut and says so. */
+function fontSection(fonts: readonly LocalFontFamily[]): string {
+  const chinese = fonts.filter((font) => font.chinese)
+  const other = fonts.filter((font) => !font.chinese)
+  const names = (list: readonly LocalFontFamily[], limit: number): string =>
+    `${list.slice(0, limit).map(fontLabel).join('、')}${list.length > limit ? ` 等 ${list.length} 个` : ''}`
+  return [
+    `本机字体（文字工具的 font 用这里的中文名或英文名）：`,
+    ...(chinese.length === 0 ? [] : [`- 中文：${names(chinese, MAX_LISTED_CHINESE_FONTS)}`]),
+    ...(other.length === 0 ? [] : [`- 其他：${names(other, MAX_LISTED_OTHER_FONTS)}`])
+  ].join('\n')
+}
 
 /** Everything the model needs about this turn, in one user message at the start of the turn. */
 export function multiStepTurnBrief(input: {
@@ -76,6 +92,7 @@ export function multiStepTurnBrief(input: {
   readonly results: readonly GenerationResultEntry[]
   readonly projectContext: PlannerProjectContext | null
   readonly generation?: AgentToolContext['generation']
+  readonly fonts?: readonly LocalFontFamily[]
 }): string {
   const { request, scene, refs, projectContext } = input
   const canvas = scene.canvas
@@ -116,6 +133,7 @@ export function multiStepTurnBrief(input: {
       ? '没有配置生图服务，不能生成图片；需要时告诉用户先在设置里配置。'
       : `生图服务：${input.generation.summary ?? `${input.generation.model}，每次最多 ${input.generation.maxImages} 张`}`)
   }
+  if (input.fonts !== undefined && input.fonts.length > 0) sections.push(fontSection(input.fonts))
   if (input.results.length > 0) {
     sections.push(`已生成的图片：${input.results.map((result, index) => `R${index + 1}（${result.width}×${result.height}）`).join('、')}`)
   }

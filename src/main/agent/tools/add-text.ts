@@ -2,7 +2,8 @@ import { z } from 'zod'
 import type { SceneElement } from '../../../domain'
 import { boxToTransform, colorSchema, percentBoxSchema, readableTextColor, type PercentBox } from './geometry'
 import { createPlan, elementBase, sceneWrite } from './scene-write'
-import { defineTool } from './types'
+import { resolveFontName } from './fonts'
+import { defineTool, rejected } from './types'
 
 const ROLES = {
   title: { label: '标题', size: 0.075, weight: 600, box: [10, 8, 80], align: 'center', lineHeight: 1.15, letterSpacing: 0, weightLevel: 'primary' },
@@ -28,7 +29,7 @@ export const addTextTool = defineTool({
     role: z.enum(['title', 'subtitle', 'body', 'caption', 'label']).describe('title 标题，subtitle 副标题，body 正文，caption 说明，label 标签'),
     box: percentBoxSchema.optional().describe('位置 [x, y, 宽, 高]；不填按角色放'),
     align: z.enum(['start', 'center', 'end', 'justify']).optional(),
-    font: z.string().min(1).max(120).optional().describe('字体名'),
+    font: z.string().min(1).max(120).optional().describe('本机字体的中文名或英文名，不填用默认字体'),
     size: z.number().min(8).max(512).optional().describe('字号，像素'),
     weight: z.number().int().min(100).max(900).optional().describe('字重 100–900'),
     color: colorSchema.optional(),
@@ -39,6 +40,8 @@ export const addTextTool = defineTool({
   registryName: 'scene.create_elements',
   describe: (args) => `添加${ROLES[args.role].label}「${args.content.slice(0, 20)}」`,
   prepare(args, context) {
+    const font = args.font === undefined ? null : resolveFontName(args.font, context)
+    if (font !== null && 'problem' in font) return rejected(font.problem, font.hint)
     const canvas = context.scene.canvas
     const role = ROLES[args.role]
     const size = args.size ?? Math.max(8, Math.min(512, Math.round(canvas.outputWidth * role.size)))
@@ -52,7 +55,7 @@ export const addTextTool = defineTool({
       orientation: args.vertical === true ? 'vertical' : 'horizontal',
       align: args.align ?? role.align,
       wrapping: 'word',
-      fontFamily: args.font ?? 'Segoe UI Variable',
+      fontFamily: font?.family ?? 'Segoe UI Variable',
       fontSize: size,
       fontWeight: args.weight ?? role.weight,
       fill: args.color ?? readableTextColor(canvas.backgroundColor),

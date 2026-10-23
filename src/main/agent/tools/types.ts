@@ -1,3 +1,4 @@
+import type { LocalFontFamily } from '../../../shared/local-fonts'
 import type { z } from 'zod'
 import type { Scene, SceneElement } from '../../../domain'
 import type { AgentToolOutcome, AgentToolPlan } from '../../../shared/agent'
@@ -59,6 +60,8 @@ export interface AgentToolContext {
   readonly screenshots?: 'allowed' | 'ask' | 'declined'
   readonly manuals?: ManualLibrary | null
   readonly readAsset?: ((assetId: string) => Promise<LlmImage>) | null
+  /** Font families installed on this computer; empty when unknown, and then any name is accepted. */
+  readonly fonts?: readonly LocalFontFamily[]
 }
 
 export interface AgentToolResult {

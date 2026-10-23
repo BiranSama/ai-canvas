@@ -12,6 +12,8 @@ import { openAiImagesCapabilitiesFor, seedreamCapabilitiesFor, TASK_IMAGES_CAPAB
 import type { ProviderCapabilities } from '../../../shared/generation'
 import { MultiStepPlannerAdapter, type MultiStepModel } from './multi-step-planner'
 import { SceneLooker } from './scene-looker'
+import { localFontCatalog } from '../../fonts/local-font-catalog'
+import type { LocalFontFamily } from '../../../shared/local-fonts'
 
 type LlmConfig = Extract<ProviderPublicConfig, { kind: 'llm' }>
 type ImageConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -45,6 +47,8 @@ export function createMultiStepPlannerAdapter(options: {
   readonly assets: { resolveAsset(assetId: string): Promise<{ readonly asset: AssetMetadata; readonly filePath: string }> }
   readonly scene: () => Scene
   readonly fetcher?: typeof fetch
+  /** This computer's fonts by default. */
+  readonly fonts?: () => Promise<readonly LocalFontFamily[]>
 }): MultiStepPlannerAdapter {
   const providers = async (): Promise<{ readonly llm: LlmConfig | undefined; readonly image: ImageConfig | undefined; readonly file: ProviderConfigFile }> => {
     const file = await options.config.read()
@@ -63,6 +67,7 @@ export function createMultiStepPlannerAdapter(options: {
   return new MultiStepPlannerAdapter({
     scene: options.scene,
     manuals: BUILT_IN_MANUALS,
+    fonts: options.fonts ?? (() => localFontCatalog.list()),
     looker: new SceneLooker(async (assetId) => {
       try {
         return (await options.assets.resolveAsset(assetId)).filePath
