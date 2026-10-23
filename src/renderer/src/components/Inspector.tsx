@@ -1,38 +1,19 @@
 import {
-  AlignCenterHorizontal,
-  AlignCenterVertical,
-  AlignEndHorizontal,
-  AlignEndVertical,
-  AlignStartHorizontal,
-  AlignStartVertical,
-  ArrowDown,
-  ArrowUp,
-  ChevronsDown,
-  ChevronsUp,
-  ChevronRight,
   Search,
-  Copy,
-  Eye,
-  EyeOff,
-  Group as GroupIcon,
-  GripVertical,
-  Lock,
   Link2,
   PanelRightClose,
   Rows3,
   SlidersHorizontal,
-  Trash2,
-  Unlock,
-  Unlink2,
-  Ungroup
+  Unlink2
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { Canvas, SceneElement } from '../../../domain'
 import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { CanvasSizeControl } from './CanvasSizeControl'
 import { FontPicker } from './FontPicker'
 import { ImageBlendSection } from './ImageBlendSection'
+import { LayerPanel } from './LayerPanel'
 import { UnifiedRenderSection } from './UnifiedRenderSection'
 import { ImeSafeInput, ImeSafeTextarea } from './ImeSafeTextField'
 import { simplePropertiesFor, type SimplePropertyDefinition } from '../inspector/property-schema'
@@ -430,106 +411,13 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
 export function Inspector({ onRequestCollapse, projection = 'vertical' }: { readonly onRequestCollapse?: () => void; readonly projection?: 'vertical' | 'horizontal' } = {}): React.JSX.Element {
   const scene = useWorkspaceStore((state) => state.scene)
   const selectedIds = useWorkspaceStore((state) => state.selectedIds)
-  const editingGroupId = useWorkspaceStore((state) => state.editingGroupId)
   const tab = useWorkspaceStore((state) => state.inspectorTab)
-  const select = useWorkspaceStore((state) => state.select)
   const setTab = useWorkspaceStore((state) => state.setInspectorTab)
   const setOpen = useWorkspaceStore((state) => state.setInspectorOpen)
-  const updateElement = useWorkspaceStore((state) => state.updateElement)
-  const reorder = useWorkspaceStore((state) => state.reorderElement)
-  const align = useWorkspaceStore((state) => state.alignSelection)
-  const distribute = useWorkspaceStore((state) => state.distributeSelection)
-  const group = useWorkspaceStore((state) => state.groupSelection)
-  const ungroup = useWorkspaceStore((state) => state.ungroupSelection)
-  const enterGroupEditing = useWorkspaceStore((state) => state.enterGroupEditing)
-  const duplicateSelection = useWorkspaceStore((state) => state.duplicateSelection)
-  const deleteSelection = useWorkspaceStore((state) => state.deleteSelection)
   const [propertyMode, setPropertyMode] = useState<'simple' | 'advanced'>('simple')
   const selected = scene.elements.find((element) => element.id === selectedIds[0])
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-  const [draggedId, setDraggedId] = useState<string | null>(null)
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set())
   const [propertySearch, setPropertySearch] = useState('')
   const horizontal = projection === 'horizontal'
-
-  useEffect(() => {
-    const id = selectedIds[0]
-    if (id === undefined) return
-    const row = document.querySelector(`[data-layer-id="${id}"]`)
-    if (row instanceof HTMLElement && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' })
-  }, [selectedIds])
-
-  const finishRename = (element: SceneElement, value = editingName): void => {
-    const name = value.trim()
-    if (name !== '' && name !== element.name) updateElement(element.id, { name }, '重命名图层')
-    setEditingId(null)
-  }
-
-  const actOn = (id: string, action: 'duplicate' | 'delete' | 'front' | 'back'): void => {
-    select(id, false)
-    if (action === 'duplicate') duplicateSelection()
-    else if (action === 'delete') deleteSelection()
-    else reorder(id, action === 'front' ? scene.elements.length - 1 : 0)
-  }
-
-  const renderLayer = (element: SceneElement, depth = 0): React.JSX.Element => {
-    const isGroup = element.type === 'group'
-    const collapsed = isGroup && collapsedGroups.has(element.id)
-    const maskChildren = scene.elements.filter((candidate) => candidate.type === 'mask' && candidate.targetElementId === element.id)
-    const groupChildren = isGroup
-      ? element.childIds.map((id) => scene.elements.find((candidate) => candidate.id === id)).filter((candidate): candidate is SceneElement => candidate !== undefined).sort((a, b) => b.zIndex - a.zIndex)
-      : []
-    return (
-      <div key={element.id} className="layer-tree-node">
-        <div
-          role="option"
-          aria-selected={selectedIds.includes(element.id)}
-          data-layer-id={element.id}
-          draggable={!element.locked}
-          className={`layer-row${selectedIds.includes(element.id) ? ' is-selected' : ''}${editingGroupId === element.id ? ' is-editing-group' : ''}${draggedId === element.id ? ' is-dragging' : ''}`}
-          style={{ '--layer-depth': depth } as React.CSSProperties}
-          onClick={(event) => select(element.id, event.shiftKey || event.ctrlKey)}
-          onDoubleClick={() => {
-            if (isGroup) enterGroupEditing(element.id)
-            else { setEditingId(element.id); setEditingName(element.name) }
-          }}
-          onDragStart={(event) => { setDraggedId(element.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', element.id) }}
-          onDragEnd={() => setDraggedId(null)}
-          onDragOver={(event) => { if (draggedId !== null && draggedId !== element.id) event.preventDefault() }}
-          onDrop={(event) => { event.preventDefault(); if (draggedId !== null && draggedId !== element.id) reorder(draggedId, element.zIndex); setDraggedId(null) }}
-        >
-          <span className="layer-drag" aria-hidden="true"><GripVertical size={13} /></span>
-          {isGroup ? <button type="button" className={`layer-disclosure${collapsed ? '' : ' is-open'}`} aria-label={collapsed ? `展开${element.name}` : `折叠${element.name}`} onClick={(event) => { event.stopPropagation(); setCollapsedGroups((current) => { const next = new Set(current); if (next.has(element.id)) next.delete(element.id); else next.add(element.id); return next }) }}><ChevronRight size={13} /></button> : <span className="layer-disclosure-spacer" />}
-          <span className={`layer-kind kind-${element.type}`}>{elementLabels[element.type].slice(0, 1)}</span>
-          <span className="layer-copy">
-            {editingId === element.id
-              ? <ImeSafeInput aria-label={`重命名${element.name}`} autoFocus value={editingName} commitDelayMs={null} commitOnEnter onCommit={(value) => finishRename(element, value)} onEscape={() => setEditingId(null)} onClick={(event) => event.stopPropagation()} />
-              : <strong>{element.name}</strong>}
-            <small>{elementLabels[element.type]}{element.type === 'mask' ? ' · 归属目标' : element.referencePolicy === 'reference-only' ? ' · 仅参考' : ''}{resolveBlendMode(element) !== 'normal' ? ` · ${blendModeLabel(resolveBlendMode(element))}` : ''}</small>
-          </span>
-          <span className="layer-actions">
-            <button type="button" title="复制" aria-label={`复制${element.name}`} onClick={(event) => { event.stopPropagation(); actOn(element.id, 'duplicate') }}><Copy size={12} /></button>
-            <button type="button" title="删除" aria-label={`删除${element.name}`} onClick={(event) => { event.stopPropagation(); actOn(element.id, 'delete') }}><Trash2 size={12} /></button>
-            <button type="button" aria-label={element.visible ? `隐藏${element.name}` : `显示${element.name}`} disabled={element.locked} onClick={(event) => { event.stopPropagation(); updateElement(element.id, { visible: !element.visible }, element.visible ? '隐藏图层' : '显示图层') }}>{element.visible ? <Eye size={13} /> : <EyeOff size={13} />}</button>
-            <button type="button" aria-label={element.locked ? `解锁${element.name}` : `锁定${element.name}`} onClick={(event) => { event.stopPropagation(); updateElement(element.id, { locked: !element.locked }, element.locked ? '解锁图层' : '锁定图层') }}>{element.locked ? <Lock size={13} /> : <Unlock size={13} />}</button>
-          </span>
-          <span className="layer-order">
-            <button type="button" title="置顶" aria-label={`置顶${element.name}`} onClick={(event) => { event.stopPropagation(); actOn(element.id, 'front') }}><ChevronsUp size={11} /></button>
-            <button type="button" aria-label={`上移${element.name}`} onClick={(event) => { event.stopPropagation(); reorder(element.id, Math.min(scene.elements.length - 1, element.zIndex + 1)) }}><ArrowUp size={11} /></button>
-            <button type="button" aria-label={`下移${element.name}`} onClick={(event) => { event.stopPropagation(); reorder(element.id, Math.max(0, element.zIndex - 1)) }}><ArrowDown size={11} /></button>
-            <button type="button" title="置底" aria-label={`置底${element.name}`} onClick={(event) => { event.stopPropagation(); actOn(element.id, 'back') }}><ChevronsDown size={11} /></button>
-          </span>
-        </div>
-        {!collapsed && groupChildren.map((child) => renderLayer(child, depth + 1))}
-        {maskChildren.map((mask) => renderLayer(mask, depth + 1))}
-      </div>
-    )
-  }
-
-  const layerRoots = [...scene.elements]
-    .filter((element) => element.groupId === null && !(element.type === 'mask' && scene.elements.some((candidate) => candidate.id === element.targetElementId)))
-    .sort((a, b) => b.zIndex - a.zIndex)
 
   const selectedTypeLabel = selected === undefined ? '画布' : elementLabels[selected.type]
   const properties = useMemo(() => selected === undefined ? [] : simplePropertiesFor(selected), [selected])
@@ -551,26 +439,7 @@ export function Inspector({ onRequestCollapse, projection = 'vertical' }: { read
       </div>
 
       {tab === 'layers' ? (
-        <div className="layers-panel">
-          <div className="arrange-strip" aria-label="排列工具">
-            <button type="button" title="左对齐" aria-label="左对齐" onClick={() => align('left')}><AlignStartVertical size={15} /></button>
-            <button type="button" title="水平居中" aria-label="水平居中" onClick={() => align('center-x')}><AlignCenterVertical size={15} /></button>
-            <button type="button" title="右对齐" aria-label="右对齐" onClick={() => align('right')}><AlignEndVertical size={15} /></button>
-            <button type="button" title="顶对齐" aria-label="顶对齐" onClick={() => align('top')}><AlignStartHorizontal size={15} /></button>
-            <button type="button" title="垂直居中" aria-label="垂直居中" onClick={() => align('center-y')}><AlignCenterHorizontal size={15} /></button>
-            <button type="button" title="底对齐" aria-label="底对齐" onClick={() => align('bottom')}><AlignEndHorizontal size={15} /></button>
-            <span />
-            <button type="button" title="组合" aria-label="组合" onClick={group}><GroupIcon size={15} /></button>
-            <button type="button" title="取消组合" aria-label="取消组合" onClick={ungroup}><Ungroup size={15} /></button>
-          </div>
-          <div className="layer-list" role="listbox" aria-label="图层">
-            {layerRoots.map((element) => renderLayer(element))}
-          </div>
-          {selectedIds.length >= 3 && <div className="distribution-actions" aria-label="分布工具">
-            <button type="button" className="text-action" onClick={() => distribute('horizontal')}>水平等距分布</button>
-            <button type="button" className="text-action" onClick={() => distribute('vertical')}>垂直等距分布</button>
-          </div>}
-        </div>
+        <LayerPanel />
       ) : (
         <div className={`properties-panel mode-${propertyMode}${selected === undefined ? ' type-canvas' : ` type-${selected.type}`}`} data-simple-field-count={properties.length}>
           {selected === undefined
