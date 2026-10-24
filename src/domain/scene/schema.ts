@@ -73,6 +73,65 @@ export const imageEffectsSchema = z.object({
   }).nullable().default(null)
 })
 
+const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
+const unitSchema = finiteNumber.min(0).max(1)
+const paintPointSchema = z.tuple([finiteNumber, finiteNumber])
+
+/**
+ * One thing done to an image layer's pixels, in the layer's own pixel space
+ * (the asset's natural size). The asset is never changed; the operations
+ * are replayed over it in order by the shared rasterizer, which draws the
+ * canvas, the export and the references alike. lockAlpha keeps each
+ * pixel's transparency, as Photoshop's 锁定透明像素 does.
+ */
+export const paintOpSchema = z.discriminatedUnion('kind', [
+  z.object({
+    id: idSchema,
+    kind: z.literal('stroke'),
+    tool: z.enum(['brush', 'eraser']),
+    color: hexColorSchema,
+    size: finiteNumber.min(0.5).max(5000),
+    hardness: unitSchema,
+    opacity: unitSchema,
+    flow: unitSchema,
+    /** Whether pen pressure (the third number of each point) scales size and flow. */
+    pressure: z.boolean(),
+    lockAlpha: z.boolean(),
+    /** x, y, pressure for each point, flattened. */
+    points: z.array(finiteNumber).min(3).max(60_000).refine((points) => points.length % 3 === 0, 'points come in x, y, pressure triples')
+  }),
+  z.object({
+    id: idSchema,
+    kind: z.literal('fill'),
+    x: finiteNumber,
+    y: finiteNumber,
+    color: hexColorSchema,
+    tolerance: finiteNumber.min(0).max(255),
+    contiguous: z.boolean(),
+    opacity: unitSchema,
+    lockAlpha: z.boolean()
+  }),
+  z.object({
+    id: idSchema,
+    kind: z.literal('fill-all'),
+    color: hexColorSchema,
+    opacity: unitSchema,
+    lockAlpha: z.boolean()
+  }),
+  z.object({
+    id: idSchema,
+    kind: z.literal('gradient'),
+    shape: z.enum(['linear', 'radial']),
+    from: paintPointSchema,
+    to: paintPointSchema,
+    colors: z.tuple([hexColorSchema, hexColorSchema]),
+    opacity: unitSchema,
+    lockAlpha: z.boolean()
+  })
+])
+
+export const MAX_PAINT_OPS = 500
+
 export const imageElementSchema = z.object({
   ...elementBaseShape,
   type: z.literal('image'),
@@ -86,7 +145,11 @@ export const imageElementSchema = z.object({
   fit: z.enum(['cover', 'contain', 'fill']),
   referenceRole: z.enum(['subject', 'style', 'composition', 'color', 'material', 'general']),
   /** Layer effects that blend the image into the picture; the asset itself is never changed. */
-  effects: imageEffectsSchema.optional()
+  effects: imageEffectsSchema.optional(),
+  /** What has been painted on the layer, oldest first. */
+  paint: z.array(paintOpSchema).max(MAX_PAINT_OPS).optional(),
+  /** Painting keeps each pixel's transparency (Photoshop's 锁定透明像素). */
+  transparencyLocked: z.boolean().optional()
 })
 
 export const textElementSchema = z.object({
@@ -331,5 +394,6 @@ export type SceneElement = z.infer<typeof sceneElementSchema>
 export type SceneRelation = z.infer<typeof sceneRelationSchema>
 export type BlendMode = z.infer<typeof blendModeSchema>
 export type ImageEffects = z.infer<typeof imageEffectsSchema>
+export type PaintOp = z.infer<typeof paintOpSchema>
 export type NormalizedTransform = z.infer<typeof normalizedTransformSchema>
 export type Canvas = z.infer<typeof canvasSchema>

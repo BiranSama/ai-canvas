@@ -11,11 +11,13 @@ import { arrangeTool } from './arrange'
 import { askUserTool } from './ask-user'
 import { cancelGenerationTool } from './cancel-generation'
 import { editImageTool } from './edit-image'
+import { fillTool } from './fill'
 import { generateTool } from './generate'
 import { groupTool } from './group'
 import { inspectTool } from './inspect'
 import { loadManualTool } from './load-manual'
 import { lookTool } from './look'
+import { mergeLayersTool } from './merge'
 import { placeResultTool } from './place-result'
 import { blendTool } from './blend'
 import { rememberTool } from './remember'
@@ -30,7 +32,7 @@ import { viewResultTool } from './view-result'
 /** Every small tool, in the order the model sees them. */
 export const AGENT_TOOLS: readonly AgentToolSpec<never>[] = [
   lookTool, inspectTool, viewResultTool,
-  setCanvasTool, addTextTool, addShapeTool, updateTool, arrangeTool, reorderTool, groupTool, removeTool,
+  setCanvasTool, addTextTool, addShapeTool, updateTool, arrangeTool, reorderTool, groupTool, mergeLayersTool, fillTool, removeTool,
   addSubjectTool, addLightTool, addMaskTool, undoTool,
   generateTool, editImageTool, placeResultTool, blendTool, cancelGenerationTool,
   askUserTool, rememberTool, loadManualTool

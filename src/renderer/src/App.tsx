@@ -35,6 +35,7 @@ import { CanvasStage, type CanvasStageHandle } from './canvas/CanvasStage'
 import { ActionTrace } from './canvas/ActionTrace'
 import { createElementForTool } from './canvas/element-factory'
 import { CanvasToolbar } from './components/CanvasToolbar'
+import { PaintOptionsBar } from './components/PaintOptionsBar'
 import { CanvasSizeControl } from './components/CanvasSizeControl'
 import { CreationBar } from './components/CreationBar'
 import { ConversationView } from './components/ConversationView'
@@ -48,7 +49,7 @@ import { showAppNotice } from './components/app-notice'
 import { ShortcutSheet } from './components/ShortcutSheet'
 import { WorkspaceRecoveryView } from './components/RendererErrorBoundary'
 import { createVisualExampleScene, VISUAL_EXAMPLE_KEYS, visualExampleLabels, type VisualExampleKey } from './fixtures/visual-examples'
-import { groupBoundsForChildTransforms, hydrateWorkspaceScene, useWorkspaceStore, type CanvasTool, type WorkspaceView } from './store/workspace-store'
+import { groupBoundsForChildTransforms, hydrateWorkspaceScene, isPaintTool, useWorkspaceStore, type CanvasTool, type WorkspaceView } from './store/workspace-store'
 import { GlassIsland } from './islands/GlassIsland'
 import { resetAllGlassIslands } from './islands/island-events'
 import { waitForWorkspaceStartup } from './startup/workspace-startup'
@@ -469,7 +470,7 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
       return
     }
     setActiveTool(tool)
-    if (tool === 'select' || tool === 'hand' || tool === 'eyedropper') return
+    if (tool === 'select' || tool === 'hand' || tool === 'eyedropper' || isPaintTool(tool)) return
     if (tool === 'sketch') return
     if (tool === 'image') {
       setImportChooserOpen(true)
@@ -671,7 +672,11 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
             </div>
           )}
         </section>
-          <div ref={canvasSizeRef} className="canvas-size-float glass-surface" style={canvasUtilityStyles?.size}><CanvasSizeControl /></div>
+          <div ref={canvasSizeRef} className={`canvas-size-float glass-surface${isPaintTool(activeTool) ? ' is-painting' : ''}`} style={canvasUtilityStyles?.size}>
+            <CanvasSizeControl />
+            {/* The painting tools' options sit beside the canvas size, Photoshop's options bar, and move with it out of the panels' way. */}
+            {isPaintTool(activeTool) && <PaintOptionsBar tool={activeTool} />}
+          </div>
           <div ref={canvasStatusRef} className="canvas-status glass-surface" style={canvasUtilityStyles?.status}>
             <div className="canvas-status-scale">
             <button type="button" aria-label="适合窗口" title="适合窗口（Ctrl+0）" onClick={() => stageRef.current?.viewFit()}><Maximize2 size={14} /></button>

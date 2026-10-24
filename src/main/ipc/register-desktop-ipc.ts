@@ -1,7 +1,9 @@
+import { z } from 'zod'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { basename, extname } from 'node:path'
 import { DESKTOP_CHANNELS, DESKTOP_EVENTS, type RuntimeInfo } from '../../shared/desktop-api'
 import { diagnosticExportResultSchema } from '../../shared/diagnostics'
+import { pixelImportInputSchema } from '../../shared/project'
 import { projectWorkContextSchema } from '../../shared/project-work-context'
 import { generationReferencePreviewInputSchema } from '../../shared/generation-reference'
 import type { AppearanceSettingsService } from '../appearance/appearance-settings-service'
@@ -129,6 +131,7 @@ export function registerDesktopIpc(
     if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > MAX_PSD_BYTES) throw new Error('PSD 必须大于 0 字节且不超过 1 GB。')
     return readPsdForImport(bytes)
   })
+  ipcMain.handle(DESKTOP_CHANNELS.paintBake, async (_event, elementId: unknown) => (await generationRuntime).bakePaint({ elementId: z.string().uuid().parse(elementId) }))
   ipcMain.handle(DESKTOP_CHANNELS.imageToneMatch, async (_event, input: unknown) => (await generationRuntime).matchImageTone(imageToneMatchSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettings, async () => appearanceSettings.snapshot())
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettingsSet, async (_event, input: unknown) => {
@@ -315,6 +318,9 @@ export function registerDesktopIpc(
   })
   ipcMain.handle(DESKTOP_CHANNELS.assetImport, async (_event, input: unknown) => {
     return (await generationRuntime).importAsset(assetImportSchema.parse(input))
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.assetImportPixels, async (_event, input: unknown) => {
+    return (await generationRuntime).importPixels(pixelImportInputSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.workspaceBootstrap, async () => (await generationRuntime).getWorkspaceBootstrap())
   ipcMain.handle(DESKTOP_CHANNELS.projectWorkContextSave, async (_event, input: unknown) => {

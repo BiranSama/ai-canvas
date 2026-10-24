@@ -35,6 +35,7 @@ import type {
 import type {
   AssetImportInput,
   ImportedAsset,
+  PixelImportInput,
   ProjectActionResult,
   ProjectCreateInput,
   ProjectDeleteResult,
@@ -62,6 +63,7 @@ export const DESKTOP_CHANNELS = {
   localFonts: 'desktop:local-fonts',
   openFileRequests: 'desktop:open-file-requests',
   psdRead: 'project:psd-read',
+  paintBake: 'scene:paint-bake',
   imageToneMatch: 'scene:image-tone-match',
   unifiedRender: 'generation:unified-render',
   appearanceSettings: 'appearance:settings',
@@ -102,6 +104,7 @@ export const DESKTOP_CHANNELS = {
   projectLibraryChange: 'project:library-change',
   projectSaveAs: 'project:save-as',
   assetImport: 'asset:import',
+  assetImportPixels: 'asset:import-pixels',
   workspaceBootstrap: 'workspace:bootstrap',
   projectWorkContextSave: 'project:work-context-save',
   windowCloseReady: 'window:close-ready',
@@ -199,6 +202,8 @@ export interface DesktopApi {
   onOpenFileRequested(listener: () => void): () => void
   /** A PSD's layers as PNGs with their place, opacity, visibility, blend mode and group, ready to become a project. */
   readPsd(bytes: Uint8Array): Promise<PsdDocumentImport>
+  /** Replays an image layer's recorded paint into a new asset; the scene then swaps it in and drops the operations listed. */
+  bakePaint(elementId: string): Promise<{ readonly assetId: string; readonly paintIds: readonly string[] } | null>
   /** How to shift an image's colour part of the way (strength 0–1) towards the picture around it; null when it cannot be measured. */
   matchImageTone(input: { readonly elementId: string; readonly strength: number }): Promise<{ readonly colorMatch: NonNullable<ImageEffects['colorMatch']>; readonly opaque: boolean } | null>
   getAppearanceSettings(): Promise<AppearanceSettingsSnapshot>
@@ -242,6 +247,7 @@ export interface DesktopApi {
   changeProjectLibraryLocation(mode: ProjectLibraryChangeMode): Promise<ProjectLibraryLocationResult>
   saveProjectAs(input: ProjectCreateInput): Promise<ProjectActionResult>
   importAsset(input: AssetImportInput): Promise<ImportedAsset>
+  importPixels(input: PixelImportInput): Promise<ImportedAsset>
   getWorkspaceBootstrap(): Promise<WorkspaceBootstrap>
   saveProjectWorkContext(context: ProjectWorkContext): Promise<void>
   executeSceneCommands(input: SceneExecuteInput): Promise<SceneMutationResult>

@@ -1,7 +1,7 @@
 import type { ToneMeasurement } from '../../edit/tone-match'
 import type { LocalFontFamily } from '../../../shared/local-fonts'
 import type { z } from 'zod'
-import type { Scene, SceneElement } from '../../../domain'
+import type { NormalizedTransform, Scene, SceneElement } from '../../../domain'
 import type { AgentToolOutcome, AgentToolPlan } from '../../../shared/agent'
 import type { LlmImage } from '../llm/transcript'
 import type { ElementRefs } from './refs'
@@ -69,6 +69,16 @@ export interface AgentToolContext {
   readonly measureTone?: ((elementId: string, strength: number) => Promise<ToneMeasurement | null>) | null
   /** Font families installed on this computer; empty when unknown, and then any name is accepted. */
   readonly fonts?: readonly LocalFontFamily[]
+  /** An image's size in pixels, for tools that paint in a layer's own pixels; null when unknown. */
+  readonly assetSize?: ((assetId: string) => Promise<{ readonly width: number; readonly height: number } | null>) | null
+  /**
+   * Draws layers as the final picture shows them into a new asset cut to
+   * what they cover (the base layer at full opacity and normal blend);
+   * null when Main cannot render here.
+   */
+  readonly drawLayers?: ((elementIds: readonly string[], base?: string) => Promise<{ readonly assetId: string; readonly transform: NormalizedTransform } | null>) | null
+  /** A new transparent asset the size of the canvas, for a new layer to paint on. */
+  readonly blankLayer?: (() => Promise<string | null>) | null
 }
 
 export interface AgentToolResult {

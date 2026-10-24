@@ -40,9 +40,12 @@ import type { EphemeralAnnotationTool } from '../agent/ephemeral-annotation-stor
 import { activeModal, canvasKeyboardBlocked, isInteractiveTarget, MODAL_SCOPE_CHANGED } from '../interaction/keyboard-scope'
 import { islandFitInsets } from '../islands/island-layout'
 import { useIslandLayoutStore } from '../islands/island-layout-store'
-import { groupBoundsForChildTransforms, useWorkspaceStore } from '../store/workspace-store'
+import { groupBoundsForChildTransforms, isPaintTool, useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
+import { paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
+import { setLayerRenderer } from './layer-render'
+import { constrainAngle, fillAt, gradientBetween, paintTarget, startStroke, type PaintGeometry, type PaintSession } from './paint-controller'
 import {
   boundsForElements,
   clampCrop,
@@ -191,14 +194,21 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   useSyncExternalStore(subscribeRuntimeAssets, getRuntimeAssetVersion, getRuntimeAssetVersion)
   const assetUrl = getRuntimeAssetUrl(element.assetId)
   const image = useHtmlImage(assetUrl)
+  const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
+  // With paint on it, the layer is drawn from its asset with the operations replayed.
+  const source = useMemo(
+    () => image === null ? null : paintedSource(element.id, image, element.paint),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas
+    [image, element.id, element.paint, paintVersion]
+  )
   const shownWidth = Math.round(width)
   const shownHeight = Math.round(height)
   const effected = useMemo(
-    () => image === null ? null : renderImageEffects(image, element, shownWidth, shownHeight),
+    () => source === null ? null : renderImageEffects(source, element, shownWidth, shownHeight),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
-    [image, element.crop, element.fit, element.effects, shownWidth, shownHeight]
+    [source, paintVersion, element.crop, element.fit, element.effects, shownWidth, shownHeight]
   )
-  if (image === null) {
+  if (image === null || source === null) {
     const missing = isRuntimeAssetMissing(element.assetId)
     const loading = isRuntimeAssetLoading(element.assetId)
     const status = missing
@@ -209,7 +219,8 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
           ? '正在显示图片…'
           : '正在准备图片…'
     return (
-      <Group>
+      // Named so merging waits for the picture instead of drawing this stand-in into a layer.
+      <Group name="image-pending">
         <Rect width={width} height={height} fill={missing ? '#E9E1DE' : '#DCE3EA'} cornerRadius={8} />
         <Text width={width} y={height / 2 - 8} align="center" text={status} fill={missing ? '#925F58' : '#6D7783'} fontSize={13} />
       </Group>
@@ -226,11 +237,12 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
       </Group>
     )
   }
-  const { crop, draw } = drawRect(image, element, width, height)
+  const { crop, draw } = drawRect(source, element, width, height)
   return (
     <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
       <KonvaImage
-        image={image}
+        name={`pixels-${element.id}`}
+        image={source}
         x={draw.x}
         y={draw.y}
         width={draw.width}
@@ -816,6 +828,13 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const transformerRef = useRef<Konva.Transformer>(null)
   const auxiliaryLayerRef = useRef<Konva.Layer>(null)
   const contentLayerRef = useRef<Konva.Layer>(null)
+  const paintSessionRef = useRef<PaintSession | null>(null)
+  const gradientStartRef = useRef<{ x: number, y: number } | null>(null)
+  /** Where the last stroke ended on each layer, in layer pixels, for Shift+click straight lines. */
+  const lastStrokeEndRef = useRef(new Map<string, { x: number, y: number }>())
+  // Moved by hand on every pointer move, so following the pointer never re-renders the stage.
+  const brushRingRef = useRef<Konva.Group>(null)
+  const [gradientLine, setGradientLine] = useState<{ from: { x: number, y: number }, to: { x: number, y: number } } | null>(null)
   const [guides, setGuides] = useState<Guide[]>([])
   const [draftStroke, setDraftStroke] = useState<number[]>([])
   const [draftMask, setDraftMask] = useState<number[]>([])
@@ -1514,6 +1533,60 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     }
   }), [artboard.height, artboard.width, artboard.x, artboard.y, pan.x, pan.y, scene.canvas.outputHeight, scene.canvas.outputWidth, setClampedViewport, unsupportedBlendModes.length, viewFit, zoom])
 
+  // Merging and rasterizing draw layers as they are shown here, at the canvas's output size, with nothing behind them.
+  useEffect(() => {
+    setLayerRenderer((ids, options) => {
+      const stage = stageRef.current
+      const content = contentLayerRef.current
+      const auxiliary = auxiliaryLayerRef.current
+      if (stage === null || content === null || auxiliary === null) return null
+      const keep = new Set(ids)
+      const nodes = [...content.find('.final-content'), ...content.find('.editor-reference')]
+      const pending = content.find('.image-pending').some((stand) => {
+        const owner = stand.findAncestor((ancestor: Konva.Node) => ancestor.id().startsWith('element-'))
+        return owner !== null && owner !== undefined && keep.has(owner.id().slice('element-'.length))
+      })
+      if (pending) return 'pending'
+      const restore: Array<() => void> = []
+      const change = <T,>(read: () => T, write: (value: T) => void, value: T): void => {
+        const before = read()
+        write(value)
+        restore.push(() => write(before))
+      }
+      for (const node of nodes) {
+        const id = node.id().startsWith('element-') ? node.id().slice('element-'.length) : null
+        if (id === null) continue
+        if (!keep.has(id)) change(() => node.visible(), (value) => node.visible(value), false)
+        else if (options.showHidden === true) change(() => node.visible(), (value) => node.visible(value), true)
+        if (id === options.base) {
+          change(() => node.opacity(), (value) => node.opacity(value), 1)
+          change(() => node.globalCompositeOperation(), (value) => node.globalCompositeOperation(value), 'source-over')
+        }
+      }
+      const background = content.findOne('.artboard-background')
+      if (background !== undefined) change(() => background.visible(), (value) => background.visible(value), false)
+      for (const chrome of stage.find('.editor-chrome')) change(() => chrome.visible(), (value) => chrome.visible(value), false)
+      change(() => auxiliary.visible(), (value) => auxiliary.visible(value), false)
+      try {
+        const renderScale = Math.max(scene.canvas.outputWidth / (artboard.width * zoom), scene.canvas.outputHeight / (artboard.height * zoom))
+        const rendered = stage.toCanvas({ x: artboard.x, y: artboard.y, width: artboard.width * zoom, height: artboard.height * zoom, pixelRatio: renderScale })
+        const output = document.createElement('canvas')
+        output.width = scene.canvas.outputWidth
+        output.height = scene.canvas.outputHeight
+        const context = output.getContext('2d')
+        if (context === null) return null
+        context.imageSmoothingEnabled = true
+        context.imageSmoothingQuality = 'high'
+        context.drawImage(rendered, 0, 0, output.width, output.height)
+        return output
+      } finally {
+        for (const undo of restore.reverse()) undo()
+        stage.draw()
+      }
+    })
+    return () => setLayerRenderer(null)
+  }, [artboard.height, artboard.width, artboard.x, artboard.y, scene.canvas.outputHeight, scene.canvas.outputWidth, zoom])
+
   const handleWheel = useCallback((event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault()
     const stage = stageRef.current
@@ -1790,6 +1863,94 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     return true
   }
 
+  const paintGeometry = (): PaintGeometry => ({
+    origin: { x: displayedArtboard.x, y: displayedArtboard.y },
+    zoom,
+    canvasWidth: scene.canvas.outputWidth,
+    canvasHeight: scene.canvas.outputHeight
+  })
+  const stagePoint = (event: { clientX: number, clientY: number }): { x: number, y: number } | null => {
+    const rect = stageRef.current?.container().getBoundingClientRect()
+    return rect === undefined ? null : { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  }
+  const redrawContent = (): void => { contentLayerRef.current?.batchDraw() }
+
+  const beginPaint = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isPaintTool(activeTool) || event.button !== 0 || spacePressed) return
+    if (!(event.target instanceof Element) || event.target.closest('.konvajs-content') === null) return
+    const point = stagePoint(event)
+    if (point === null) return
+    // Alt with a painting tool picks a colour instead, as in Photoshop.
+    if (event.altKey && activeTool !== 'gradient') {
+      stageRef.current?.setPointersPositions(event.nativeEvent)
+      sampleColor(false)
+      return
+    }
+    const element = paintTarget()
+    if (element === null) return
+    event.preventDefault()
+    if (activeTool === 'bucket') {
+      fillAt(element, paintGeometry(), point.x, point.y, redrawContent)
+      return
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    if (activeTool === 'gradient') {
+      gradientStartRef.current = point
+      setGradientLine({ from: point, to: point })
+      return
+    }
+    const pressure = event.pointerType === 'pen' ? event.pressure : null
+    paintSessionRef.current = startStroke(
+      activeTool, element, paintGeometry(), point.x, point.y, pressure,
+      event.shiftKey ? lastStrokeEndRef.current.get(element.id) ?? null : null,
+      redrawContent,
+      (end) => lastStrokeEndRef.current.set(element.id, end)
+    )
+  }
+
+  const continuePaint = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isPaintTool(activeTool)) return
+    const point = stagePoint(event)
+    if (point === null) return
+    if (activeTool === 'brush' || activeTool === 'eraser') {
+      const size = useWorkspaceStore.getState().paintSettings[activeTool].size
+      const ring = brushRingRef.current
+      if (ring !== null) {
+        ring.position(point)
+        for (const circle of ring.getChildren()) (circle as Konva.Circle).radius(Math.max(0.5, size * zoom / 2))
+        ring.visible(true)
+        ring.getLayer()?.batchDraw()
+      }
+    }
+    const start = gradientStartRef.current
+    if (start !== null) {
+      setGradientLine({ from: start, to: event.shiftKey ? constrainAngle(start, point) : point })
+      return
+    }
+    const session = paintSessionRef.current
+    if (session === null) return
+    // A pen sends more samples than frames; every one of them goes into the stroke.
+    const samples = typeof event.nativeEvent.getCoalescedEvents === 'function' ? event.nativeEvent.getCoalescedEvents() : []
+    for (const sample of samples.length > 0 ? samples : [event.nativeEvent]) {
+      const at = stagePoint(sample)
+      if (at !== null) session.move(at.x, at.y, sample.pointerType === 'pen' ? sample.pressure : 1)
+    }
+  }
+
+  const finishPaint = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const point = stagePoint(event)
+    const session = paintSessionRef.current
+    paintSessionRef.current = null
+    if (session !== null && point !== null) session.end(point.x, point.y, event.shiftKey)
+    const start = gradientStartRef.current
+    gradientStartRef.current = null
+    if (start !== null) {
+      setGradientLine(null)
+      const element = point === null ? null : paintTarget()
+      if (element !== null && point !== null) gradientBetween(element, paintGeometry(), start, event.shiftKey ? constrainAngle(start, point) : point, redrawContent)
+    }
+  }
+
   /**
    * The eyedropper reads the picture as drawn under the pointer, background
    * included, and sets the foreground colour, or with Alt the background.
@@ -1813,7 +1974,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
 
   const handleElementSelect = (element: SceneElement, event: KonvaEventObject<MouseEvent | TouchEvent>): void => {
     event.cancelBubble = true
-    if (activeTool === 'eyedropper') return
+    if (activeTool === 'eyedropper' || isPaintTool(activeTool)) return
     const targetId = element.groupId !== null && element.groupId !== editingGroupId ? element.groupId : element.id
     if (!event.evt.altKey) {
       select(targetId, event.evt.shiftKey || event.evt.ctrlKey || event.evt.metaKey)
@@ -1964,7 +2125,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   return (
     <div
       ref={containerRef}
-      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}${activeTool === 'eyedropper' ? ' is-eyedropper' : ''}`}
+      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}${activeTool === 'eyedropper' ? ' is-eyedropper' : ''}${isPaintTool(activeTool) && !spacePressed ? ` is-painting is-${activeTool}` : ''}`}
       data-testid="canvas-stage"
       tabIndex={preview ? -1 : 0}
       aria-label={preview ? '作品预览' : '画布编辑区'}
@@ -1973,6 +2134,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           containerRef.current?.focus({ preventScroll: true })
         }
       }}
+      onPointerDown={(event) => { if (!preview) beginPaint(event) }}
+      onPointerMove={(event) => { if (!preview) continuePaint(event) }}
+      onPointerUp={(event) => { if (!preview) finishPaint(event) }}
+      onPointerCancel={() => { paintSessionRef.current?.cancel(); paintSessionRef.current = null; gradientStartRef.current = null; setGradientLine(null) }}
+      onPointerLeave={() => { brushRingRef.current?.visible(false); brushRingRef.current?.getLayer()?.batchDraw() }}
       data-scene-revision={scene.revision}
       data-shape-editing={shapeEditId ?? ''}
       data-shape-edit-kind={shapeEditElement?.shape ?? ''}
@@ -2003,6 +2169,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
             sampleColor(event.evt.altKey)
             return
           }
+          // Painting runs on pointer events, for pen pressure and every sample the pen sends.
+          if (isPaintTool(activeTool) && event.evt.button === 0 && !spacePressed) return
           if (event.evt.button === 1 || ((spacePressed || activeTool === 'hand') && event.evt.button === 0)) {
             event.evt.preventDefault()
             panningRef.current = true
@@ -2127,6 +2295,20 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           </Group>
         </Layer>
         <Layer ref={auxiliaryLayerRef} name="editor-auxiliary" listening={!preview}>
+          {!preview && (activeTool === 'brush' || activeTool === 'eraser') && !spacePressed && (
+            // The brush's real size on the canvas, light over dark so it reads on any picture.
+            <Group ref={brushRingRef} listening={false} name="brush-ring" visible={false}>
+              <Circle radius={1} stroke="rgba(0,0,0,.55)" strokeWidth={2} />
+              <Circle radius={1} stroke="rgba(255,255,255,.9)" strokeWidth={1} />
+            </Group>
+          )}
+          {!preview && gradientLine !== null && (
+            <Group listening={false} name="gradient-line">
+              <Line points={[gradientLine.from.x, gradientLine.from.y, gradientLine.to.x, gradientLine.to.y]} stroke="rgba(0,0,0,.55)" strokeWidth={3} />
+              <Line points={[gradientLine.from.x, gradientLine.from.y, gradientLine.to.x, gradientLine.to.y]} stroke="#FFFFFF" strokeWidth={1} />
+              <Circle x={gradientLine.from.x} y={gradientLine.from.y} radius={4} fill="#FFFFFF" stroke="#1F242B" strokeWidth={1} />
+            </Group>
+          )}
           {!preview && marquee !== null && (() => {
             const rect = rectFromPoints(marquee.start, marquee.current)
             return (

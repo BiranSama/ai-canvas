@@ -131,7 +131,7 @@ test('launches the production canvas with native modules isolated in Main', asyn
     await window.getByLabel('撤销', { exact: true }).evaluate((button) => button.click())
     await expect(layerOptions).toHaveCount(initialLayers)
 
-    await window.getByRole('button', { name: '草图 B' }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '草图', exact: true }).evaluate((button) => button.click())
     const sketchSurface = window.getByTestId('canvas-stage').locator('.konvajs-content')
     const stageBox = await sketchSurface.boundingBox()
     if (stageBox === null) throw new Error('Canvas event surface is missing.')
@@ -301,6 +301,7 @@ test('launches the production canvas with native modules isolated in Main', asyn
         'listLocalFonts',
         'takeOpenFileRequests',
         'readPsd',
+        'bakePaint',
         'onOpenFileRequested',
         'matchImageTone',
         'getAppearanceSettings',
@@ -343,6 +344,7 @@ test('launches the production canvas with native modules isolated in Main', asyn
         'changeProjectLibraryLocation',
         'saveProjectAs',
         'importAsset',
+        'importPixels',
         'getWorkspaceBootstrap',
         'saveProjectWorkContext',
         'onWindowClosing',

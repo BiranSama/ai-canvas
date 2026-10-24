@@ -13,6 +13,7 @@ import type { ProviderCapabilities } from '../../../shared/generation'
 import { MultiStepPlannerAdapter, type MultiStepModel } from './multi-step-planner'
 import { SceneLooker } from './scene-looker'
 import { measureToneMatch } from '../../edit/tone-match'
+import { blankLayerBytes, drawLayers } from '../../paint/draw-layers'
 import { localFontCatalog } from '../../fonts/local-font-catalog'
 import type { LocalFontFamily } from '../../../shared/local-fonts'
 
@@ -47,6 +48,8 @@ export function createMultiStepPlannerAdapter(options: {
   readonly authorization: { reserve(input: ProviderUsageReservation): Promise<unknown> }
   readonly assets: { resolveAsset(assetId: string): Promise<{ readonly asset: AssetMetadata; readonly filePath: string }> }
   readonly scene: () => Scene
+  /** Stores pixels Main drew for the agent (a merge, a blank layer) as a project asset. */
+  readonly importImage?: (bytes: Buffer, sourceId: string) => Promise<{ readonly id: string }>
   readonly fetcher?: typeof fetch
   /** This computer's fonts by default. */
   readonly fonts?: () => Promise<readonly LocalFontFamily[]>
@@ -83,6 +86,25 @@ export function createMultiStepPlannerAdapter(options: {
       return measureToneMatch(scene, element, resolveAssetPath, strength).catch(() => null)
     },
     looker: new SceneLooker(resolveAssetPath),
+    assetSize: async (assetId) => {
+      try {
+        const { asset } = await options.assets.resolveAsset(assetId)
+        return { width: asset.width, height: asset.height }
+      } catch {
+        return null
+      }
+    },
+    drawLayers: options.importImage === undefined ? null : async (elementIds, base) => {
+      const drawn = await drawLayers(options.scene(), elementIds, base, resolveAssetPath).catch(() => null)
+      if (drawn === null) return null
+      const asset = await options.importImage!(drawn.bytes, elementIds[0]!)
+      return { assetId: asset.id, transform: drawn.transform }
+    },
+    blankLayer: options.importImage === undefined ? null : async () => {
+      const { canvas, elements } = options.scene()
+      const bytes = await blankLayerBytes(canvas.outputWidth, canvas.outputHeight)
+      return (await options.importImage!(bytes, elements[0]?.id ?? 'blank-layer')).id
+    },
     model: async (): Promise<MultiStepModel> => {
       const { llm } = await providers()
       if (llm === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !await options.secrets.has('openai-compatible-llm')) {

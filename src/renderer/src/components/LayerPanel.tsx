@@ -28,6 +28,8 @@ import { createPortal } from 'react-dom'
 import { pathInBox, type SceneElement } from '../../../domain'
 import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
+import { mergeDown, mergeVisible, rasterizeLayer } from '../canvas/layer-actions'
+import { pixelLayerCanvas, pixelLayerVersion, subscribePixelLayers } from '../canvas/pixel-layers'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeInput } from './ImeSafeTextField'
 
@@ -58,11 +60,42 @@ function luminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
+const THUMB_PIXELS = 60
+
+/** An image layer with paint on it, drawn from the canvas the stage shows it from once the stage has drawn it. */
+function PaintedThumb({ element, url }: { readonly element: Extract<SceneElement, { type: 'image' }>; readonly url: string | null }): React.JSX.Element {
+  const version = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [drawn, setDrawn] = useState(false)
+  useEffect(() => {
+    // The stage brings the layer's canvas up to date as it renders, so draw a frame later.
+    const frame = requestAnimationFrame(() => {
+      const target = canvasRef.current
+      const source = pixelLayerCanvas(element.id)
+      const context = target?.getContext('2d')
+      if (target === null || source === null || context === null || context === undefined) return
+      target.width = THUMB_PIXELS
+      target.height = THUMB_PIXELS
+      const scale = Math.max(THUMB_PIXELS / source.width, THUMB_PIXELS / source.height)
+      context.drawImage(source, (THUMB_PIXELS - source.width * scale) / 2, (THUMB_PIXELS - source.height * scale) / 2, source.width * scale, source.height * scale)
+      setDrawn(true)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [element.id, element.paint, version])
+  return (
+    <span className="layer-thumb is-image">
+      {!drawn && (url === null ? <ImageIcon size={14} /> : <img src={url} alt="" draggable={false} />)}
+      <canvas ref={canvasRef} hidden={!drawn} />
+    </span>
+  )
+}
+
 /** A small picture of the layer: the image itself, the shape in its colours, the first character of text. */
 function LayerThumb({ element, open }: { readonly element: SceneElement; readonly open: boolean }): React.JSX.Element {
   useSyncExternalStore(subscribeRuntimeAssets, getRuntimeAssetVersion, getRuntimeAssetVersion)
   if (element.type === 'image') {
     const url = getRuntimeAssetUrl(element.assetId)
+    if ((element.paint?.length ?? 0) > 0) return <PaintedThumb element={element} url={url} />
     return <span className="layer-thumb is-image">{url === null ? <ImageIcon size={14} /> : <img src={url} alt="" draggable={false} />}</span>
   }
   if (element.type === 'shape') {
@@ -218,7 +251,7 @@ export function LayerPanel(): React.JSX.Element {
     setRenaming(null)
   }
 
-  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup'): void => {
+  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup' | 'merge' | 'merge-visible' | 'rasterize'): void => {
     setMenu(null)
     const element = byId.get(id)
     if (element === undefined) return
@@ -233,6 +266,9 @@ export function LayerPanel(): React.JSX.Element {
     else if (action === 'visibility') void updateElement(id, { visible: !element.visible }, element.visible ? '隐藏图层' : '显示图层')
     else if (action === 'lock') void updateElement(id, { locked: !element.locked }, element.locked ? '解锁图层' : '锁定图层')
     else if (action === 'group') void group()
+    else if (action === 'merge') void mergeDown()
+    else if (action === 'merge-visible') void mergeVisible()
+    else if (action === 'rasterize') void rasterizeLayer(id)
     else void ungroup()
   }
 
@@ -418,7 +454,7 @@ export function LayerPanel(): React.JSX.Element {
 
       {/* The island's backdrop filter would make it the containing block of a fixed menu, so the menu lives on the body. */}
       {menu !== null && menuElement !== undefined && createPortal(
-        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: Math.min(menu.y, window.innerHeight - 340) }}>
+        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: Math.min(menu.y, window.innerHeight - 450) }}>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'rename')}>重命名<kbd>F2</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'duplicate')}>复制</button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'visibility')} disabled={menuElement.locked}>{menuElement.visible ? '隐藏' : '显示'}</button>
@@ -431,6 +467,10 @@ export function LayerPanel(): React.JSX.Element {
           <hr />
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'group')} disabled={selected.length < 2}>组合所选</button>
           {menuElement.type === 'group' && <button type="button" role="menuitem" onClick={() => act(menu.id, 'ungroup')}>取消组合</button>}
+          <hr />
+          {(menuElement.type === 'text' || menuElement.type === 'shape') && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}
+          <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge')}>{menuElement.type === 'group' ? '合并组' : selected.length > 1 && selectedIds.includes(menu.id) ? '合并图层' : '向下合并'}<kbd>Ctrl+E</kbd></button>
+          <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge-visible')}>合并可见图层<kbd>Ctrl+Shift+E</kbd></button>
           <button type="button" role="menuitem" className="is-danger" onClick={() => act(menu.id, 'delete')}>删除</button>
         </div>,
         document.body

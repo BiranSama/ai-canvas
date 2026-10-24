@@ -1,6 +1,8 @@
 import type { SceneCommand, SceneElement } from '../../../domain'
 import { BLEND_MODES, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
-import { useWorkspaceStore, type CanvasTool } from '../store/workspace-store'
+import { createBlankLayer, mergeDown, mergeVisible, stampVisible } from '../canvas/layer-actions'
+import { fillLayer } from '../canvas/paint-controller'
+import { isPaintTool, useWorkspaceStore, type CanvasTool, type PaintTool } from '../store/workspace-store'
 
 /*
  * The Photoshop shortcuts that act on layers, colours and tools. App's
@@ -29,9 +31,24 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'T', action: '文字' },
       { keys: 'U', action: '形状' },
       { keys: 'I', action: '吸管：单击取前景色，Alt+单击取背景色' },
-      { keys: 'B', action: '草图' },
+      { keys: 'B', action: '画笔' },
+      { keys: 'E', action: '橡皮擦' },
+      { keys: 'G / Shift+G', action: '油漆桶或渐变 / 在两者间切换' },
       { keys: 'Ctrl+T', action: '自由变换' },
       { keys: 'F', action: '专注模式' }
+    ]
+  },
+  {
+    title: '绘画',
+    entries: [
+      { keys: '[ / ]', action: '笔刷变小 / 变大' },
+      { keys: 'Shift+[ / Shift+]', action: '笔刷变软 / 变硬' },
+      { keys: '1 … 9, 0', action: '用绘画工具时：工具不透明度' },
+      { keys: 'Shift+1 … 0', action: '用画笔或橡皮擦时：流量' },
+      { keys: '按住 Alt', action: '用绘画工具时临时吸管' },
+      { keys: 'Shift+单击', action: '从上一笔的终点画直线' },
+      { keys: '拖动时按住 Shift', action: '渐变锁定在 45° 方向' },
+      { keys: '/', action: '锁定或解锁所选图层的透明像素' }
     ]
   },
   {
@@ -39,14 +56,18 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
     entries: [
       { keys: 'X', action: '交换前景色和背景色' },
       { keys: 'D', action: '默认前景色和背景色（黑 / 白）' },
-      { keys: 'Alt+Backspace', action: '用前景色填充所选文字或形状' },
-      { keys: 'Ctrl+Backspace', action: '用背景色填充所选文字或形状' }
+      { keys: 'Alt+Backspace', action: '用前景色填充所选图层（图片图层整层填满）' },
+      { keys: 'Ctrl+Backspace', action: '用背景色填充所选图层' }
     ]
   },
   {
     title: '图层',
     entries: [
+      { keys: 'Ctrl+Shift+N', action: '新建空白图层' },
       { keys: 'Ctrl+J', action: '复制图层（原位，放在原图层上方）' },
+      { keys: 'Ctrl+E', action: '向下合并；选中多层时合并所选，选中组时合并组' },
+      { keys: 'Ctrl+Shift+E', action: '合并可见图层' },
+      { keys: 'Ctrl+Alt+Shift+E', action: '盖印：可见图层合成到一个新图层' },
       { keys: 'Alt+拖动', action: '拖出一个副本' },
       { keys: 'Ctrl+G / Ctrl+Shift+G', action: '组合 / 取消组合' },
       { keys: 'Ctrl+] / Ctrl+[', action: '上移一层 / 下移一层' },
@@ -138,8 +159,40 @@ function setBlend(next: (current: (typeof BLEND_MODES)[number]) => (typeof BLEND
 }
 
 function fill(color: string, which: '前景色' | '背景色'): void {
-  const elements = selectedElements().filter((element) => !element.locked && (element.type === 'shape' || element.type === 'text'))
-  updateEach(elements, `用${which}填充`, (element) => (element as { fill?: string }).fill === color ? null : { fill: color })
+  const elements = selectedElements().filter((element) => !element.locked)
+  updateEach(elements.filter((element) => element.type === 'shape' || element.type === 'text'), `用${which}填充`, (element) => (element as { fill?: string }).fill === color ? null : { fill: color })
+  // An image layer is filled with paint, as Photoshop fills a pixel layer.
+  for (const element of elements) if (element.type === 'image') void fillLayer(element, color, `用${which}填充`)
+}
+
+/** Brush sizes step as Photoshop's [ and ] do: by 1 up to 10, then 10, 25, 50 and 100 as they grow. */
+function stepSize(size: number, up: boolean): number {
+  const step = (value: number): number => value < 10 ? 1 : value < 100 ? 10 : value < 200 ? 25 : value < 300 ? 50 : 100
+  return up ? Math.min(5000, size + step(size)) : Math.max(1, size - step(size - 1))
+}
+
+function adjustBrush(tool: 'brush' | 'eraser', key: '[' | ']', shift: boolean): void {
+  const { paintSettings, setPaintSettings } = useWorkspaceStore.getState()
+  const settings = paintSettings[tool]
+  if (shift) setPaintSettings(tool, { hardness: Math.max(0, Math.min(1, Math.round((settings.hardness + (key === ']' ? 0.25 : -0.25)) * 100) / 100)) })
+  else setPaintSettings(tool, { size: stepSize(settings.size, key === ']') })
+}
+
+/** With a painting tool, digits set the tool's opacity (or with Shift the brush's flow), two quick ones as one value. */
+function setToolAmount(tool: PaintTool, digit: number, now: number, flow: boolean): void {
+  const paired = lastDigit !== null && now - lastDigit.at <= DIGIT_PAIR_MS
+  const percent = paired ? lastDigit!.digit * 10 + digit : digit === 0 ? 100 : digit * 10
+  lastDigit = paired ? null : { digit, at: now }
+  const value = Math.max(1, Math.min(100, percent)) / 100
+  const { setPaintSettings } = useWorkspaceStore.getState()
+  if (flow && (tool === 'brush' || tool === 'eraser')) setPaintSettings(tool, { flow: value })
+  else if (!flow) setPaintSettings(tool, { opacity: value })
+}
+
+function toggleTransparencyLock(): void {
+  const images = selectedElements().filter((element): element is Extract<SceneElement, { type: 'image' }> => element.type === 'image' && !element.locked)
+  const lock = images.some((element) => element.transparencyLocked !== true)
+  updateEach(images, lock ? '锁定透明像素' : '解锁透明像素', (element) => (element.type === 'image' && (element.transparencyLocked === true) === lock) ? null : { transparencyLocked: lock })
 }
 
 /**
@@ -165,8 +218,11 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
 
   if (command) {
     if (event.altKey && !event.shiftKey && key === 'a') return run(() => state.setSelection(state.scene.elements.filter((element) => element.groupId === null).map((element) => element.id)))
+    if (event.shiftKey && !event.altKey && key === 'n') return run(() => { void createBlankLayer() })
+    if (event.code === 'KeyE' && event.shiftKey) return event.altKey ? run(() => { void stampVisible() }) : run(() => { void mergeVisible() })
     if (event.altKey || event.shiftKey) return false
     if (key === 'd') return run(() => state.setSelection([]))
+    if (event.code === 'KeyE') return run(() => { void mergeDown() })
     if (key === 't') return run(() => state.setActiveTool('select'))
     if (event.key === ',') {
       return run(() => {
@@ -191,6 +247,12 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
   }
   if (event.altKey) return false
 
+  const paintTool = isPaintTool(state.activeTool) ? state.activeTool : null
+  if (event.shiftKey && key === 'g') return run(() => context.chooseTool(state.activeTool === 'bucket' ? 'gradient' : state.activeTool === 'gradient' ? 'bucket' : state.toolMemory.fill))
+  if ((event.code === 'BracketLeft' || event.code === 'BracketRight') && (paintTool === 'brush' || paintTool === 'eraser')) {
+    return run(() => adjustBrush(paintTool, event.code === 'BracketLeft' ? '[' : ']', event.shiftKey))
+  }
+  if (/^(Digit|Numpad)[0-9]$/.test(event.code) && paintTool !== null) return run(() => setToolAmount(paintTool, Number(event.code.slice(-1)), event.timeStamp || Date.now(), event.shiftKey))
   if (event.shiftKey) {
     if (state.activeTool !== 'select') return false
     if (event.key === '+' || event.key === '=') return run(() => setBlend((current) => BLEND_MODES[(BLEND_MODES.indexOf(current) + 1) % BLEND_MODES.length]!))
@@ -202,7 +264,10 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
   if (key === 'v') return run(() => context.chooseTool('select'))
   if (key === 'h') return run(() => context.chooseTool('hand'))
   if (key === 't') return run(() => context.chooseTool('text'))
-  if (key === 'b') return run(() => context.chooseTool('sketch'))
+  if (key === 'b') return run(() => context.chooseTool('brush'))
+  if (key === 'e') return run(() => context.chooseTool('eraser'))
+  if (key === 'g') return run(() => context.chooseTool(state.activeTool === 'bucket' || state.activeTool === 'gradient' ? state.activeTool : state.toolMemory.fill))
+  if (event.code === 'Slash') return run(toggleTransparencyLock)
   if (key === 'u') return run(() => context.chooseTool('shape'))
   if (key === 'i') return run(() => context.chooseTool('eyedropper'))
   if (key === 'x') return run(() => state.swapColors())

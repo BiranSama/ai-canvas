@@ -26,7 +26,7 @@ import type {
   ProviderPublicConfigInput,
   ProviderSecretInput
 } from '../shared/provider-settings'
-import type { AssetImportInput, ProjectCreateInput, ProjectFavoriteInput, ProjectLibraryChangeMode } from '../shared/project'
+import type { AssetImportInput, PixelImportInput, ProjectCreateInput, ProjectFavoriteInput, ProjectLibraryChangeMode } from '../shared/project'
 import type { SceneChangedEvent, SceneExecuteInput, SceneHistoryInput } from '../shared/scene-authority'
 import type { DesignDirectionSelectionInput } from '../shared/design-direction-selection'
 import type { ProjectWorkContext } from '../shared/project-work-context'
@@ -36,6 +36,7 @@ const desktopApi: DesktopApi = Object.freeze({
   listLocalFonts: (rescan?: boolean) => ipcRenderer.invoke(DESKTOP_CHANNELS.localFonts, rescan === true),
   takeOpenFileRequests: () => ipcRenderer.invoke(DESKTOP_CHANNELS.openFileRequests),
   readPsd: (bytes: Uint8Array) => ipcRenderer.invoke(DESKTOP_CHANNELS.psdRead, bytes),
+  bakePaint: (elementId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.paintBake, elementId),
   onOpenFileRequested: (listener: () => void) => {
     const handler = (): void => listener()
     ipcRenderer.on(DESKTOP_EVENTS.openFileRequested, handler)
@@ -89,6 +90,7 @@ const desktopApi: DesktopApi = Object.freeze({
   changeProjectLibraryLocation: (mode: ProjectLibraryChangeMode) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectLibraryChange, mode),
   saveProjectAs: (input: ProjectCreateInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectSaveAs, input),
   importAsset: (input: AssetImportInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.assetImport, input),
+  importPixels: (input: PixelImportInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.assetImportPixels, input),
   getWorkspaceBootstrap: () => ipcRenderer.invoke(DESKTOP_CHANNELS.workspaceBootstrap),
   saveProjectWorkContext: (context: ProjectWorkContext) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectWorkContextSave, context),
   onWindowClosing: (listener: () => Promise<void>) => {

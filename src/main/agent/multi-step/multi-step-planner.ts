@@ -48,6 +48,9 @@ export interface MultiStepPlannerOptions {
   /** Font families installed on this computer, listed in the brief and checked by the text tools. */
   readonly fonts?: (() => Promise<readonly LocalFontFamily[]>) | null
   readonly measureTone?: AgentToolContext['measureTone']
+  readonly assetSize?: AgentToolContext['assetSize']
+  readonly drawLayers?: AgentToolContext['drawLayers']
+  readonly blankLayer?: AgentToolContext['blankLayer']
   readonly newId?: () => string
   /** Model calls one pass may make while it answers read-only tools itself. */
   readonly maxModelCallsPerPass?: number
@@ -163,7 +166,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       manuals: this.#options.manuals ?? null,
       readAsset: this.#options.readAsset ?? null,
       fonts: await this.#options.fonts?.().catch(() => []) ?? [],
-      measureTone: this.#options.measureTone ?? null
+      measureTone: this.#options.measureTone ?? null,
+      assetSize: this.#options.assetSize ?? null,
+      drawLayers: this.#options.drawLayers ?? null,
+      blankLayer: this.#options.blankLayer ?? null
     }
     const finish = (step: PlannerStep, emitted: ModelTrace['emitted'], modelTurns: number): PlannerStepResult => ({
       step: {

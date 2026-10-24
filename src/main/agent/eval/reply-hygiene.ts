@@ -17,7 +17,7 @@ const STATIC_INTERNAL_TERMS = [
   'sceneRevision', 'expectedSceneRevision', 'designContract', 'creativeContext', 'creativeBrief', 'semanticRole',
   'controlIntent', 'renderStrategy', 'referencePolicy', 'providerId', 'openai-compatible-llm', 'image-provider',
   'tool_call', 'tool_result', 'generated:', 'element.add', 'element.update', 'element.remove', 'element.reorder',
-  'element.group', 'element.set-image', 'scene.set-canvas', 'scene.set-creative-context', 'relation.add'
+  'element.group', 'element.set-image', 'element.rasterize', 'scene.set-canvas', 'scene.set-creative-context', 'relation.add'
 ]
 
 // Every planner tool name and runtime tool name that is not an ordinary word.

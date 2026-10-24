@@ -44,7 +44,7 @@ function canvas(width: number, height: number): { readonly canvas: HTMLCanvasEle
  * same pixel math as Main's composite renderer. Null when it has no visible
  * effects or the browser cannot draw here.
  */
-export function renderImageEffects(image: HTMLImageElement, element: ImageElement, width: number, height: number): EffectedImage | null {
+export function renderImageEffects(image: HTMLImageElement | HTMLCanvasElement, element: ImageElement, width: number, height: number): EffectedImage | null {
   const effects = element.effects
   if (!hasVisibleEffects(effects)) return null
   const w = Math.max(1, Math.round(width))

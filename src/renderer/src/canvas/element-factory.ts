@@ -149,6 +149,10 @@ export function createElementForTool(tool: CanvasTool, scene: Scene, assetId?: s
     case 'select':
     case 'hand':
     case 'eyedropper':
+    case 'brush':
+    case 'eraser':
+    case 'bucket':
+    case 'gradient':
       return null
   }
 }

@@ -17,7 +17,8 @@ vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
 const desktop = {
   getRuntimeInfo: vi.fn(),
   createProject: vi.fn(),
-  saveProjectAs: vi.fn()
+  saveProjectAs: vi.fn(),
+  importPixels: vi.fn()
 }
 
 function element(id: string) {
@@ -46,6 +47,7 @@ describe('Photoshop shortcuts on the canvas', () => {
     desktop.getRuntimeInfo.mockResolvedValue({ appVersion: '0.1.0', electronVersion: '43.3.0', platform: 'win32', systemTheme: 'light', backgroundMaterial: 'mica', startupRoute: 'workspace', projectLibraryPath: 'C:\\AI Canvas', nativeModules: { betterSqlite3: true, sharp: true } })
     desktop.createProject.mockResolvedValue({ cancelled: true, bootstrap: null })
     desktop.saveProjectAs.mockResolvedValue({ cancelled: true, bootstrap: null })
+    desktop.importPixels.mockResolvedValue({ id: '10000000-0000-4000-8000-000000000099', width: 1024, height: 1280, format: 'png', hasAlpha: true })
     Object.defineProperty(window, 'desktop', { configurable: true, value: desktop })
   })
 
@@ -175,5 +177,78 @@ describe('Photoshop shortcuts on the canvas', () => {
     fireEvent.click(screen.getByRole('button', { name: '隐藏主标题' }), { altKey: true })
     await waitFor(() => expect(element(NIGHT_VEIL_IDS.bottle).visible).toBe(true))
     expect(element(NIGHT_VEIL_IDS.light).visible).toBe(true)
+  })
+
+  it('picks the painting tools with B, E, G and Shift+G, and sets the brush with brackets and digits', async () => {
+    await renderWorkspace()
+    press({ key: 'b', code: 'KeyB' })
+    expect(useWorkspaceStore.getState().activeTool).toBe('brush')
+    const options = screen.getByRole('toolbar', { name: '画笔选项' })
+    press({ key: ']', code: 'BracketRight' })
+    expect(useWorkspaceStore.getState().paintSettings.brush.size).toBe(34)
+    press({ key: '[', code: 'BracketLeft' })
+    press({ key: '[', code: 'BracketLeft' })
+    expect(useWorkspaceStore.getState().paintSettings.brush.size).toBe(14)
+    press({ key: '{', code: 'BracketLeft', shiftKey: true })
+    expect(useWorkspaceStore.getState().paintSettings.brush.hardness).toBe(0.55)
+    press({ key: '}', code: 'BracketRight', shiftKey: true })
+    press({ key: '}', code: 'BracketRight', shiftKey: true })
+    expect(useWorkspaceStore.getState().paintSettings.brush.hardness).toBe(1)
+    press({ key: '5', code: 'Digit5' })
+    expect(useWorkspaceStore.getState().paintSettings.brush.opacity).toBe(0.5)
+    vi.setSystemTime(new Date('2026-10-24T08:00:01Z'))
+    press({ key: '#', code: 'Digit3', shiftKey: true })
+    expect(useWorkspaceStore.getState().paintSettings.brush.flow).toBe(0.3)
+    expect(within(options).getByRole('spinbutton', { name: '不透明度' })).toHaveValue(50)
+    expect(within(options).getByRole('spinbutton', { name: '流量' })).toHaveValue(30)
+
+    press({ key: 'e', code: 'KeyE' })
+    expect(useWorkspaceStore.getState().activeTool).toBe('eraser')
+    press({ key: 'g', code: 'KeyG' })
+    expect(useWorkspaceStore.getState().activeTool).toBe('bucket')
+    press({ key: 'G', code: 'KeyG', shiftKey: true })
+    expect(useWorkspaceStore.getState().activeTool).toBe('gradient')
+    press({ key: 'v', code: 'KeyV' })
+    // G brings back whichever of the two was used last, as Photoshop's shared slot does.
+    press({ key: 'g', code: 'KeyG' })
+    expect(useWorkspaceStore.getState().activeTool).toBe('gradient')
+    expect(screen.getByRole('button', { name: '渐变' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('makes a blank layer with Ctrl+Shift+N, locks its transparency with / and fills it with Alt+Backspace', async () => {
+    await renderWorkspace([NIGHT_VEIL_IDS.bottle])
+    press({ key: 'N', code: 'KeyN', ctrlKey: true, shiftKey: true })
+    await waitFor(() => expect(useWorkspaceStore.getState().scene.elements.some((candidate) => candidate.name === '图层 1')).toBe(true))
+    expect(desktop.importPixels).toHaveBeenCalledWith(expect.objectContaining({ width: 1024, height: 1280 }))
+    const elements = useWorkspaceStore.getState().scene.elements
+    const layer = elements.find((candidate) => candidate.name === '图层 1')!
+    // Directly above the selected layer, and selected.
+    expect(elements.indexOf(layer)).toBe(elements.findIndex((candidate) => candidate.id === NIGHT_VEIL_IDS.bottle) + 1)
+    expect(useWorkspaceStore.getState().selectedIds).toEqual([layer.id])
+    expect(layer).toMatchObject({ type: 'image', fit: 'fill', transform: { x: 0, y: 0, width: 1, height: 1 } })
+
+    press({ key: '/', code: 'Slash' })
+    await waitFor(() => expect(element(layer.id)).toMatchObject({ transparencyLocked: true }))
+    useWorkspaceStore.getState().setForegroundColor('#336699')
+    press({ key: 'Backspace', code: 'Backspace', altKey: true })
+    await waitFor(() => expect(element(layer.id)).toMatchObject({ paint: [{ kind: 'fill-all', color: '#336699', lockAlpha: true }] }))
+  })
+
+  it('merges with Ctrl+E, Ctrl+Shift+E and Ctrl+Alt+Shift+E, refusing what Photoshop would not merge', async () => {
+    await renderWorkspace([NIGHT_VEIL_IDS.title])
+    press({ key: 'e', code: 'KeyE', ctrlKey: true })
+    expect(await screen.findByText('下面的「香水瓶」是 AI 标注，不能合并。')).toBeInTheDocument()
+    act(() => useWorkspaceStore.getState().setSelection([NIGHT_VEIL_IDS.background]))
+    press({ key: 'e', code: 'KeyE', ctrlKey: true })
+    expect(await screen.findByText('「背景」下面没有可以合并进去的图层。')).toBeInTheDocument()
+    act(() => useWorkspaceStore.getState().setSelection([]))
+    press({ key: 'e', code: 'KeyE', ctrlKey: true })
+    expect(await screen.findByText('先选中要合并的图层。')).toBeInTheDocument()
+    press({ key: 'E', code: 'KeyE', ctrlKey: true, shiftKey: true })
+    expect(await screen.findByText('「背景」已锁定，解锁或隐藏它后再合并可见图层。')).toBeInTheDocument()
+    // Stamping draws the layers on the canvas, which this test does not have.
+    press({ key: 'E', code: 'KeyE', ctrlKey: true, altKey: true, shiftKey: true })
+    expect(await screen.findByText('没能盖印可见图层：画布上的图层还没画好，稍后再试。')).toBeInTheDocument()
+    expect(useWorkspaceStore.getState().scene.elements).toHaveLength(4)
   })
 })

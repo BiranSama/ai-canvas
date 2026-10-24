@@ -1,3 +1,4 @@
+import { paintedImageBytes } from '../paint/painted-image'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { summarizeGenerationCosts } from '../../shared/generation-cost'
@@ -110,6 +111,7 @@ import type {
 import type {
   AssetImportInput,
   ImportedAsset,
+  PixelImportInput,
   ProjectDeleteResult,
   ProjectLibraryChangeMode,
   ProjectLibraryLocationResult,
@@ -664,7 +666,8 @@ export class GenerationRuntime {
           config: this.#providerConfig,
           authorization: this.#providerUsage,
           assets: project.workspace.assets,
-          scene: () => sceneService.state().scene
+          scene: () => sceneService.state().scene,
+          importImage: (bytes, sourceId) => this.#importDerivedImage(project, bytes, 'imported', sourceId)
         })
       : null
     const agent = new AgentRuntime({
@@ -1145,6 +1148,16 @@ export class GenerationRuntime {
     try { return await operation } finally { this.#assetImports.delete(operation) }
   }
 
+  /** Encodes pixels the renderer drew as a PNG asset, off the renderer's thread; no pixels makes a transparent image. */
+  async importPixels(input: PixelImportInput): Promise<ImportedAsset> {
+    this.#assertRequestedProject(input.projectId)
+    const image = input.rgba === undefined
+      ? sharp({ create: { width: input.width, height: input.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      : sharp(input.rgba, { raw: { width: input.width, height: input.height, channels: 4 } })
+    const bytes = await image.png().toBuffer()
+    return this.importAsset({ projectId: input.projectId, name: input.name, mimeType: 'image/png', bytes: new Uint8Array(bytes) })
+  }
+
   async #importAssetOwned(input: AssetImportInput, owner: OpenProjectResult): Promise<ImportedAsset> {
     const extension = input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType.slice('image/'.length)
     const stagingDirectory = join(this.#userDataDirectory, 'import-staging')
@@ -1172,6 +1185,20 @@ export class GenerationRuntime {
     } finally {
       await rm(stagingPath, { force: true })
     }
+  }
+
+  /**
+   * Replays an image layer's recorded paint into a new asset, so the scene
+   * can drop the operations it covers. Null when the layer has none.
+   */
+  async bakePaint(input: { readonly elementId: string }): Promise<{ readonly assetId: string; readonly paintIds: readonly string[] } | null> {
+    const owner = this.#project
+    const element = this.#sceneService.state().scene.elements.find((candidate) => candidate.id === input.elementId)
+    if (element?.type !== 'image' || element.paint === undefined || element.paint.length === 0) return null
+    const path = (await owner.workspace.assets.resolveAsset(element.assetId)).filePath
+    const bytes = await paintedImageBytes(path, element.paint)
+    const asset = await this.#importDerivedImage(owner, bytes, 'imported', element.id)
+    return { assetId: asset.id, paintIds: element.paint.map((op) => op.id) }
   }
 
   /** The colour shift that moves an image on the canvas part of the way towards the picture around it. */

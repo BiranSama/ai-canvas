@@ -1,6 +1,7 @@
 import sharp from 'sharp'
 import { pathInBox, sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
+import { paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
 import { layoutTextLines } from './text-layout'
@@ -118,7 +119,8 @@ async function elementSvg(
       return `${groupStart}<rect x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" rx="${finite(Math.min(box.w, box.h) * .04)}" fill="#AEB8C4" fill-opacity=".24" stroke="#8090A2" stroke-width="${finite(Math.max(1, width * .0015))}"/>${groupEnd}`
     }
     try {
-      const uri = await imageDataUri(path, element)
+      const painted = element.paint !== undefined && element.paint.length > 0 ? await paintedImageBytes(path, element.paint) : path
+      const uri = await imageDataUri(painted, element)
       if (hasVisibleEffects(element.effects)) return `${groupStart}${await imageWithEffects(uri, element, element.effects, box)}${groupEnd}`
       const aspect = element.fit === 'cover' ? 'xMidYMid slice' : element.fit === 'contain' ? 'xMidYMid meet' : 'none'
       return `${groupStart}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="${uri}" preserveAspectRatio="${aspect}"/>${groupEnd}`

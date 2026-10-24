@@ -29,6 +29,8 @@ class Harness {
   readonly newId = ids(100)
   readonly refs: ElementRefs
   generation: AgentToolContext['generation'] = { providerId: 'image-provider', model: 'seedream', maxImages: 4 }
+  /** Main's services a test stands in for, such as drawing layers. */
+  extra: Partial<AgentToolContext> = {}
 
   constructor() {
     const base = createScene({ id: ids(1)(), projectId: '00000000-0000-4000-8000-000000000002', now: NOW })
@@ -39,7 +41,7 @@ class Harness {
   context(): AgentToolContext {
     return {
       scene: this.scene, refs: this.refs, newId: this.newId, results: [], generation: this.generation,
-      activeJobId: null, sourceMessageId: 'message-1', userText: ''
+      activeJobId: null, sourceMessageId: 'message-1', userText: '', ...this.extra
     }
   }
 
@@ -68,8 +70,8 @@ class Harness {
 describe('small agent tools', () => {
   it('keeps the whole catalogue small, uniquely named and valid for every protocol', () => {
     const definitions = llmToolDefinitions(AGENT_TOOLS as never)
-    expect(definitions).toHaveLength(23)
-    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(23)
+    expect(definitions).toHaveLength(25)
+    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(25)
     for (const definition of definitions) expect(definition.name).toMatch(/^[a-z_]{1,64}$/)
     expect(JSON.stringify(definitions).length).toBeLessThan(20_000)
   })
@@ -390,5 +392,81 @@ describe('load_manual', () => {
     expect(formatToolResult((loaded.step as { result: AgentToolResult }).result)).not.toContain('已截断')
     const missing = await prepareAgentToolCall({ callId: 'n', name: 'load_manual', argumentsText: '', arguments: { topic: 'fonts' }, argumentsError: null }, context)
     expect(missing.step).toMatchObject({ kind: 'answer', result: { ok: false, hint: expect.stringContaining('poster-layout') } })
+  })
+})
+
+describe('fill and merge_layers', () => {
+  const ASSET = '00000000-0000-4000-8000-000000000602'
+  function withImage(harness: Harness): void {
+    const image = {
+      id: '00000000-0000-4000-8000-000000000601', version: 1, type: 'image', name: '底图', description: '',
+      transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, zIndex: 0, opacity: 1, blendMode: 'normal', visible: true, locked: false,
+      groupId: null, semanticRole: 'content', referencePolicy: 'include', assetId: ASSET,
+      crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general'
+    } as const
+    harness.scene = { ...harness.scene, elements: [image] }
+    harness.refs.sync(harness.scene)
+  }
+
+  it('fills an image layer with a colour or a gradient across its own pixels, as one recorded paint step', async () => {
+    const harness = new Harness()
+    withImage(harness)
+    harness.extra = { assetSize: async () => ({ width: 200, height: 100 }) }
+    expect((await harness.call('fill', { target: 'E1', color: '#3366cc', keep_transparency: true })).result.ok).toBe(true)
+    expect((harness.scene.elements[0] as { paint?: unknown[] }).paint).toEqual([
+      { id: expect.any(String), kind: 'fill-all', color: '#3366CC', opacity: 1, lockAlpha: true }
+    ])
+    const { result } = await harness.call('fill', { target: 'E1', color: '#000', to_color: '#FFFFFF80', direction: 'left_to_right' })
+    expect(result.summary).toBe('已给 E1 铺上从左到右的 #000000 → #FFFFFF 渐变')
+    expect((harness.scene.elements[0] as { paint?: unknown[] }).paint?.[1]).toMatchObject({
+      kind: 'gradient', shape: 'linear', from: [0, 50], to: [200, 50], colors: ['#000000', '#FFFFFF'], opacity: 128 / 255, lockAlpha: false
+    })
+    await harness.call('fill', { target: 'E1', color: '#FF0000', to_color: '#0000FF', direction: 'radial' })
+    expect((harness.scene.elements[0] as { paint?: unknown[] }).paint?.[2]).toMatchObject({ shape: 'radial', from: [100, 50], to: [100 + Math.round(Math.hypot(200, 100) / 2 * 100) / 100, 50] })
+
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    expect((await harness.call('fill', { target: 'E2', color: '#FF0000' })).result).toMatchObject({ ok: false, summary: 'E2 是文字，不是像素图层。' })
+    expect((await harness.call('fill', { target: 'E1', color: '#FF0000', direction: 'radial' })).result).toMatchObject({ ok: false, summary: 'direction 只用于渐变。' })
+  })
+
+  it('fills a new canvas-sized layer when no target is given', async () => {
+    const harness = new Harness()
+    harness.extra = { blankLayer: async () => ASSET }
+    const { result } = await harness.call('fill', { color: '#F4EDE2', to_color: '#D9C7B0', name: '暖色背景' })
+    expect(result).toMatchObject({ ok: true, summary: '已新建图层并铺上从上到下的 #F4EDE2 → #D9C7B0 渐变，在最上面' })
+    expect(harness.scene.elements[0]).toMatchObject({
+      type: 'image', name: '暖色背景', assetId: ASSET, fit: 'fill', transform: { x: 0, y: 0, width: 1, height: 1 },
+      paint: [{ kind: 'gradient', from: [512, 0], to: [512, 1280] }]
+    })
+    harness.extra = {}
+    expect((await harness.call('fill', { color: '#FFFFFF' })).result).toMatchObject({ ok: false, summary: '现在建不了新图层。' })
+  })
+
+  it('rasterizes one text or shape layer in place and merges several into the lowest', async () => {
+    const harness = new Harness()
+    const drawn: [readonly string[], string | undefined][] = []
+    harness.extra = {
+      drawLayers: async (elementIds, base) => {
+        drawn.push([elementIds, base])
+        return { assetId: ASSET, transform: { x: 0.1, y: 0.2, width: 0.5, height: 0.25, rotation: 0 } }
+      }
+    }
+    await harness.call('add_shape', { shape: 'rectangle', box: [10, 20, 50, 25], color: '#AA3300' })
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    const [shape, title] = harness.scene.elements
+
+    const rasterized = await harness.call('merge_layers', { targets: ['E1'] })
+    expect(rasterized.result.summary).toBe('已把 E1「矩形」栅格化成图片，样子不变')
+    expect(drawn.at(-1)).toEqual([[shape!.id], shape!.id])
+    expect(harness.scene.elements[0]).toMatchObject({ id: shape!.id, type: 'image', name: '矩形', assetId: ASSET, fit: 'fill', transform: { x: 0.1, y: 0.2, width: 0.5, height: 0.25 } })
+
+    const merged = await harness.call('merge_layers', { targets: ['E2', 'E1'] })
+    expect(merged.result.summary).toBe('已把 2 个图层合并进 E1「矩形」')
+    expect(drawn.at(-1)).toEqual([[shape!.id, title!.id], undefined])
+    expect(harness.scene.elements.map((element) => element.id)).toEqual([shape!.id])
+    expect(harness.scene.elements[0]).toMatchObject({ opacity: 1, blendMode: 'normal' })
+
+    await harness.call('add_subject', { subject: '一只猫', box: [20, 20, 40, 40] })
+    expect((await harness.call('merge_layers', { targets: ['E1', 'E3'] })).result).toMatchObject({ ok: false, summary: 'E3「主体·一只猫」是 AI 标注，不能合并。' })
   })
 })

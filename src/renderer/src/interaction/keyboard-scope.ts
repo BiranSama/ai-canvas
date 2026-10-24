@@ -37,8 +37,11 @@ function targetElement(target: EventTarget | null): Element | null {
   return target instanceof Element ? target : document.activeElement
 }
 
+/** Inputs that take typing; a colour well, checkbox or slider does not, so Photoshop's letters still work from one. */
+const TEXT_INPUT = 'input:not([type="color"], [type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="file"]), textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]'
+
 export function isTextInputTarget(target: EventTarget | null): boolean {
-  return targetElement(target)?.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]') != null
+  return targetElement(target)?.closest(TEXT_INPUT) != null
 }
 
 export function isInteractiveTarget(target: EventTarget | null): boolean {
