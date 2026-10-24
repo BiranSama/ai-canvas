@@ -832,8 +832,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const gradientStartRef = useRef<{ x: number, y: number } | null>(null)
   /** Where the last stroke ended on each layer, in layer pixels, for Shift+click straight lines. */
   const lastStrokeEndRef = useRef(new Map<string, { x: number, y: number }>())
-  // Moved by hand on every pointer move, so following the pointer never re-renders the stage.
-  const brushRingRef = useRef<Konva.Group>(null)
+  // A small element moved by hand on every pointer move: redrawing a canvas layer instead would re-blur every glass panel over it.
+  const brushRingRef = useRef<HTMLDivElement>(null)
   const [gradientLine, setGradientLine] = useState<{ from: { x: number, y: number }, to: { x: number, y: number } } | null>(null)
   const [guides, setGuides] = useState<Guide[]>([])
   const [draftStroke, setDraftStroke] = useState<number[]>([])
@@ -1863,6 +1863,14 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     return true
   }
 
+  // [ and ] resize the ring where it is, before the pointer moves again.
+  const brushSize = useWorkspaceStore((state) => state.activeTool === 'brush' || state.activeTool === 'eraser' ? state.paintSettings[state.activeTool].size : 0)
+  useEffect(() => {
+    const ring = brushRingRef.current
+    if (ring === null || brushSize === 0) return
+    ring.style.width = ring.style.height = `${Math.max(1, brushSize * zoom)}px`
+  }, [brushSize, zoom])
+
   const paintGeometry = (): PaintGeometry => ({
     origin: { x: displayedArtboard.x, y: displayedArtboard.y },
     zoom,
@@ -1915,11 +1923,12 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     if (activeTool === 'brush' || activeTool === 'eraser') {
       const size = useWorkspaceStore.getState().paintSettings[activeTool].size
       const ring = brushRingRef.current
-      if (ring !== null) {
-        ring.position(point)
-        for (const circle of ring.getChildren()) (circle as Konva.Circle).radius(Math.max(0.5, size * zoom / 2))
-        ring.visible(true)
-        ring.getLayer()?.batchDraw()
+      const root = containerRef.current?.getBoundingClientRect()
+      if (ring !== null && root !== undefined) {
+        const diameter = `${Math.max(1, size * zoom)}px`
+        if (ring.style.width !== diameter) { ring.style.width = diameter; ring.style.height = diameter }
+        ring.style.transform = `translate(${event.clientX - root.left}px, ${event.clientY - root.top}px) translate(-50%, -50%)`
+        ring.hidden = false
       }
     }
     const start = gradientStartRef.current
@@ -2138,7 +2147,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       onPointerMove={(event) => { if (!preview) continuePaint(event) }}
       onPointerUp={(event) => { if (!preview) finishPaint(event) }}
       onPointerCancel={() => { paintSessionRef.current?.cancel(); paintSessionRef.current = null; gradientStartRef.current = null; setGradientLine(null) }}
-      onPointerLeave={() => { brushRingRef.current?.visible(false); brushRingRef.current?.getLayer()?.batchDraw() }}
+      onPointerLeave={() => { if (brushRingRef.current !== null) brushRingRef.current.hidden = true }}
       data-scene-revision={scene.revision}
       data-shape-editing={shapeEditId ?? ''}
       data-shape-edit-kind={shapeEditElement?.shape ?? ''}
@@ -2295,13 +2304,6 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           </Group>
         </Layer>
         <Layer ref={auxiliaryLayerRef} name="editor-auxiliary" listening={!preview}>
-          {!preview && (activeTool === 'brush' || activeTool === 'eraser') && !spacePressed && (
-            // The brush's real size on the canvas, light over dark so it reads on any picture.
-            <Group ref={brushRingRef} listening={false} name="brush-ring" visible={false}>
-              <Circle radius={1} stroke="rgba(0,0,0,.55)" strokeWidth={2} />
-              <Circle radius={1} stroke="rgba(255,255,255,.9)" strokeWidth={1} />
-            </Group>
-          )}
           {!preview && gradientLine !== null && (
             <Group listening={false} name="gradient-line">
               <Line points={[gradientLine.from.x, gradientLine.from.y, gradientLine.to.x, gradientLine.to.y]} stroke="rgba(0,0,0,.55)" strokeWidth={3} />
@@ -2454,6 +2456,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           {!preview && <Circle listening={false} x={artboard.x + 14} y={artboard.y + 14} radius={3} fill="rgba(255,255,255,.55)" />}
         </Layer>
       </Stage>
+      {/* The brush's real size on the canvas, light over dark so it reads on any picture. */}
+      {!preview && (activeTool === 'brush' || activeTool === 'eraser') && !spacePressed && <div ref={brushRingRef} className="brush-ring" aria-hidden="true" hidden />}
       {!preview && inlineText !== undefined && (
         <ImeSafeTextarea
           className="canvas-inline-text-editor"
