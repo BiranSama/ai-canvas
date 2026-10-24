@@ -35,6 +35,7 @@ const desktopApi: DesktopApi = Object.freeze({
   getRuntimeInfo: (): Promise<RuntimeInfo> => ipcRenderer.invoke(DESKTOP_CHANNELS.runtimeInfo),
   listLocalFonts: (rescan?: boolean) => ipcRenderer.invoke(DESKTOP_CHANNELS.localFonts, rescan === true),
   takeOpenFileRequests: () => ipcRenderer.invoke(DESKTOP_CHANNELS.openFileRequests),
+  readPsd: (bytes: Uint8Array) => ipcRenderer.invoke(DESKTOP_CHANNELS.psdRead, bytes),
   onOpenFileRequested: (listener: () => void) => {
     const handler = (): void => listener()
     ipcRenderer.on(DESKTOP_EVENTS.openFileRequested, handler)

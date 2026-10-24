@@ -28,6 +28,7 @@
     "package:win:dir": "pnpm build && electron-builder --win dir --config.electronDist=node_modules/electron/dist"
   },
   "dependencies": {
+    "ag-psd": "^31.0.3",
     "ai": "^7.0.58",
     "better-sqlite3": "^13.0.3",
     "immer": "^11.1.16",

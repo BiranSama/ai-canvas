@@ -1,3 +1,4 @@
+import type { PsdDocumentImport } from './psd-import'
 import type { AgentRequest, AgentRun, ConversationSnapshot } from './agent'
 import type { AcceptDesignReviewInput } from './design-capability'
 import type { AppearanceSettingsSnapshot, AppearanceSettingsUpdate } from './appearance-settings'
@@ -60,6 +61,7 @@ export const DESKTOP_CHANNELS = {
   runtimeInfo: 'desktop:runtime-info',
   localFonts: 'desktop:local-fonts',
   openFileRequests: 'desktop:open-file-requests',
+  psdRead: 'project:psd-read',
   imageToneMatch: 'scene:image-tone-match',
   unifiedRender: 'generation:unified-render',
   appearanceSettings: 'appearance:settings',
@@ -182,7 +184,7 @@ export interface GenerationProviderInfo {
 /** An image the system asked the app to open, as from Explorer's 打开方式 or a file dropped on the app's icon. */
 export interface OpenFileRequest {
   readonly name: string
-  readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+  readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/vnd.adobe.photoshop'
   readonly bytes: Uint8Array
 }
 
@@ -195,6 +197,8 @@ export interface DesktopApi {
   takeOpenFileRequests(): Promise<readonly OpenFileRequest[]>
   /** Called when the system asks to open another image; take it with takeOpenFileRequests. */
   onOpenFileRequested(listener: () => void): () => void
+  /** A PSD's layers as PNGs with their place, opacity, visibility, blend mode and group, ready to become a project. */
+  readPsd(bytes: Uint8Array): Promise<PsdDocumentImport>
   /** How to shift an image's colour part of the way (strength 0–1) towards the picture around it; null when it cannot be measured. */
   matchImageTone(input: { readonly elementId: string; readonly strength: number }): Promise<{ readonly colorMatch: NonNullable<ImageEffects['colorMatch']>; readonly opaque: boolean } | null>
   getAppearanceSettings(): Promise<AppearanceSettingsSnapshot>

@@ -42,7 +42,9 @@ import { GenerateView } from './components/GenerateView'
 import { Inspector } from './components/Inspector'
 import { ProviderSettingsSheet } from './components/ProviderSettingsSheet'
 import { ProjectLibrary } from './components/ProjectLibrary'
-import { createProjectFromImage, OPENABLE_IMAGE_TYPES } from './project/open-image-project'
+import { isPsdFile, OPENABLE_FILE_ACCEPT, openFileAsProject } from './project/open-file-project'
+import { AppNotice } from './components/AppNotice'
+import { showAppNotice } from './components/app-notice'
 import { ShortcutSheet } from './components/ShortcutSheet'
 import { WorkspaceRecoveryView } from './components/RendererErrorBoundary'
 import { createVisualExampleScene, VISUAL_EXAMPLE_KEYS, visualExampleLabels, type VisualExampleKey } from './fixtures/visual-examples'
@@ -103,6 +105,19 @@ async function hydrateRuntimeWorkspace(bootstrap: WorkspaceBootstrap): Promise<v
       if (isCurrent()) markRuntimeAssetMissing(assetId)
     }
   }))
+}
+
+async function openPsdAsProject(file: File): Promise<void> {
+  try {
+    await flushProjectWorkContext()
+    clearEphemeralAnnotation()
+    const opened = await openFileAsProject(file)
+    if (opened === null) return
+    await hydrateRuntimeWorkspace(opened.bootstrap)
+    if (opened.notice !== null) showAppNotice(opened.notice)
+  } catch (error) {
+    showAppNotice(error instanceof Error ? error.message : `没有打开“${file.name}”。`, 'problem')
+  }
 }
 
 function useRuntimeStatus(): { ready: boolean; detail: string } {
@@ -199,7 +214,10 @@ function WorkspaceHeader({
       await flushProjectWorkContext()
       await applyProjectResult(await action())
     } catch (error) {
-      setProjectProblem(error instanceof Error ? error.message : '项目操作没有完成。')
+      const problem = error instanceof Error ? error.message : '项目操作没有完成。'
+      setProjectProblem(problem)
+      // Ctrl+O and Ctrl+N run with the menu closed, where its problem line would not show.
+      if (!projectMenuOpen) showAppNotice(problem, 'problem')
     } finally {
       setProjectBusy(false)
     }
@@ -239,9 +257,13 @@ function WorkspaceHeader({
     }
   }
 
-  const createFromImage = (file: File): void => {
+  const openFile = (file: File): void => {
     clearEphemeralAnnotation()
-    void runProjectAction(async () => ({ cancelled: false, bootstrap: await createProjectFromImage(file) }))
+    void runProjectAction(async () => {
+      const opened = await openFileAsProject(file)
+      if (opened?.notice != null) showAppNotice(opened.notice)
+      return { cancelled: false, bootstrap: opened?.bootstrap ?? null }
+    })
   }
 
   useLayoutEffect(() => {
@@ -326,10 +348,10 @@ function WorkspaceHeader({
         {projectProblem !== null && <p role="alert">{projectProblem}</p>}
       </div>
     )}
-    <input ref={projectImageInputRef} className="visually-hidden" type="file" accept={OPENABLE_IMAGE_TYPES.join(',')} onChange={(event) => {
+    <input ref={projectImageInputRef} className="visually-hidden" type="file" accept={OPENABLE_FILE_ACCEPT} onChange={(event) => {
       const file = event.currentTarget.files?.[0]
       event.currentTarget.value = ''
-      if (file !== undefined) createFromImage(file)
+      if (file !== undefined) openFile(file)
     }} />
     {settingsOpen && <ProviderSettingsSheet initialProviderId={settingsProviderId} onClose={closeSettings} />}
     {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
@@ -603,7 +625,11 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
         onDrop={(event) => {
           if (activeModal() !== null) return
           event.preventDefault()
-          const file = [...event.dataTransfer.files].find((candidate) => candidate.type.startsWith('image/'))
+          const files = [...event.dataTransfer.files]
+          // A PSD cannot become one layer yet, so it opens as its own project.
+          const psd = files.find(isPsdFile)
+          if (psd !== undefined) { void openPsdAsProject(psd); return }
+          const file = files.find((candidate) => candidate.type.startsWith('image/'))
           if (file !== undefined) void importFile(file)
         }}
       >
@@ -779,12 +805,13 @@ export function App(): React.JSX.Element {
           try {
             await flushProjectWorkContext()
             clearEphemeralAnnotation()
-            const bootstrap = await createProjectFromImage(new File([request.bytes as Uint8Array<ArrayBuffer>], request.name, { type: request.mimeType }))
-            if (bootstrap === null) continue
-            await openWorkspace(bootstrap)
+            const opened = await openFileAsProject(new File([request.bytes as Uint8Array<ArrayBuffer>], request.name, { type: request.mimeType }))
+            if (opened === null) continue
+            await openWorkspace(opened.bootstrap)
             useWorkspaceStore.getState().setActiveView('canvas')
+            if (opened.notice !== null) showAppNotice(opened.notice)
           } catch (error) {
-            useWorkspaceStore.setState({ sceneProblem: error instanceof Error ? error.message : `没有打开“${request.name}”。` })
+            showAppNotice(error instanceof Error ? error.message : `没有打开“${request.name}”。`, 'problem')
           }
         }
       }
@@ -823,6 +850,7 @@ export function App(): React.JSX.Element {
     <>
       <LiquidGlassDefs />
       <div className="app-shell">
+        <AppNotice />
         {workContextProblem !== null && <div className="workspace-save-problem" role="alert">
           <span>{workContextProblem}</span>
           {projectContextWritable() && <button type="button" onClick={() => { void flushProjectWorkContext().catch(() => undefined) }}>重试保存</button>}

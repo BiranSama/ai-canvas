@@ -14,7 +14,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RuntimeInfo } from '../../../shared/desktop-api'
 import type { RecentProjectSummary, WorkspaceBootstrap } from '../../../shared/project'
 import appIconUrl from '../../../../build/icon.png'
-import { createProjectFromImage, OPENABLE_IMAGE_TYPES } from '../project/open-image-project'
+import { isOpenableFile, OPENABLE_FILE_ACCEPT, openFileAsProject } from '../project/open-file-project'
+import { showAppNotice } from './app-notice'
 import { projectLibraryLocationLabel } from './project-library-label'
 import { ProviderSettingsSheet } from './ProviderSettingsSheet'
 import { activeModal } from '../interaction/keyboard-scope'
@@ -168,8 +169,12 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
       .finally(() => setBusy(false))
   }
 
-  const createFromImage = (file: File): void => {
-    void run(() => createProjectFromImage(file))
+  const openFile = (file: File): void => {
+    void run(async () => {
+      const opened = await openFileAsProject(file)
+      if (opened?.notice != null) showAppNotice(opened.notice)
+      return opened?.bootstrap ?? null
+    })
   }
 
   return (
@@ -180,8 +185,8 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
       }}
       onDrop={(event) => {
         event.preventDefault()
-        const file = [...event.dataTransfer.files].find((candidate) => candidate.type.startsWith('image/'))
-        if (file !== undefined) createFromImage(file)
+        const file = [...event.dataTransfer.files].find(isOpenableFile)
+        if (file !== undefined) openFile(file)
       }}
     >
       <header className="library-titlebar">
@@ -286,10 +291,10 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
       </footer>
       {problem !== null && <div className="library-problem glass-surface" role="alert">{problem}</div>}
       {notice !== null && <div className="library-notice glass-surface" role="status">{notice}</div>}
-      <input ref={imageInputRef} className="visually-hidden" type="file" accept={OPENABLE_IMAGE_TYPES.join(',')} onChange={(event) => {
+      <input ref={imageInputRef} className="visually-hidden" type="file" accept={OPENABLE_FILE_ACCEPT} onChange={(event) => {
         const file = event.currentTarget.files?.[0]
         event.currentTarget.value = ''
-        if (file !== undefined) createFromImage(file)
+        if (file !== undefined) openFile(file)
       }} />
       {settingsOpen && <ProviderSettingsSheet onClose={() => setSettingsOpen(false)} />}
       {deleteCandidate !== null && (

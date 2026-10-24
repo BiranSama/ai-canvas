@@ -156,7 +156,7 @@ describe('Photoshop shortcuts on the canvas', () => {
     const click = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => undefined)
     press({ key: 'o', code: 'KeyO', ctrlKey: true })
     expect(click).toHaveBeenCalledTimes(1)
-    expect((click.mock.contexts[0] as HTMLInputElement).accept).toBe('image/png,image/jpeg,image/webp')
+    expect((click.mock.contexts[0] as HTMLInputElement).accept).toBe('image/png,image/jpeg,image/webp,.psd')
     click.mockRestore()
 
     await act(async () => { press({ key: 'n', code: 'KeyN', ctrlKey: true }) })

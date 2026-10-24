@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { openableFileArguments, queueOpenFiles, takeOpenFileRequests } from '../../src/main/open-file-requests'
-import { createProjectFromImage } from '../../src/renderer/src/project/open-image-project'
+import { createProjectFromImage, openFileAsProject } from '../../src/renderer/src/project/open-file-project'
 import { createNightVeilScene } from '../../src/renderer/src/fixtures/night-veil'
 
 function bootstrapFor() {
@@ -56,7 +56,7 @@ describe('opening an image as a project', () => {
 
   it('refuses what it cannot open before creating anything', async () => {
     const desktop = stubDesktop({ width: 10, height: 10, hasAlpha: false })
-    await expect(createProjectFromImage(new File([new Uint8Array([1])], 'notes.gif', { type: 'image/gif' }))).rejects.toThrow('PNG、JPEG 或 WebP')
+    await expect(createProjectFromImage(new File([new Uint8Array([1])], 'notes.gif', { type: 'image/gif' }))).rejects.toThrow('PNG、JPEG、WebP')
     expect(desktop.createProject).not.toHaveBeenCalled()
   })
 })
@@ -85,5 +85,63 @@ describe('images the system asks to open', () => {
     expect(requests[0]).toMatchObject({ name: '封面.png', mimeType: 'image/png' })
     expect([...requests[0]!.bytes]).toEqual([137, 80, 78, 71])
     expect(await takeOpenFileRequests()).toEqual([])
+  })
+})
+
+describe('opening a PSD as a project', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  function stubPsdDesktop() {
+    const bootstrap = bootstrapFor()
+    let assetCount = 0
+    const png = new Uint8Array([137, 80, 78, 71])
+    const desktop = {
+      readPsd: vi.fn().mockResolvedValue({
+        width: 400,
+        height: 200,
+        opaqueBackground: true,
+        groups: [{ name: '标题组', visible: false }],
+        layers: [
+          { name: '背景', left: 0, top: 0, width: 400, height: 200, opacity: 1, visible: true, blendMode: 'normal', groupIndex: null, png },
+          { name: '阴影', left: 40, top: 20, width: 80, height: 40, opacity: 0.5, visible: false, blendMode: 'multiply', groupIndex: 0, png },
+          { name: '光', left: -40, top: 100, width: 100, height: 100, opacity: 0.8, visible: true, blendMode: 'soft-light', groupIndex: 0, png }
+        ],
+        composite: png,
+        approximations: ['1 个图层的图层样式（投影、描边等）没有带过来'],
+        keptAsPictures: ['1 个文字图层按画好的样子保留成图片']
+      }),
+      createProject: vi.fn().mockResolvedValue({ cancelled: false, bootstrap }),
+      importAsset: vi.fn().mockImplementation(async () => ({ id: `00000000-0000-4000-8000-00000000000${++assetCount}`, width: 1, height: 1, format: 'png', hasAlpha: true })),
+      executeSceneCommands: vi.fn().mockResolvedValue({ ok: true, receipt: { state: { scene: bootstrap.scene, sequence: 1, canUndo: true, canRedo: false } } })
+    }
+    Object.defineProperty(window, 'desktop', { configurable: true, value: desktop })
+    return desktop
+  }
+
+  it('adds every layer bottom first at its place, groups them, and keeps Photoshop\'s flattened image hidden on top', async () => {
+    const desktop = stubPsdDesktop()
+    const opened = await openFileAsProject(new File([new Uint8Array([56, 66, 80, 83])], '海报.psd', { type: '' }))
+    expect(desktop.readPsd).toHaveBeenCalledTimes(1)
+    expect(desktop.createProject).toHaveBeenCalledWith({ suggestedName: '海报' })
+    const commands = desktop.executeSceneCommands.mock.calls[0]![0].batch.commands
+    expect(commands[0]).toMatchObject({ kind: 'scene.set-canvas', canvas: { outputWidth: 400, outputHeight: 200, aspectWidth: 2, aspectHeight: 1, transparent: false } })
+    const added = commands.filter((command: { kind: string }) => command.kind === 'element.add').map((command: { element: Record<string, unknown> }) => command.element)
+    expect(added.map((element: { name: string }) => element.name)).toEqual(['背景', '阴影', '光', 'PSD 原样（对照用）'])
+    expect(added[0]).toMatchObject({ semanticRole: 'background', transform: { x: 0, y: 0, width: 1, height: 1 } })
+    expect(added[1]).toMatchObject({ opacity: 0.5, visible: false, blendMode: 'multiply', transform: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 } })
+    expect(added[2]).toMatchObject({ blendMode: 'soft-light', transform: { x: -0.1, y: 0.5, width: 0.25, height: 0.5 } })
+    expect(added[3]).toMatchObject({ visible: false, referencePolicy: 'exclude', transform: { x: 0, y: 0, width: 1, height: 1 } })
+    const group = commands.find((command: { kind: string }) => command.kind === 'element.group')
+    expect(group).toMatchObject({ elementIds: [added[1].id, added[2].id], group: { name: '标题组', visible: false, type: 'group' } })
+    expect(opened?.notice).toContain('已打开“海报.psd”，3 个图层')
+    expect(opened?.notice).toContain('图层样式')
+    expect(opened?.notice).toContain('PSD 原样（对照用）')
+  })
+
+  it('passes on what Main could not read, without Electron\'s wrapping', async () => {
+    const desktop = stubPsdDesktop()
+    desktop.readPsd.mockRejectedValue(new Error("Error invoking remote method 'project:psd-read': Error: 只支持 RGB、灰度和 CMYK 模式的 PSD，请先在 Photoshop 里转成 RGB。"))
+    await expect(openFileAsProject(new File([new Uint8Array([1])], 'lab.psd'))).rejects.toThrow(/^只支持 RGB/)
+    expect(desktop.createProject).not.toHaveBeenCalled()
   })
 })

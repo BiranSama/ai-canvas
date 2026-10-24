@@ -8,6 +8,9 @@ import type { AppearanceSettingsService } from '../appearance/appearance-setting
 import type { GenerationRuntime } from '../generation/generation-runtime'
 import { localFontCatalog } from '../fonts/local-font-catalog'
 import { takeOpenFileRequests } from '../open-file-requests'
+import { readPsdForImport } from '../psd/psd-import'
+
+const MAX_PSD_BYTES = 1024 * 1024 * 1024
 import { inspectNativeModules } from '../native-health'
 import {
   activityBatchIdSchema,
@@ -122,6 +125,10 @@ export function registerDesktopIpc(
   ipcMain.handle(DESKTOP_CHANNELS.runtimeInfo, async (): Promise<RuntimeInfo> => createRuntimeInfo(backgroundMaterial, generationRuntime))
   ipcMain.handle(DESKTOP_CHANNELS.localFonts, async (_event, rescan: unknown) => localFontCatalog.list({ rescan: rescan === true }))
   ipcMain.handle(DESKTOP_CHANNELS.openFileRequests, () => takeOpenFileRequests())
+  ipcMain.handle(DESKTOP_CHANNELS.psdRead, async (_event, bytes: unknown) => {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > MAX_PSD_BYTES) throw new Error('PSD 必须大于 0 字节且不超过 1 GB。')
+    return readPsdForImport(bytes)
+  })
   ipcMain.handle(DESKTOP_CHANNELS.imageToneMatch, async (_event, input: unknown) => (await generationRuntime).matchImageTone(imageToneMatchSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettings, async () => appearanceSettings.snapshot())
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettingsSet, async (_event, input: unknown) => {

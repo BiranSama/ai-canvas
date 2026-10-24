@@ -300,6 +300,7 @@ test('launches the production canvas with native modules isolated in Main', asyn
         'getRuntimeInfo',
         'listLocalFonts',
         'takeOpenFileRequests',
+        'readPsd',
         'onOpenFileRequested',
         'matchImageTone',
         'getAppearanceSettings',

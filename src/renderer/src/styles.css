@@ -2123,6 +2123,12 @@ select:focus-visible {
 .shortcut-groups dt { margin: 0; }
 .shortcut-groups dd { margin: 0; font-size: 12px; line-height: 1.45; }
 .shortcut-groups kbd { display: inline-block; padding: 2px 6px; border: 1px solid var(--hairline); border-radius: 6px; color: var(--graphite); background: var(--field); font-family: inherit; font-size: 12px; white-space: nowrap; }
+.app-notice { position: fixed; z-index: 120; top: 62px; left: 50%; display: flex; width: min(640px, calc(100vw - 32px)); align-items: flex-start; gap: 10px; padding: 11px 10px 11px 16px; border: 1px solid var(--hairline); border-radius: 14px; color: var(--graphite); background: var(--thick-glass); box-shadow: var(--shadow-float); backdrop-filter: blur(24px) saturate(1.2); transform: translateX(-50%); }
+.app-notice.is-problem { border-color: rgba(156, 83, 77, .35); }
+.app-notice p { flex: 1; margin: 0; font-size: 13px; line-height: 1.55; }
+.app-notice.is-problem p { color: #9c534d; }
+.app-notice button { display: grid; flex: 0 0 auto; width: 26px; height: 26px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted-slate); background: transparent; cursor: pointer; }
+.app-notice button:hover { background: color-mix(in srgb, var(--graphite) 8%, transparent); }
 .settings-backdrop { position: fixed; inset: 0; z-index: 90; display: grid; padding: 44px; place-items: center; background: rgba(33,38,45,.18); backdrop-filter: blur(10px) saturate(.88); }
 .provider-settings-sheet { display: grid; width: min(780px, calc(100vw - 88px)); max-height: calc(100vh - 48px); overflow: hidden; grid-template-rows: auto minmax(0,1fr) auto; border: 1px solid rgba(255,255,255,.82); border-radius: 26px; color: var(--graphite); background: var(--thick-glass); box-shadow: 0 32px 90px rgba(29,35,43,.24), inset 0 1px rgba(255,255,255,.82); }
 .provider-settings-sheet > header { display: flex; align-items: start; justify-content: space-between; padding: 28px 30px 23px; border-bottom: 1px solid var(--hairline); }

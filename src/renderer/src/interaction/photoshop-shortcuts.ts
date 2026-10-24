@@ -69,7 +69,7 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+Z / Ctrl+Shift+Z', action: '撤销 / 重做' },
       { keys: 'Ctrl+C / Ctrl+X / Ctrl+V', action: '拷贝 / 剪切 / 粘贴' },
       { keys: 'Ctrl+N', action: '新建空白项目' },
-      { keys: 'Ctrl+O', action: '打开图片，自动建成项目' },
+      { keys: 'Ctrl+O', action: '打开图片或 PSD，自动建成项目' },
       { keys: 'Ctrl+Shift+S', action: '项目另存为' },
       { keys: 'Ctrl+Alt+Shift+K', action: '快捷键一览' }
     ]

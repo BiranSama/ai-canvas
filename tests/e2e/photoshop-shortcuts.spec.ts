@@ -1,8 +1,9 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { samplePsd } from '../helpers/psd-fixture'
 
 const IMAGE = resolve('tests/visual/__screenshots__/m3-canvas-1024x700.png')
 
@@ -137,6 +138,47 @@ test('Ctrl+O on the project library opens an image as a project too', async () =
     await (await chooser).setFiles(IMAGE)
     await expect(page.getByRole('button', { name: '项目菜单：m3-canvas-1024x700' })).toBeVisible({ timeout: 10_000 })
     expect((await bootstrap(page)).scene.canvas).toMatchObject({ outputWidth: 1024, outputHeight: 700 })
+  } finally {
+    await app.close()
+  }
+})
+
+async function samplePsdFile(name = '海报.psd'): Promise<string> {
+  const path = join(await mkdtemp(join(tmpdir(), 'psd-')), name)
+  await writeFile(path, samplePsd())
+  return path
+}
+
+test('Ctrl+O opens a PSD as a project with its layers, group and a note on what changed', async () => {
+  // Playwright's file chooser drops a non-ASCII file name here; the launch test below covers one.
+  const psd = await samplePsdFile('poster.psd')
+  const { app, page } = await launch()
+  try {
+    await newCanvas(page)
+    const chooser = page.waitForEvent('filechooser')
+    await page.keyboard.press('Control+o')
+    await (await chooser).setFiles(psd)
+    await expect(page.getByRole('button', { name: '项目菜单：poster' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.app-notice')).toContainText('已打开“poster.psd”，5 个图层')
+    const opened = (await bootstrap(page)).scene
+    expect(opened.canvas).toMatchObject({ outputWidth: 200, outputHeight: 100, transparent: false })
+    expect(opened.elements.filter((element) => element.type === 'image').map((element) => element.name)).toEqual(['背景', '阴影', '草稿', '柔光', '减淡', 'PSD 原样（对照用）'])
+    const group = opened.elements.find((element) => element.type === 'group')
+    expect(group).toMatchObject({ name: '标题组' })
+    const layers = page.getByRole('listbox', { name: '图层' })
+    await expect(layers.getByText('标题组', { exact: true })).toBeVisible()
+    await expect(layers.getByText('PSD 原样（对照用）', { exact: true })).toBeVisible()
+  } finally {
+    await app.close()
+  }
+})
+
+test('a PSD named when the app starts opens as a project, as from Explorer', async () => {
+  const psd = await samplePsdFile()
+  const { app, page } = await launch([psd])
+  try {
+    await expect(page.getByRole('button', { name: '项目菜单：海报' })).toBeVisible({ timeout: 15_000 })
+    expect((await bootstrap(page)).scene.elements.filter((element) => element.type === 'image')).toHaveLength(6)
   } finally {
     await app.close()
   }
