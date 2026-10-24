@@ -56,8 +56,9 @@ test('the eyedropper sets the foreground colour, and with Alt the background', a
     await page.keyboard.press('i')
     await expect(page.getByRole('button', { name: '吸管' })).toHaveAttribute('aria-pressed', 'true')
     const point = await artboardPoint(page, 0.1, 0.1)
-    await page.mouse.click(point.x, point.y)
-    await expect(page.getByLabel('前景色', { exact: true })).toHaveValue('#336699')
+    const foreground = page.getByLabel('前景色', { exact: true })
+    // The new background reaches the canvas a frame or two after Main accepts it.
+    await expect.poll(async () => { await page.mouse.click(point.x, point.y); return foreground.inputValue() }).toBe('#336699')
     await page.keyboard.down('Alt')
     await page.mouse.click(point.x, point.y)
     await page.keyboard.up('Alt')

@@ -474,7 +474,8 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         onClick={(event) => { if (!event.evt.altKey) onSelect(event) }}
         onTap={onSelect}
         onDblClick={(event) => {
-          if (element.locked) return
+          // An Alt+click cycles through what is under the pointer; it never completes a double-click.
+          if (element.locked || event.evt.altKey) return
           event.cancelBubble = true
           enterGroupEditing(element.id)
         }}
@@ -565,7 +566,8 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
       onTap={onSelect}
       onDblClick={(event) => {
         if (element.type !== 'text' && element.type !== 'image' && element.type !== 'shape') return
-        if (element.locked) return
+        // An Alt+click cycles through what is under the pointer; it never completes a double-click.
+        if (element.locked || event.evt.altKey) return
         event.cancelBubble = true
         select(element.id, false)
         onRequestEdit(element)
