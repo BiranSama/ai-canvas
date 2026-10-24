@@ -1,11 +1,18 @@
+import { z } from 'zod'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import { basename, extname } from 'node:path'
 import { DESKTOP_CHANNELS, DESKTOP_EVENTS, type RuntimeInfo } from '../../shared/desktop-api'
 import { diagnosticExportResultSchema } from '../../shared/diagnostics'
+import { pixelImportInputSchema } from '../../shared/project'
 import { projectWorkContextSchema } from '../../shared/project-work-context'
 import { generationReferencePreviewInputSchema } from '../../shared/generation-reference'
 import type { AppearanceSettingsService } from '../appearance/appearance-settings-service'
 import type { GenerationRuntime } from '../generation/generation-runtime'
+import { localFontCatalog } from '../fonts/local-font-catalog'
+import { takeOpenFileRequests } from '../open-file-requests'
+import { readPsdForImport } from '../psd/psd-import'
+
+const MAX_PSD_BYTES = 1024 * 1024 * 1024
 import { inspectNativeModules } from '../native-health'
 import {
   activityBatchIdSchema,
@@ -34,7 +41,9 @@ import {
   generationRetrySchema,
   placeGenerationResultInputSchema,
   providerConnectionTestSchema,
+  agentEngineSetSchema,
   providerSecretDeleteSchema,
+  providerImageIdSchema,
   providerConfigSetSchema,
   providerExecutionPolicySetSchema,
   providerSecretSetSchema,
@@ -47,7 +56,9 @@ import {
   designDirectionSelectSchema,
   designReviewAcceptSchema,
   diagnosticExportSchema,
-  sceneHistorySchema
+  sceneHistorySchema,
+  imageToneMatchSchema,
+  unifiedRenderStartSchema
 } from './contracts'
 
 let subscribedRuntime: Promise<GenerationRuntime> | null = null
@@ -114,6 +125,14 @@ export function registerDesktopIpc(
   ensureAppearanceBroadcast(appearanceSettings)
   for (const channel of Object.values(DESKTOP_CHANNELS)) ipcMain.removeHandler(channel)
   ipcMain.handle(DESKTOP_CHANNELS.runtimeInfo, async (): Promise<RuntimeInfo> => createRuntimeInfo(backgroundMaterial, generationRuntime))
+  ipcMain.handle(DESKTOP_CHANNELS.localFonts, async (_event, rescan: unknown) => localFontCatalog.list({ rescan: rescan === true }))
+  ipcMain.handle(DESKTOP_CHANNELS.openFileRequests, () => takeOpenFileRequests())
+  ipcMain.handle(DESKTOP_CHANNELS.psdRead, async (_event, bytes: unknown) => {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > MAX_PSD_BYTES) throw new Error('PSD 必须大于 0 字节且不超过 1 GB。')
+    return readPsdForImport(bytes)
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.paintBake, async (_event, elementId: unknown) => (await generationRuntime).bakePaint({ elementId: z.string().uuid().parse(elementId) }))
+  ipcMain.handle(DESKTOP_CHANNELS.imageToneMatch, async (_event, input: unknown) => (await generationRuntime).matchImageTone(imageToneMatchSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettings, async () => appearanceSettings.snapshot())
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettingsSet, async (_event, input: unknown) => {
     return appearanceSettings.update(appearanceSettingsSetSchema.parse(input))
@@ -185,6 +204,7 @@ export function registerDesktopIpc(
     const parsed = generationAssetSchema.parse(input)
     return (await generationRuntime).readAssetDataUrl(parsed.assetId, parsed.thumbnail, parsed.projectId)
   })
+  ipcMain.handle(DESKTOP_CHANNELS.unifiedRender, async (_event, input: unknown) => (await generationRuntime).startUnifiedRender(unifiedRenderStartSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.canvasGeneration, async (_event, input: unknown) => {
     return (await generationRuntime).generateFromCanvas(canvasGenerationSchema.parse(input))
   })
@@ -194,6 +214,10 @@ export function registerDesktopIpc(
   ipcMain.handle(DESKTOP_CHANNELS.providerSettings, async () => (await generationRuntime).getProviderSettings())
   ipcMain.handle(DESKTOP_CHANNELS.providerConnectionTest, async (_event, input: unknown) => {
     return (await generationRuntime).validateProviderConnection(providerConnectionTestSchema.parse(input))
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.agentEngineGet, async () => (await generationRuntime).getAgentEngine())
+  ipcMain.handle(DESKTOP_CHANNELS.agentEngineSet, async (_event, input: unknown) => {
+    return (await generationRuntime).setAgentEngine(agentEngineSetSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.providerConfigSet, async (_event, input: unknown) => {
     return (await generationRuntime).setProviderConfig(providerConfigSetSchema.parse(input))
@@ -206,6 +230,13 @@ export function registerDesktopIpc(
   })
   ipcMain.handle(DESKTOP_CHANNELS.providerSecretDelete, async (_event, input: unknown) => {
     return (await generationRuntime).deleteProviderSecret(providerSecretDeleteSchema.parse(input))
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.providerImageAdd, async () => (await generationRuntime).addImageProvider())
+  ipcMain.handle(DESKTOP_CHANNELS.providerImageRemove, async (_event, input: unknown) => {
+    return (await generationRuntime).removeImageProvider(providerImageIdSchema.parse(input))
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.providerImageDefaultSet, async (_event, input: unknown) => {
+    return (await generationRuntime).setDefaultImageProvider(providerImageIdSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.projectRecent, async () => (await generationRuntime).listRecentProjects())
   ipcMain.handle(DESKTOP_CHANNELS.projectCreate, async (event, input: unknown) => {
@@ -287,6 +318,9 @@ export function registerDesktopIpc(
   })
   ipcMain.handle(DESKTOP_CHANNELS.assetImport, async (_event, input: unknown) => {
     return (await generationRuntime).importAsset(assetImportSchema.parse(input))
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.assetImportPixels, async (_event, input: unknown) => {
+    return (await generationRuntime).importPixels(pixelImportInputSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.workspaceBootstrap, async () => (await generationRuntime).getWorkspaceBootstrap())
   ipcMain.handle(DESKTOP_CHANNELS.projectWorkContextSave, async (_event, input: unknown) => {

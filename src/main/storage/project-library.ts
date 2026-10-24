@@ -20,7 +20,8 @@ import type {
   ProjectLibrarySettings,
   ProjectMigrationItem
 } from '../../shared/project'
-import { deserializeSceneSnapshot, type Scene } from '../../domain'
+import { deserializeSceneSnapshot, pathInBox, type Scene } from '../../domain'
+import { svgPaint } from '../reference/composite-reference-renderer'
 import type { AssetMetadata } from './project-repository'
 
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
@@ -232,6 +233,7 @@ function sceneCoverSvg(scene: Scene): Buffer {
       return `<text x="${x + elementWidth / 2}" y="${y + elementHeight / 2}" dominant-baseline="middle" text-anchor="middle" fill="${escapeXml(element.fill)}" opacity="${opacity}" font-family="serif" font-size="${fontSize}" letter-spacing="${Math.max(0, element.letterSpacing * .3)}">${escapeXml(element.content.slice(0, 48))}</text>`
     }
     if (element.type === 'shape') {
+      if (element.shape === 'path' && element.path !== undefined) return `<path d="${pathInBox(element.path, elementWidth, elementHeight, x, y)}" fill="${svgPaint(element.fill)}" stroke="${element.stroke === null ? 'none' : svgPaint(element.stroke)}" stroke-width="${Math.max(1, element.strokeWidth * Math.min(elementWidth, elementHeight))}" opacity="${opacity}" />`
       if (element.shape === 'ellipse') return `<ellipse cx="${x + elementWidth / 2}" cy="${y + elementHeight / 2}" rx="${elementWidth / 2}" ry="${elementHeight / 2}" fill="${escapeXml(element.fill)}" opacity="${opacity}" />`
       if (element.shape === 'line') return `<line x1="${x}" y1="${y + elementHeight}" x2="${x + elementWidth}" y2="${y}" stroke="${escapeXml(element.stroke ?? element.fill)}" stroke-width="2" opacity="${opacity}" />`
       return `<rect x="${x}" y="${y}" width="${elementWidth}" height="${elementHeight}" rx="${Math.round(element.cornerRadius * Math.min(elementWidth, elementHeight))}" fill="${escapeXml(element.fill)}" opacity="${opacity}" />`

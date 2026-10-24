@@ -13,7 +13,13 @@ export const canvasEditInputSchema = z.object({
   profileId: z.string().trim().min(1).max(120).default('local-sketch'),
   confirmed: z.boolean().default(false),
   sourceMessageId: z.string().min(1).nullable().default(null),
-  parentResultId: z.string().min(1).nullable().default(null)
+  parentResultId: z.string().min(1).nullable().default(null),
+  /**
+   * mask: change the parts of an image its edit masks mark. in-context:
+   * redraw the box of an image or subject placeholder within the picture
+   * beneath it, to be cut out and blended in when placed.
+   */
+  mode: z.enum(['mask', 'in-context']).default('mask')
 })
 
 export const canvasEditResultSchema = z.object({

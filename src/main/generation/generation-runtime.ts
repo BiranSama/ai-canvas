@@ -1,4 +1,6 @@
+import { paintedImageBytes } from '../paint/painted-image'
 import { createHash, randomUUID } from 'node:crypto'
+import sharp from 'sharp'
 import { summarizeGenerationCosts } from '../../shared/generation-cost'
 import { generationReferencePreviewInputSchema, type GenerationReferencePreviewInput, type GenerationReferencePreview, type GenerationReferenceSource } from '../../shared/generation-reference'
 import { resolveGenerationReference } from '../reference/generation-reference-source'
@@ -7,7 +9,7 @@ import { lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { AgentPlan, AgentRequest, AgentRun, AgentToolOutcome, AgentToolPlan, ConversationSnapshot, SceneSummary } from '../../shared/agent'
 import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../shared/agent'
-import { ELEMENT_SCHEMA_VERSION, type Scene, type SceneElement } from '../../domain'
+import { ELEMENT_SCHEMA_VERSION, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 import type { AgentEvent, AgentHarnessSnapshot, AgentMode, AgentTaskDispatch, TaskRelation, TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
@@ -48,8 +50,12 @@ import { canvasEditInputSchema, canvasEditResultSchema, type CanvasEditInput, ty
 import {
   canvasGenerationInputSchema,
   canvasGenerationResultSchema,
+  unifiedRenderInputSchema,
+  unifiedRenderResultSchema,
   type CanvasGenerationInput,
-  type CanvasGenerationResult
+  type CanvasGenerationResult,
+  type UnifiedRenderInput,
+  type UnifiedRenderResult
 } from '../../shared/reference'
 import {
   AgentRuntime,
@@ -68,21 +74,29 @@ import {
   OutboundContextService
 } from '../agent'
 import type { AgentLoopToolContext } from '../agent'
+import { createMultiStepPlannerAdapter, environmentAgentEngine } from '../agent/multi-step/runtime-adapter'
+import { AgentEngineSettingStore } from '../agent/multi-step/engine-setting-store'
+import type { AgentEngine, AgentEngineSetting } from '../../shared/agent-engine'
 import { projectWorkContextSchema, type ProjectWorkContext } from '../../shared/project-work-context'
 import { blendModeCommandViolation, compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../agent/atomic-scene-tools'
 import { compileDesignDirectionSelection } from '../agent/design-direction-selection'
 import { EditMaskCompiler } from '../edit'
+import { extractLayer, inContextLayerJob, layerRegion, layersBelow, regionMask, regionTransform, type LayerRegion } from '../edit/layer-in-context'
+import { subScene } from '../reference/sub-scene'
+import { measureToneMatch, type ToneMeasurement } from '../edit/tone-match'
+import { unifiedPlacementCommands, unifiedRenderCover, unifiedRenderJob } from '../edit/unified-render'
+import type { AssetMetadata } from '../storage/project-repository'
 import { buildTransientAnnotationMasks } from '../../shared/ephemeral-annotation'
 import { ProviderSettingsService } from '../security/provider-settings-service'
 import { FileProviderConfigStore } from '../security/provider-config-store'
 import { FileRedactedLogger } from '../security/file-redacted-logger'
-import { ElectronSecretVault } from '../security/secret-vault'
+import { ElectronSecretVault, type ProviderSecretVault } from '../security/secret-vault'
 import { ImageExecutionBindings, executionInputHash, executionRequestHash, type ImageExecutionBinding } from '../security/image-execution-bindings'
 import { ArkHttpClient } from '../security/ark-http-client'
 import { KrillHttpTransport } from '../security/krill-http-transport'
 import { ProviderUsageLedger } from '../security/provider-usage-ledger'
 import { ProviderConnectionValidator } from '../security/provider-connection-validator'
-import { DEFAULT_PROVIDER_EXECUTION_POLICY, resolveImageProtocolEndpoint } from '../../shared/provider-settings'
+import { DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
@@ -90,12 +104,14 @@ import type {
   ProviderConnectionTestInput,
   ProviderConnectionTestResult,
   ProviderPublicConfig,
+  ProviderPublicConfigInput,
   ProviderSecretInput,
   ProviderSettingsSnapshot
 } from '../../shared/provider-settings'
 import type {
   AssetImportInput,
   ImportedAsset,
+  PixelImportInput,
   ProjectDeleteResult,
   ProjectLibraryChangeMode,
   ProjectLibraryLocationResult,
@@ -103,7 +119,7 @@ import type {
   RecentProjectSummary,
   WorkspaceBootstrap
 } from '../../shared/project'
-import { ReferenceCompiler } from '../reference'
+import { CompositeReferenceRenderer, ReferenceCompiler } from '../reference'
 import { SceneService } from '../scene'
 import { ProjectWorkspace, type OpenProjectResult } from '../storage/project-workspace'
 import { RecentProjectsStore } from '../storage/recent-projects-store'
@@ -121,11 +137,12 @@ import { GenerationWorkflowRepository } from './generation-workflow-repository'
 import { GenerationProfileRegistry } from './generation-profiles'
 import { GenerationQueue } from './generation-queue'
 import { ArkSeedreamImageProvider } from './ark-seedream-provider'
-import { ArkSeedreamProtocol, seedreamCapabilitiesFor } from './ark-seedream-protocol'
+import { ArkSeedreamProtocol } from './ark-seedream-protocol'
 import { KrillImageProvider } from './krill-image-provider'
-import { OPENAI_IMAGES_CAPABILITIES, OpenAiImagesProtocol } from './openai-images-protocol'
+import { OpenAiImagesProtocol } from './openai-images-protocol'
 import { OpenAiImagesProvider } from './openai-images-provider'
-import { TASK_IMAGES_CAPABILITIES, TaskImagesProtocol } from './task-images-protocol'
+import { TaskImagesProtocol } from './task-images-protocol'
+import { openAiImagesCapabilitiesFor, seedreamCapabilitiesFor, TASK_IMAGES_CAPABILITIES } from '../../shared/image-model-profiles'
 import { MockImageProvider } from './mock-image-provider'
 import { ProviderError, ProviderRegistry, type ImageProvider } from './provider'
 import type { ProviderCapabilities } from '../../shared/generation'
@@ -153,6 +170,10 @@ export interface GenerationProviderInfo {
 
 export interface GenerationRuntimeOptions {
   readonly projectLibraryDirectory?: string
+  /** Replaces the operating-system vault; used by the offline/real-model eval harness only. */
+  readonly secretVault?: ProviderSecretVault
+  /** Forces an agent engine over the owner's stored choice and AI_CANVAS_AGENT_ENGINE. */
+  readonly agentEngine?: AgentEngine
 }
 
 type ImageProviderConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -302,11 +323,15 @@ export class GenerationRuntime {
   #editMaskCompiler!: EditMaskCompiler
   readonly #providerSettings: ProviderSettingsService
   readonly #providerConfig: FileProviderConfigStore
-  readonly #secrets: ElectronSecretVault
+  readonly #secrets: ProviderSecretVault
+  /** Forced by the environment or a runtime option; otherwise the stored choice applies. */
+  readonly #forcedAgentEngine: AgentEngine | null
+  readonly #agentEngineSetting: AgentEngineSettingStore
+  #activeAgentEngine: AgentEngine = 'plan-once'
   readonly #executionBindings: ImageExecutionBindings
   readonly #providerUsage: ProviderUsageLedger
   readonly #providerConnection: ProviderConnectionValidator
-  #configuredImage: ImageProviderConfig | null = null
+  #configuredImages: ReadonlyMap<string, ImageProviderConfig> = new Map()
   #executionPolicy: ProviderExecutionPolicy = DEFAULT_PROVIDER_EXECUTION_POLICY
   readonly #userDataDirectory: string
   #projectLibraryDirectory: string
@@ -341,9 +366,12 @@ export class GenerationRuntime {
     providers: ProviderRegistry,
     providerSettings: ProviderSettingsService,
     providerConfig: FileProviderConfigStore,
-    secrets: ElectronSecretVault,
-    providerUsage: ProviderUsageLedger
+    secrets: ProviderSecretVault,
+    providerUsage: ProviderUsageLedger,
+    forcedAgentEngine: AgentEngine | null
   ) {
+    this.#forcedAgentEngine = forcedAgentEngine
+    this.#agentEngineSetting = new AgentEngineSettingStore(join(userDataDirectory, 'state', 'agent-engine.json'))
     this.#userDataDirectory = userDataDirectory
     this.#projectLibraryDirectory = projectLibraryDirectory
     this.#librarySettings = new LibrarySettingsStore(
@@ -390,7 +418,7 @@ export class GenerationRuntime {
         project = await openDefaultProject(projectDirectory)
       }
     }
-    const secrets = new ElectronSecretVault(join(userDataDirectory, 'security', 'provider-secrets.json'))
+    const secrets = options.secretVault ?? new ElectronSecretVault(join(userDataDirectory, 'security', 'provider-secrets.json'))
     const providerConfig = new FileProviderConfigStore(join(userDataDirectory, 'security', 'provider-settings.json'))
     const providerUsage = new ProviderUsageLedger(join(userDataDirectory, 'security', 'provider-usage.json'), providerConfig)
     const providers = new ProviderRegistry([
@@ -408,7 +436,8 @@ export class GenerationRuntime {
       providerSettings,
       providerConfig,
       secrets,
-      providerUsage
+      providerUsage,
+      options.agentEngine ?? environmentAgentEngine()
     )
     await runtime.#refreshConfiguredImageProvider()
     await runtime.#activate(project, openedRecent)
@@ -418,15 +447,19 @@ export class GenerationRuntime {
   async #refreshConfiguredImageProvider(): Promise<void> {
     return this.#providerSettings.withStableConfiguration(async (config) => {
     this.#executionPolicy = config.executionPolicy
-    const image = config.providers.find((provider): provider is ImageProviderConfig => provider.kind === 'image') ?? null
-    this.#configuredImage = image
-    this.#providers.remove('image-provider')
-    this.#profiles.setProviderModels('image-provider', [])
-    if (image === null) return
-    const provider = this.#makeImageProvider(image, config.executionPolicy)
-    if (provider === null) return
-    this.#providers.replace(provider)
-    this.#profiles.setProviderModels(provider.id, [image.defaultModel])
+    const images = imageProviderConfigs(config)
+    for (const id of new Set([PRIMARY_IMAGE_PROVIDER_ID, ...this.#configuredImages.keys()])) {
+      this.#providers.remove(id)
+      this.#profiles.setProviderModels(id, [])
+    }
+    this.#configuredImages = new Map(images.map((image) => [image.id, image]))
+    // Every complete service is registered; each job keeps the service it was submitted to.
+    for (const image of images) {
+      const provider = this.#makeImageProvider(image, config.executionPolicy)
+      if (provider === null) continue
+      this.#providers.replace(provider)
+      this.#profiles.setProviderModels(provider.id, [image.defaultModel])
+    }
     })
   }
 
@@ -445,7 +478,7 @@ export class GenerationRuntime {
       if (executionPolicy.maxRequestsPerJob < 3) return null
       const capabilities = configuredImageCapabilities(image, TASK_IMAGES_CAPABILITIES, executionPolicy)
       const provider = new KrillImageProvider({
-        id: 'image-provider',
+        id: image.id,
         label: image.label,
         capabilities,
         allowArbitraryModels: true,
@@ -467,7 +500,8 @@ export class GenerationRuntime {
           timeoutMs: image.timeoutMs,
           baseUrl: image.baseUrl,
           submissionCostCeilingCny: executionPolicy.maxCostCnyPerJob,
-          providerLabel: image.label
+          providerLabel: image.label,
+          providerId: image.id
         }),
         stagingDirectory: join(this.#userDataDirectory, 'generation-staging'),
         maxPollRequests: Math.max(1, Math.min(40, executionPolicy.maxRequestsPerJob - 2))
@@ -476,8 +510,9 @@ export class GenerationRuntime {
     }
 
     if (image.protocol === 'openai-images') {
-      const capabilities = configuredImageCapabilities(image, OPENAI_IMAGES_CAPABILITIES, executionPolicy)
+      const capabilities = configuredImageCapabilities(image, openAiImagesCapabilitiesFor(image.defaultModel), executionPolicy)
       const provider = new OpenAiImagesProvider({
+        id: image.id,
         label: image.label,
         capabilities,
         protocol: new OpenAiImagesProtocol({ baseUrl: image.baseUrl, allowedModels: [image.defaultModel] }),
@@ -498,6 +533,7 @@ export class GenerationRuntime {
 
     const capabilities = configuredImageCapabilities(image, seedreamCapabilitiesFor(image.defaultModel), executionPolicy)
     const provider = new ArkSeedreamImageProvider({
+      id: image.id,
       label: image.label,
       capabilities,
       protocol: new ArkSeedreamProtocol({ baseUrl: image.baseUrl }),
@@ -523,7 +559,7 @@ export class GenerationRuntime {
       || binding.invocationKey !== job.request.parameters.workflowIdempotencyKey
       || binding.operation !== ('kind' in job.request && job.request.kind === 'edit' ? 'edit' : 'generate')
       || job.effectiveTimeoutMs !== binding.image.timeoutMs
-      || !await this.#secrets.hasReference('image-provider', binding.credentialReference)) {
+      || !await this.#secrets.hasReference(binding.image.id, binding.credentialReference)) {
       throw new Error('The original image execution identity is unavailable or mismatched.')
     }
     const provider = this.#makeImageProvider(binding.image, binding.policy, {
@@ -614,18 +650,31 @@ export class GenerationRuntime {
         transport: llm.transport,
         protocolId: llm.protocol,
         model: llm.defaultModel,
+        endpoint: resolveLlmEndpoint(llm),
         maxOutputTokens: llm.maxOutputTokens,
         llmProviderLabel: llm.label,
-        imageProviderId: 'image-provider',
+        imageProviderId: image.id,
         imageModel: image.defaultModel,
         maxImages,
         imageGenerationAvailable
       })
     })
+    this.#activeAgentEngine = this.#forcedAgentEngine ?? await this.#agentEngineSetting.get()
+    const multiStep = this.#activeAgentEngine === 'multi-step'
+      ? createMultiStepPlannerAdapter({
+          secrets: this.#secrets,
+          config: this.#providerConfig,
+          authorization: this.#providerUsage,
+          assets: project.workspace.assets,
+          scene: () => sceneService.state().scene,
+          importImage: (bytes, sourceId) => this.#importDerivedImage(project, bytes, 'imported', sourceId)
+        })
+      : null
     const agent = new AgentRuntime({
       projectId: project.workspace.metadata.id,
       repository: conversationRepository,
       planner,
+      ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: 40 }),
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
       logger: this.#diagnosticLog,
       activityLedger,
@@ -1099,6 +1148,16 @@ export class GenerationRuntime {
     try { return await operation } finally { this.#assetImports.delete(operation) }
   }
 
+  /** Encodes pixels the renderer drew as a PNG asset, off the renderer's thread; no pixels makes a transparent image. */
+  async importPixels(input: PixelImportInput): Promise<ImportedAsset> {
+    this.#assertRequestedProject(input.projectId)
+    const image = input.rgba === undefined
+      ? sharp({ create: { width: input.width, height: input.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+      : sharp(input.rgba, { raw: { width: input.width, height: input.height, channels: 4 } })
+    const bytes = await image.png().toBuffer()
+    return this.importAsset({ projectId: input.projectId, name: input.name, mimeType: 'image/png', bytes: new Uint8Array(bytes) })
+  }
+
   async #importAssetOwned(input: AssetImportInput, owner: OpenProjectResult): Promise<ImportedAsset> {
     const extension = input.mimeType === 'image/jpeg' ? 'jpg' : input.mimeType.slice('image/'.length)
     const stagingDirectory = join(this.#userDataDirectory, 'import-staging')
@@ -1112,6 +1171,51 @@ export class GenerationRuntime {
     } finally {
       await rm(stagingPath, { force: true })
     }
+  }
+
+  /** Stores an image Main made itself (a render, a mask, a cut-out layer) as a project asset. */
+  async #importDerivedImage(owner: OpenProjectResult, bytes: Buffer, sourceType: AssetMetadata['sourceType'], sourceId: string): Promise<AssetMetadata> {
+    const stagingDirectory = join(this.#userDataDirectory, 'derived-staging')
+    await mkdir(stagingDirectory, { recursive: true })
+    const stagingPath = join(stagingDirectory, `${randomUUID()}.png`)
+    await writeFile(stagingPath, bytes, { flag: 'wx' })
+    try {
+      this.#assertGenerationProject(owner)
+      return await owner.workspace.assets.importImage({ sourcePath: stagingPath, sourceType, sourceId })
+    } finally {
+      await rm(stagingPath, { force: true })
+    }
+  }
+
+  /**
+   * Replays an image layer's recorded paint into a new asset, so the scene
+   * can drop the operations it covers. Null when the layer has none.
+   */
+  async bakePaint(input: { readonly elementId: string }): Promise<{ readonly assetId: string; readonly paintIds: readonly string[] } | null> {
+    const owner = this.#project
+    const element = this.#sceneService.state().scene.elements.find((candidate) => candidate.id === input.elementId)
+    if (element?.type !== 'image' || element.paint === undefined || element.paint.length === 0) return null
+    const path = (await owner.workspace.assets.resolveAsset(element.assetId)).filePath
+    const bytes = await paintedImageBytes(path, element.paint)
+    const asset = await this.#importDerivedImage(owner, bytes, 'imported', element.id)
+    return { assetId: asset.id, paintIds: element.paint.map((op) => op.id) }
+  }
+
+  /** The colour shift that moves an image on the canvas part of the way towards the picture around it. */
+  async matchImageTone(input: { readonly elementId: string; readonly strength: number }): Promise<ToneMeasurement | null> {
+    const owner = this.#project
+    const scene = this.#sceneService.state().scene
+    const element = scene.elements.find((candidate) => candidate.id === input.elementId)
+    if (element?.type !== 'image') return null
+    const measured = await measureToneMatch(scene, element, async (assetId) => {
+      try {
+        return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+      } catch {
+        return null
+      }
+    }, input.strength)
+    this.#assertGenerationProject(owner)
+    return measured
   }
 
   getSceneAuthorityState(): ReturnType<SceneService['state']> {
@@ -1244,13 +1348,14 @@ export class GenerationRuntime {
               { id: 'mock-timeout', label: '超时状态验证', behavior: '仅用于离线测试超时恢复' }
             ])
           ]
-        : provider.id === 'image-provider' && this.#configuredImage !== null
-          ? [{
-              id: this.#configuredImage.defaultModel,
-              label: this.#configuredImage.defaultModel,
-              behavior: `当前图片模块 · ${this.#configuredImage.protocol} · 实际能力与价格以供应商为准`
+        : (() => {
+            const image = this.#configuredImages.get(provider.id)
+            return image === undefined ? [] : [{
+              id: image.defaultModel,
+              label: image.defaultModel,
+              behavior: `${image.label} · ${image.protocol} · 实际能力与价格以供应商为准`
             }]
-          : []
+          })()
     }))
   }
 
@@ -1279,7 +1384,7 @@ export class GenerationRuntime {
       workspace: owner.workspace, scene: this.#sceneService.state().scene,
       jobs: await this.#repository.listJobs(owner.workspace.metadata.id), capabilities: provider.capabilities, thumbnails,
       configurationIdentity: { profile, capabilities: provider.capabilities,
-        image: profile.providerId === 'mock' ? null : config.providers.find((entry) => entry.kind === 'image') }
+        image: profile.providerId === 'mock' ? null : imageProviderConfigs(config).find((entry) => entry.id === profile.providerId) }
     })
     this.#assertGenerationProject(owner)
     return preview
@@ -1287,6 +1392,20 @@ export class GenerationRuntime {
 
   getProviderSettings(): Promise<ProviderSettingsSnapshot> {
     return this.#providerSettings.snapshot()
+  }
+
+  async getAgentEngine(): Promise<AgentEngineSetting> {
+    return {
+      selected: this.#forcedAgentEngine ?? await this.#agentEngineSetting.get(),
+      active: this.#activeAgentEngine,
+      forcedByEnvironment: this.#forcedAgentEngine !== null
+    }
+  }
+
+  /** Stored for the next project open; a running turn keeps the engine it started with. */
+  async setAgentEngine(engine: AgentEngine): Promise<AgentEngineSetting> {
+    await this.#agentEngineSetting.set(engine)
+    return this.getAgentEngine()
   }
 
   validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
@@ -1297,7 +1416,7 @@ export class GenerationRuntime {
     return this.#providerSettings.setSecret(input)
   }
 
-  async setProviderConfig(input: ProviderPublicConfig): Promise<ProviderSettingsSnapshot> {
+  async setProviderConfig(input: ProviderPublicConfigInput): Promise<ProviderSettingsSnapshot> {
     const snapshot = await this.#providerSettings.setConfig(input)
     await this.#refreshConfiguredImageProvider()
     return snapshot
@@ -1311,6 +1430,24 @@ export class GenerationRuntime {
 
   deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot> {
     return this.#providerSettings.deleteSecret(providerId)
+  }
+
+  async addImageProvider(): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.addImageProvider()
+    await this.#refreshConfiguredImageProvider()
+    return snapshot
+  }
+
+  async removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.removeImageProvider(providerId)
+    await this.#refreshConfiguredImageProvider()
+    return snapshot
+  }
+
+  async setDefaultImageProvider(providerId: string): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.setDefaultImageProvider(providerId)
+    await this.#refreshConfiguredImageProvider()
+    return snapshot
   }
 
   listJobs(): Promise<readonly GenerationJob[]> {
@@ -1401,11 +1538,15 @@ export class GenerationRuntime {
   async #profileEnvironment(config: ProviderConfigFile, identity?: string) {
     const existing = identity === undefined ? null : await this.#workflowCoordinator.getIntentByKey(this.#project.workspace.metadata.id, identity)
     const binding = existing?.spec.executionIdentityId ? await this.#executionBindings.read(existing.spec.executionIdentityId) : null
-    const image = binding?.image ?? config.providers.find((item): item is ImageProviderConfig => item.kind === 'image')
-    const imageProvider = image === undefined ? null : this.#makeImageProvider(image, binding?.policy ?? config.executionPolicy)
-    const providers = new ProviderRegistry([this.#providers.get('mock'), ...(imageProvider === null ? [] : [imageProvider])])
+    const images = binding === null ? imageProviderConfigs(config) : [binding.image]
+    const imageProviders = images.flatMap((image) => {
+      const provider = this.#makeImageProvider(image, binding?.policy ?? config.executionPolicy)
+      return provider === null ? [] : [provider]
+    })
+    const providers = new ProviderRegistry([this.#providers.get('mock'), ...imageProviders])
     const profiles = new GenerationProfileRegistry(providers, {
-      mock: ['mock-balanced', 'mock-slow', 'mock-failure', 'mock-timeout'], 'image-provider': image === undefined ? [] : [image.defaultModel]
+      mock: ['mock-balanced', 'mock-slow', 'mock-failure', 'mock-timeout'],
+      ...Object.fromEntries(images.map((image) => [image.id, [image.defaultModel]]))
     })
     return { profiles, providers }
   }
@@ -1673,8 +1814,11 @@ export class GenerationRuntime {
     input = { ...input, scene: transientMasks.length === 0 ? authoritativeScene
       : { ...authoritativeScene, elements: [...authoritativeScene.elements, ...transientMasks] } }
     const { profiles, providers } = await this.#profileEnvironment(config)
+    const editPrompt = input.mode === 'in-context'
+      ? `在标出的区域里画出：${input.prompt.slice(0, 7_900)}\n和周围画面保持一致的光线方向、色温、透视和质感，边缘自然融入背景。`
+      : input.prompt
     const profileDraft = {
-      prompt: input.prompt,
+      prompt: editPrompt,
       negativePrompt: input.negativePrompt,
       aspect: { width: input.scene.canvas.aspectWidth, height: input.scene.canvas.aspectHeight },
       quantity: input.count,
@@ -1682,8 +1826,8 @@ export class GenerationRuntime {
       referenceResultIds: input.parentResultId === null ? [] : [input.parentResultId],
       sourceSceneRevision: input.scene.revision,
       referenceMode: 'hybrid' as const,
-      variationInstruction: input.prompt,
-      preserveConstraints: '蒙版外区域保持不变',
+      variationInstruction: editPrompt,
+      preserveConstraints: input.mode === 'in-context' ? '标出区域以外的画面保持原样' : '蒙版外区域保持不变',
       expandedSections: [] as ('parameters' | 'references' | 'advanced')[]
     }
     const preflight = profiles.compile({
@@ -1705,15 +1849,41 @@ export class GenerationRuntime {
       throw new Error(`${provider.label} 不支持蒙版局部编辑，请切换到支持该能力的供应商。`)
     }
     const target = input.scene.elements.find((element) => element.id === input.targetElementId)
-    if (target?.type !== 'image') throw new Error('局部修改需要先选择一个图片元素。')
-    const source = await owner.workspace.assets.getAsset(target.assetId)
+    const inContext = input.mode === 'in-context'
+    let source: AssetMetadata
+    let inContextMask: { readonly asset: AssetMetadata; readonly width: number; readonly height: number; readonly contributingMaskIds: readonly string[] } | null = null
+    let region: LayerRegion | null = null
+    if (inContext) {
+      if (target?.type !== 'image' && target?.type !== 'placeholder') throw new Error('按区域生成需要一张图片或一个主体占位。')
+      if (target.locked || input.scene.elements.some((element) => element.type === 'mask' && element.mode === 'protect' && element.targetElementId === target.id)) {
+        throw new Error('这个对象已锁定或有保护蒙版，不能按区域重画。')
+      }
+      region = layerRegion(input.scene, target)
+      if (region === null) throw new Error('这个对象不在画布范围内，无法按区域生成。')
+      // The picture the new content has to sit in: every layer beneath the target, as it will be exported.
+      const below = subScene(input.scene, layersBelow(input.scene, target))
+      const rendered = await new CompositeReferenceRenderer(async (assetId) => {
+        try {
+          return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+        } catch {
+          return null
+        }
+      }).render({ ...below, canvas: { ...below.canvas, transparent: false } }, 'final')
+      const invocation = randomUUID()
+      source = await this.#importDerivedImage(owner, await sharp(rendered.buffer).png().toBuffer(), 'reference', `layer-source:${invocation}`)
+      const maskAsset = await this.#importDerivedImage(owner, await regionMask(region), 'reference', `mask:${invocation}`)
+      inContextMask = { asset: maskAsset, width: maskAsset.width, height: maskAsset.height, contributingMaskIds: [] }
+    } else {
+      if (target?.type !== 'image') throw new Error('局部修改需要先选择一个图片元素。')
+      source = await owner.workspace.assets.getAsset(target.assetId)
+    }
     const referenceInput = { projectId: input.scene.projectId, source: { kind: 'images' as const, assetIds: [source.id] },
       profileId: input.profileId, modelOverride: input.providerId === 'mock' ? input.model : null, referenceMode: 'visual' as const }
     const referencePreview = await this.#resolveReference(referenceInput, config, owner)
-    if (input.parentResultId !== null && !(await this.#repository.listJobs(owner.workspace.metadata.id)).some((job) => job.results.some((result) => result.id === input.parentResultId && result.assetId === source.id))) {
+    if (!inContext && input.parentResultId !== null && !(await this.#repository.listJobs(owner.workspace.metadata.id)).some((job) => job.results.some((result) => result.id === input.parentResultId && result.assetId === source.id))) {
       throw new ProviderError('REFERENCE_SOURCE_CONFLICT', '局部修改的来源结果与选中图片不一致。', 'validating')
     }
-    const mask = await editMaskCompiler.compile(input.scene, target.id, source)
+    const mask = inContextMask ?? await editMaskCompiler.compile(input.scene, target!.id, source)
     this.#assertGenerationProject(owner)
     const profileRequest = profiles.compile({
       profileId: input.profileId,
@@ -1727,14 +1897,15 @@ export class GenerationRuntime {
         { assetId: mask.asset.id, intent: 'mask', strength: 1 }
       ],
       parameters: {
-        mode: 'local-edit',
+        mode: inContext ? 'layer-in-context' : 'local-edit',
         originalRequirement: input.prompt,
-        targetElementId: target.id,
+        targetElementId: target!.id,
         sourceAssetId: source.id,
         maskAssetId: mask.asset.id,
         contributingMaskIds: mask.contributingMaskIds,
+        ...(region === null ? {} : { layerRegion: region }),
         referenceSourceSnapshot: { version: 1, source: referencePreview.source, signature: referencePreview.signature,
-          summary: '选中的图片与当前画布蒙版', sceneRevision: authoritativeScene.revision, assetIds: [source.id, mask.asset.id] },
+          summary: inContext ? '目标下方的画面与要重画的区域' : '选中的图片与当前画布蒙版', sceneRevision: authoritativeScene.revision, assetIds: [source.id, mask.asset.id] },
         sourceDimensions: { width: source.width, height: source.height },
         maskDimensions: { width: mask.width, height: mask.height },
         invocationInputHash: inputHash,
@@ -1775,6 +1946,146 @@ export class GenerationRuntime {
     })
   }
 
+  /**
+   * Redraws the picture as one image: every exported layer except text is
+   * rendered and sent as a reference, with the composition kept and light,
+   * perspective and material made consistent. Placing the result lays it
+   * over those layers and keeps the text on top.
+   */
+  async unifiedRender(
+    inputValue: UnifiedRenderInput,
+    workflowInvocationId: string | null = null,
+    beforeDispatch?: (request: ImageTaskRequest) => Promise<void>,
+    deferActivation = false,
+    agentScope?: AgentGenerationAuthority
+  ): Promise<UnifiedRenderResult> {
+    const input = unifiedRenderInputSchema.parse(inputValue)
+    this.#assertRequestedProject(input.scene.projectId)
+    const owner = this.#project
+    return this.#providerSettings.withStableConfiguration(async (config) => {
+    this.#assertGenerationProject(owner)
+    const inputHash = executionInputHash(input)
+    const identity = workflowInvocationId !== null ? `tool:${workflowInvocationId}`
+      : input.sourceMessageId !== null ? `unified-message:${input.sourceMessageId}:${inputHash}` : `manual:${randomUUID()}`
+    const existing = await this.#existingCompiledInvocation(identity, inputHash, deferActivation, agentScope)
+    if (existing !== null) {
+      const saved = existing.request.parameters
+      return unifiedRenderResultSchema.parse({ jobId: existing.id, jobStatus: existing.status, sourceAssetId: saved.sourceAssetId, coveredElementIds: saved.coveredElementIds })
+    }
+    const scene = this.#sceneService.state().scene
+    if (input.scene.id !== scene.id || input.scene.revision !== scene.revision) {
+      throw new ProviderError('REFERENCE_REVIEW_REQUIRED', '画布已修改，请核对当前版本后重新提交。', 'validating')
+    }
+    const coveredElementIds = unifiedRenderCover(scene)
+    if (coveredElementIds.length === 0) throw new Error('画布上还没有可以统一重绘的图片或形状；文字不参与重绘。')
+    const { profiles, providers } = await this.#profileEnvironment(config)
+    const requirement = input.requirement === '' ? '' : `${input.requirement.slice(0, 7_000)}\n`
+    const prompt = `把参考图重新绘制成一张完整统一的画面。${requirement}严格保持构图：每个元素的位置、大小、形状和主要颜色都不变；统一光线方向、阴影、透视、材质和颗粒感，让各部分像一次拍摄或一次绘制出来的。画面里不要出现任何文字、字母或水印。`
+    const draft = {
+      prompt,
+      negativePrompt: '文字，字母，水印，拼贴感，贴纸边缘',
+      aspect: { width: scene.canvas.aspectWidth, height: scene.canvas.aspectHeight },
+      quantity: input.count,
+      profileId: input.profileId,
+      referenceResultIds: [] as string[],
+      sourceSceneRevision: scene.revision,
+      referenceMode: 'visual' as const,
+      variationInstruction: '',
+      preserveConstraints: '保持构图、元素位置和主要颜色',
+      expandedSections: [] as ('parameters' | 'references' | 'advanced')[]
+    }
+    const preflight = profiles.compile({
+      profileId: input.profileId,
+      confirmed: input.confirmed,
+      operation: 'generate',
+      draft,
+      outputWidth: scene.canvas.outputWidth,
+      outputHeight: scene.canvas.outputHeight,
+      references: [],
+      parameters: {},
+      sourceMessageId: input.sourceMessageId,
+      parentResultId: null,
+      modelOverride: input.providerId === 'mock' ? input.model : null
+    })
+    if (preflight.providerId !== input.providerId) throw new Error('统一渲染档位与请求供应商不一致。')
+    const provider = providers.get(preflight.providerId)
+    if (!provider.capabilities.imageReferences) {
+      throw new ProviderError('IMAGE_REFERENCE_UNSUPPORTED', `${provider.label} 不接受参考图，不能统一渲染。`, 'validating')
+    }
+    const covered = subScene(scene, new Set(coveredElementIds))
+    const rendered = await new CompositeReferenceRenderer(async (assetId) => {
+      try {
+        return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+      } catch {
+        return null
+      }
+    }).render({ ...covered, canvas: { ...covered.canvas, transparent: false } }, 'final')
+    const source = await this.#importDerivedImage(owner, await sharp(rendered.buffer).png().toBuffer(), 'reference', `unified-source:${randomUUID()}`)
+    const referenceInput = { projectId: scene.projectId, source: { kind: 'images' as const, assetIds: [source.id] },
+      profileId: input.profileId, modelOverride: input.providerId === 'mock' ? input.model : null, referenceMode: 'visual' as const }
+    const referencePreview = await this.#resolveReference(referenceInput, config, owner)
+    const request = profiles.compile({
+      profileId: input.profileId,
+      confirmed: input.confirmed,
+      operation: 'reference',
+      draft,
+      outputWidth: scene.canvas.outputWidth,
+      outputHeight: scene.canvas.outputHeight,
+      references: [{ assetId: source.id, intent: 'composition', strength: 0.9 }],
+      parameters: {
+        mode: 'unified-render',
+        originalRequirement: input.requirement,
+        sourceAssetId: source.id,
+        coveredElementIds,
+        referenceSourceSnapshot: { version: 1, source: referencePreview.source, signature: referencePreview.signature,
+          summary: '除文字外的整张画面', sceneRevision: scene.revision, assetIds: [source.id] },
+        invocationInputHash: inputHash,
+        ...(workflowInvocationId === null ? {} : { workflowInvocationId })
+      },
+      sourceMessageId: input.sourceMessageId,
+      parentResultId: null,
+      modelOverride: input.providerId === 'mock' ? input.model : null
+    })
+    await beforeDispatch?.(request)
+    this.#assertGenerationProject(owner)
+    if (this.#sceneService.state().scene.revision !== scene.revision) {
+      throw new ProviderError('REFERENCE_REVIEW_REQUIRED', '画布在准备统一渲染时发生变化，请重新提交。', 'validating')
+    }
+    const job = await this.#enqueueWorkflowConfigured(request, {
+      operation: 'canvas',
+      ...(agentScope === undefined ? {} : { agentScope }),
+      sourceSceneRevision: scene.revision,
+      promptPackage: null,
+      deferActivation,
+      idempotencyKey: identity
+    }, config, owner)
+    return unifiedRenderResultSchema.parse({ jobId: job.id, jobStatus: job.status, sourceAssetId: source.id, coveredElementIds })
+    })
+  }
+
+  /** A unified render the owner started from the panel, on the default image service, already confirmed there. */
+  async startUnifiedRender(input: { readonly requirement: string; readonly count: number }): Promise<UnifiedRenderResult> {
+    const owner = this.#project
+    const service = await this.#providerSettings.withStableConfiguration(async (config) => {
+      this.#assertGenerationProject(owner)
+      const image = defaultImageProviderConfig(config)
+      if (image === undefined || image.protocol === 'unconfigured' || image.baseUrl === '' || image.defaultModel === '') return null
+      const { profiles } = await this.#profileEnvironment(config)
+      return { providerId: image.id, model: image.defaultModel, profileId: this.#profileId(image.id, 'reference', 'final', profiles) }
+    })
+    if (service === null) throw new Error('还没有配置生图服务；先在设置里配置，再统一重绘。')
+    return this.unifiedRender({
+      scene: this.#sceneService.state().scene,
+      requirement: input.requirement,
+      providerId: service.providerId,
+      model: service.model,
+      count: input.count,
+      profileId: service.profileId,
+      confirmed: true,
+      sourceMessageId: null
+    })
+  }
+
   cancel(jobId: string): Promise<GenerationJob> {
     return this.#queue.cancel(jobId)
   }
@@ -1809,7 +2120,11 @@ export class GenerationRuntime {
       throw new AgentToolExecutorError('SCENE_REVISION_STALE',
         `The plan expected scene revision ${expectedSceneRevision}, but revision ${current.revision} is current.`, true)
     }
-    const target = targetElementId === undefined ? undefined : current.elements.find((element) => element.id === targetElementId)
+    // An in-context result goes back into the element it was drawn for unless another target is named.
+    const layer = inContextLayerJob(match.job.request.parameters)
+    const layerTarget = layer === null || targetElementId !== undefined ? undefined
+      : current.elements.find((element) => element.id === layer.targetElementId && (element.type === 'image' || element.type === 'placeholder'))
+    const target = layerTarget ?? (targetElementId === undefined ? undefined : current.elements.find((element) => element.id === targetElementId))
     if (targetElementId !== undefined && (target === undefined || (target.type !== 'image' && target.type !== 'placeholder'))) {
       throw new AgentToolExecutorError('TOOL_SCOPE_DENIED', '要替换的图片或占位已经不存在，未修改画布。', true)
     }
@@ -1819,10 +2134,12 @@ export class GenerationRuntime {
     if (target !== undefined && current.elements.some((element) => element.type === 'mask' && element.targetElementId === target.id && element.mode === 'protect')) {
       throw new AgentToolExecutorError('SCENE_ELEMENT_PROTECTED', '要替换的对象有保护蒙版，未修改画布。', true)
     }
-    const existing = target?.type === 'image' && target.assetId === match.result.assetId
-      ? target : current.elements.find((element) => element.id === input.placementId)
+    // A cut-out layer is a derived asset; its provenance names the result it came from.
+    const placedFrom = (element: SceneElement | undefined): boolean => element?.type === 'image'
+      && (element.assetId === match.result.assetId || (layer !== null && element.provenance?.sourceAssetId === match.result.assetId))
+    const existing = placedFrom(target) ? target : current.elements.find((element) => element.id === input.placementId)
     if (existing !== undefined) {
-      if (existing.type !== 'image' || existing.assetId !== match.result.assetId) {
+      if (!placedFrom(existing)) {
         throw new Error('The placement id is already bound to a different canvas element.')
       }
       return placeGenerationResultReceiptSchema.parse({
@@ -1835,12 +2152,24 @@ export class GenerationRuntime {
         reused: true
       })
     }
-    const asset = await this.#project.workspace.assets.getAsset(match.result.assetId)
+    let asset = await this.#project.workspace.assets.getAsset(match.result.assetId)
+    let layerTransform: NormalizedTransform | null = null
+    if (layer !== null) {
+      const [result, source] = await Promise.all([
+        owner.workspace.assets.resolveAsset(match.result.assetId),
+        owner.workspace.assets.resolveAsset(layer.sourceAssetId)
+      ])
+      const cutOut = await extractLayer(await readFile(result.filePath), await readFile(source.filePath), layer.region)
+      asset = await this.#importDerivedImage(owner, cutOut, 'generated', `layer:${match.result.id}`)
+      layerTransform = regionTransform(layer.region)
+    }
     this.#assertGenerationProject(owner)
     const lineage = (await this.resultFamilies())
       .flatMap((family) => family.members)
       .find((member) => member.resultId === match.result.id)
     this.#assertGenerationProject(owner)
+    // A unified render covers the whole canvas, above the layers it redrew and below the text.
+    const unified = layer === null && target === undefined ? unifiedRenderJob(match.job.request.parameters) : null
     const canvasAspect = current.canvas.outputWidth / current.canvas.outputHeight
     const imageAspect = asset.width / asset.height
     const maxWidth = 0.78
@@ -1851,9 +2180,11 @@ export class GenerationRuntime {
       id: input.placementId,
       version: ELEMENT_SCHEMA_VERSION,
       type: 'image',
-      name: `生成结果 ${match.result.variantIndex + 1}`,
-      description: `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`,
-      transform: { x: (1 - width) / 2, y: (1 - height) / 2, width, height, rotation: 0 },
+      name: unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一渲染 ${match.result.variantIndex + 1}`,
+      description: unified === null
+        ? `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`
+        : `由 ${match.job.providerId}/${match.job.model} 统一重绘；原来的图层保留在它下面，隐藏它就能看到。`,
+      transform: unified !== null ? { x: 0, y: 0, width: 1, height: 1, rotation: 0 } : layerTransform ?? { x: (1 - width) / 2, y: (1 - height) / 2, width, height, rotation: 0 },
       zIndex: current.elements.length,
       opacity: 1,
       blendMode: 'normal',
@@ -1868,9 +2199,9 @@ export class GenerationRuntime {
         sourceDirectionId: lineage?.sourceDirectionId ?? null,
         sourceAssetId: match.result.assetId
       },
-      assetId: match.result.assetId,
+      assetId: asset.id,
       crop: { x: 0, y: 0, width: 1, height: 1 },
-      fit: 'contain',
+      fit: unified !== null ? 'cover' : layerTransform === null ? 'contain' : 'fill',
       referenceRole: 'general'
     }
     const mutation = await this.#sceneService.execute({
@@ -1878,10 +2209,15 @@ export class GenerationRuntime {
       batch: {
         id: input.placementId,
         origin: input.origin,
-        summary: target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
-        commands: target === undefined ? [{ kind: 'element.add', element }] : [{
-          kind: 'element.set-image', elementId: target.id, assetId: match.result.assetId, provenance: element.provenance!
-        }]
+        summary: unified !== null ? '放入统一渲染' : target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
+        commands: unified !== null ? unifiedPlacementCommands(current, element, unified.coveredElementIds) : target === undefined ? [{ kind: 'element.add', element }] : [
+          { kind: 'element.set-image', elementId: target.id, assetId: asset.id, provenance: element.provenance! },
+          // The cut-out covers the element's box and the band it fades across.
+          ...(layerTransform === null ? [] : [{
+            kind: 'element.update' as const, elementId: target.id,
+            changes: { transform: layerTransform, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill' }
+          }])
+        ]
       }
     }, signal)
     if (!mutation.ok) throw new Error(`${mutation.error.code}: ${mutation.error.message}`)
@@ -1921,7 +2257,7 @@ export class GenerationRuntime {
     const existing = await coordinator.getIntentByKey(owner.workspace.metadata.id, identity)
     let binding: ImageExecutionBinding | null = existing?.spec.executionIdentityId
       ? await this.#executionBindings.read(existing.spec.executionIdentityId) : null
-    const image = binding?.image ?? metadata.retryExecution?.image ?? config.providers.find((item): item is ImageProviderConfig => item.kind === 'image')
+    const image = binding?.image ?? metadata.retryExecution?.image ?? imageProviderConfigs(config).find((item) => item.id === request.providerId)
     const policy = binding?.policy ?? metadata.retryExecution?.policy ?? config.executionPolicy
     const provider = request.providerId === 'mock' ? this.#providers.get('mock')
       : image === undefined ? null : this.#makeImageProvider(image, policy)
@@ -1966,9 +2302,9 @@ export class GenerationRuntime {
             || retryExecution.requestHash !== executionRequestHash(compiled))) {
             throw new ProviderError('IDEMPOTENCY_CONFLICT', '重试内容与原请求身份不一致。', 'validating')
           }
-          const credentialReference = retryExecution?.credentialReference ?? await this.#secrets.captureReference('image-provider')
+          const credentialReference = retryExecution?.credentialReference ?? await this.#secrets.captureReference(image.id)
           if (credentialReference === null) throw new ProviderError('PROVIDER_KEY_MISSING', '请先安全保存图片供应商凭据。', 'validating')
-          if (!await this.#secrets.hasReference('image-provider', credentialReference)) {
+          if (!await this.#secrets.hasReference(image.id, credentialReference)) {
             throw new ProviderError('REQUEST_IDENTITY_UNAVAILABLE', '原凭据版本已撤销，请核对原任务。', 'validating')
           }
           binding = await this.#executionBindings.create({ projectId: owner.workspace.metadata.id,
@@ -1980,7 +2316,15 @@ export class GenerationRuntime {
           || binding.requestHash !== executionRequestHash(compiled)) {
           throw new ProviderError('IDEMPOTENCY_CONFLICT', '同一生成请求的内容与原身份不一致。', 'validating')
         }
-        return { executionIdentityId: binding.id, effectiveTimeoutMs }
+        const price = binding.image.pricePerImageCny
+        return {
+          executionIdentityId: binding.id,
+          effectiveTimeoutMs,
+          costEstimate: price === null ? null : {
+            amount: Number((price * compiled.count).toFixed(4)), currency: 'CNY', source: 'provider_price', estimatedAt: new Date().toISOString(),
+            parameters: { profileId, model: compiled.model, imageCount: compiled.count }
+          }
+        }
       },
       deferActivation: metadata.deferActivation === true,
       parentJobId: metadata.parentJobId ?? null
@@ -2283,6 +2627,30 @@ export class GenerationRuntime {
       }, { deferActivation: true, agentScope: context })
       return { toolIndex: context.toolIndex, ok: true, batchId: null, jobId: job.id, affectedElementIds: [], message: '图片生成任务已创建。' }
     }
+    if (tool.kind === 'canvas_generation' && tool.mode === 'unified') {
+      const profileId = await this.#profileIdForInvocation(tool.providerId, 'reference', context.toolCallItemId, 'final')
+      this.#assertGenerationProject(owner)
+      const render = await this.unifiedRender({
+        scene: sceneService.state().scene,
+        requirement: tool.originalRequirement,
+        providerId: tool.providerId,
+        model: tool.model,
+        count: tool.count,
+        profileId,
+        confirmed: tool.providerId !== 'mock',
+        sourceMessageId: context.sourceMessageId
+      }, context.toolCallItemId, async (request) => {
+        await this.#prepareImageOutbound(context, outboundContextService, request)
+      }, true, context)
+      return {
+        toolIndex: context.toolIndex,
+        ok: true,
+        batchId: null,
+        jobId: render.jobId,
+        affectedElementIds: [],
+        message: `统一渲染任务已创建，重绘 ${render.coveredElementIds.length} 个图层，文字不参与；画布保持不变，放回后原图层留在下面。`
+      }
+    }
     if (tool.kind === 'canvas_generation') {
       const operation = 'reference' as const
       const profileId = await this.#profileIdForInvocation(tool.providerId, operation, context.toolCallItemId)
@@ -2312,13 +2680,17 @@ export class GenerationRuntime {
     if (tool.kind === 'canvas_edit') {
       const scene = sceneService.state().scene
       const target = scene.elements.find((element) => element.id === tool.targetElementId)
-      if (target?.type !== 'image') throw new Error('局部修改目标不是可用的图片元素。')
-      const parentResult = (await this.listJobs()).flatMap((job) => job.results).find((result) => result.assetId === target.assetId)
+      const inContext = tool.mode === 'in-context'
+      if (inContext ? target?.type !== 'image' && target?.type !== 'placeholder' : target?.type !== 'image') {
+        throw new Error(inContext ? '按区域生成的目标不是可用的图片或主体占位。' : '局部修改目标不是可用的图片元素。')
+      }
+      const parentResult = inContext || target?.type !== 'image' ? undefined
+        : (await this.listJobs()).flatMap((job) => job.results).find((result) => result.assetId === target.assetId)
       const profileId = await this.#profileIdForInvocation(tool.providerId, 'edit', context.toolCallItemId, 'final')
       this.#assertGenerationProject(owner)
       const edit = await this.editFromCanvas({
         scene,
-        targetElementId: target.id,
+        targetElementId: target!.id,
         prompt: tool.prompt,
         negativePrompt: '',
         providerId: tool.providerId,
@@ -2327,7 +2699,8 @@ export class GenerationRuntime {
         profileId,
         confirmed: tool.providerId !== 'mock',
         sourceMessageId: context.sourceMessageId,
-        parentResultId: parentResult?.id ?? null
+        parentResultId: parentResult?.id ?? null,
+        mode: inContext ? 'in-context' : 'mask'
       }, context.toolCallItemId, async (request) => {
         await this.#prepareImageOutbound(context, outboundContextService, request)
       }, true, context, tool.ephemeralAnnotation)
@@ -2336,8 +2709,8 @@ export class GenerationRuntime {
         ok: true,
         batchId: null,
         jobId: edit.jobId,
-        affectedElementIds: [target.id],
-        message: '局部修改任务已创建，源图保持不变。'
+        affectedElementIds: [target!.id],
+        message: inContext ? '按区域生成的任务已创建，画布保持不变，放回时会裁出这一块并融入画面。' : '局部修改任务已创建，源图保持不变。'
       }
     }
     const job = await this.cancel(tool.jobId)

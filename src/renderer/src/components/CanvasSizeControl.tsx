@@ -118,7 +118,7 @@ export function CanvasSizeControl({ inspector = false }: { readonly inspector?: 
         </button>
       )}
       {open && (
-        <div ref={panelRef} className="canvas-size-panel glass-surface" style={inspector ? undefined : panelStyle} role="dialog" aria-label="画布尺寸设置">
+        <div ref={panelRef} className={`canvas-size-panel${inspector ? '' : ' glass-surface'}`} style={inspector ? undefined : panelStyle} role="dialog" aria-label="画布尺寸设置">
           <div className="size-panel-heading">
             <div><strong>画布尺寸</strong><span>构图比例与输出像素分别设置</span></div>
             <button type="button" aria-label="横竖互换" title="横竖互换" onClick={swap}><ArrowRightLeft size={15} /></button>

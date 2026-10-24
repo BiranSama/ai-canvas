@@ -1,7 +1,9 @@
 import { z } from 'zod'
-import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
+import { familyPrompt } from './image-prompt-families'
+import type { EditRequest, GenerationRequest } from '../../shared/generation'
 import { resolveImageProtocolEndpoint } from '../../shared/provider-settings'
-import { fitFreeImageSize, formatImageSize, type FreeSizeRule } from './image-size-rules'
+import { ARK_SEEDREAM_CAPABILITIES, seedreamModelProfile, type SeedreamModelProfile } from '../../shared/image-model-profiles'
+import { fitFreeImageSize, formatImageSize } from '../../shared/image-size-rules'
 
 const arkBaseUrlSchema = z.string().url().max(2_048).refine((value) => {
   const url = new URL(value)
@@ -54,92 +56,9 @@ export interface NormalizedSeedreamResponse {
   readonly totalTokens: number | null
 }
 
-export const ARK_SEEDREAM_CAPABILITIES: ProviderCapabilities = {
-  textToImage: true,
-  imageReferences: true,
-  // Seedream has no native mask field. AI Canvas supports this through an
-  // annotated visual-control reference, as recommended by the prompt guide.
-  maskEditing: true,
-  multipleReferences: true,
-  transparentOutput: false,
-  maxImages: 4,
-  supportedRatios: ['custom'],
-  supportedFormats: ['png', 'jpeg', 'webp']
-}
 
 export const ARK_SEEDREAM_EDIT_MODE = 'visual-guided' as const
 
-/**
- * What a Seedream model accepts. Model families differ in their size range,
- * in whether they can return a related image set, and in whether seed and
- * guidance scale exist at all; sending a field a model does not support fails
- * the request.
- */
-export interface SeedreamModelProfile {
-  readonly presets: readonly string[]
-  /** Free width x height range, or null when the model takes presets only. */
-  readonly freeSize: FreeSizeRule | null
-  /** `adaptive` lets the model keep the input image size (SeedEdit). */
-  readonly adaptiveSize: boolean
-  readonly sequentialImages: boolean
-  readonly seedAndGuidance: boolean
-  readonly maxImages: number
-}
-
-const SEEDREAM_ASPECT_LIMIT = 16
-
-export function seedreamModelProfile(model: string): SeedreamModelProfile {
-  if (/seedream-5-0-(?:pro|flash)/i.test(model)) {
-    return {
-      presets: ['1K', '1.5K', '2K'],
-      freeSize: { multipleOf: 16, minPixels: 921_600, maxPixels: 4_624_220, maxAspect: SEEDREAM_ASPECT_LIMIT },
-      adaptiveSize: false,
-      sequentialImages: false,
-      seedAndGuidance: false,
-      maxImages: 1
-    }
-  }
-  if (/seedream-5-0|seedream-4-5/i.test(model)) {
-    return {
-      presets: ['2K', '4K'],
-      freeSize: { multipleOf: 16, minPixels: 3_686_400, maxPixels: 16_777_216, maxAspect: SEEDREAM_ASPECT_LIMIT },
-      adaptiveSize: false,
-      sequentialImages: true,
-      seedAndGuidance: false,
-      maxImages: 4
-    }
-  }
-  if (/seedream-4-0/i.test(model)) {
-    return {
-      presets: ['1K', '2K', '4K'],
-      freeSize: { multipleOf: 16, minPixels: 921_600, maxPixels: 16_777_216, maxAspect: SEEDREAM_ASPECT_LIMIT },
-      adaptiveSize: false,
-      sequentialImages: true,
-      seedAndGuidance: false,
-      maxImages: 4
-    }
-  }
-  if (/seededit-3-0/i.test(model)) {
-    return { presets: [], freeSize: null, adaptiveSize: true, sequentialImages: false, seedAndGuidance: true, maxImages: 1 }
-  }
-  if (/seedream-3-0/i.test(model)) {
-    return {
-      presets: [],
-      freeSize: { multipleOf: 16, minPixels: 512 * 512, maxPixels: 2_048 * 2_048, minEdge: 512, maxEdge: 2_048, maxAspect: 4 },
-      adaptiveSize: false,
-      sequentialImages: false,
-      seedAndGuidance: true,
-      maxImages: 1
-    }
-  }
-  // An unrecognised model gets only the request shape every current Seedream
-  // model accepts: the 2K preset, one image, no optional controls.
-  return { presets: ['2K'], freeSize: null, adaptiveSize: false, sequentialImages: false, seedAndGuidance: false, maxImages: 1 }
-}
-
-export function seedreamCapabilitiesFor(model: string): ProviderCapabilities {
-  return { ...ARK_SEEDREAM_CAPABILITIES, maxImages: seedreamModelProfile(model).maxImages }
-}
 
 function imageGenerationUrl(baseUrl: string): string {
   return resolveImageProtocolEndpoint(baseUrl, 'ark-seedream', 'generate')
@@ -161,22 +80,6 @@ function booleanParameter(request: GenerationRequest | EditRequest, key: string,
   return typeof value === 'boolean' ? value : fallback
 }
 
-function compiledPrompt(request: GenerationRequest | EditRequest): string {
-  const negative = request.negativePrompt.trim()
-  const framedPrompt = `画幅比例严格保持 ${request.aspectWidth}:${request.aspectHeight}。\n${request.prompt}`
-  const rawRequirement = negative === ''
-    ? framedPrompt
-    : `${framedPrompt}\n\n避免出现：${negative}`
-  const requirement = request.count > 1
-    ? `请生成一组共 ${request.count} 张内容关联、主体与风格一致的图片。\n${rawRequirement}`
-    : rawRequirement
-  if (!('kind' in request) || request.kind !== 'edit') return requirement
-  return [
-    '这是一次视觉引导式局部编辑。图一是必须保留的原图；图二是带红色半透明标记的编辑指示图。',
-    '只修改红色标记覆盖的区域，未标记区域、构图、主体身份、文字与光影关系尽量保持不变。',
-    `编辑要求：${requirement}`
-  ].join('\n')
-}
 
 function configuredSize(request: GenerationRequest | EditRequest, profile: SeedreamModelProfile): string | null {
   const configured = request.parameters.seedreamSize
@@ -239,7 +142,7 @@ export class ArkSeedreamProtocol {
       url: imageGenerationUrl(this.#baseUrl),
       body: {
         model: request.model,
-        prompt: compiledPrompt(request),
+        prompt: familyPrompt(request, 'seedream'),
         ...(images.length === 0 ? {} : { image: images }),
         size: outputSize(request, profile),
         ...(profile.sequentialImages ? { sequential_image_generation: sequential } : {}),

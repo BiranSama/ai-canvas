@@ -1,16 +1,7 @@
 import { z } from 'zod'
-import type { GenerationRequest, ProviderCapabilities } from '../../shared/generation'
-
-export const TASK_IMAGES_CAPABILITIES: ProviderCapabilities = {
-  textToImage: true,
-  imageReferences: false,
-  maskEditing: false,
-  multipleReferences: false,
-  transparentOutput: false,
-  maxImages: 1,
-  supportedRatios: ['custom'],
-  supportedFormats: ['png', 'jpeg', 'webp']
-}
+import { familyPrompt } from './image-prompt-families'
+import type { GenerationRequest } from '../../shared/generation'
+import { TASK_IMAGES_CAPABILITIES } from '../../shared/image-model-profiles'
 
 const modelSchema = z.string().trim().min(1).max(200)
 const taskIdSchema = z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._:-]+$/)
@@ -67,11 +58,6 @@ function validatedBaseUrl(value: string): URL {
   return new URL(direct.toString().endsWith('/') ? direct.toString() : `${direct.toString()}/`)
 }
 
-function compiledPrompt(request: GenerationRequest): string {
-  const ratio = `画幅比例严格保持 ${request.aspectWidth}:${request.aspectHeight}。`
-  const negative = request.negativePrompt.trim()
-  return negative === '' ? `${ratio}\n${request.prompt}` : `${ratio}\n${request.prompt}\n\n避免出现：${negative}`
-}
 
 function failedStatus(status: string | undefined): boolean {
   return status !== undefined && ['failed', 'error', 'cancelled', 'canceled'].includes(status)
@@ -102,7 +88,7 @@ export class TaskImagesProtocol {
       url: new URL('images/generations', this.#baseUrl).toString(),
       body: {
         model: request.model,
-        prompt: compiledPrompt(request),
+        prompt: familyPrompt(request),
         size: `${request.outputWidth}x${request.outputHeight}`,
         n: 1,
         async: true,

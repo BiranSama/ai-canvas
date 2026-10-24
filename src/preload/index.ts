@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { AppearanceSettingsSnapshot, AppearanceSettingsUpdate } from '../shared/appearance-settings'
+import type { AgentEngine } from '../shared/agent-engine'
 import { DESKTOP_CHANNELS, DESKTOP_EVENTS, type DesktopApi, type RuntimeInfo } from '../shared/desktop-api'
 import type { GenerationProfileRequest, GenerationRequest } from '../shared/generation'
 import type { GenerationReferencePreviewInput } from '../shared/generation-reference'
@@ -22,16 +23,26 @@ import type {
   ConfigurableProviderId,
   ProviderConnectionTestInput,
   ProviderExecutionPolicy,
-  ProviderPublicConfig,
+  ProviderPublicConfigInput,
   ProviderSecretInput
 } from '../shared/provider-settings'
-import type { AssetImportInput, ProjectCreateInput, ProjectFavoriteInput, ProjectLibraryChangeMode } from '../shared/project'
+import type { AssetImportInput, PixelImportInput, ProjectCreateInput, ProjectFavoriteInput, ProjectLibraryChangeMode } from '../shared/project'
 import type { SceneChangedEvent, SceneExecuteInput, SceneHistoryInput } from '../shared/scene-authority'
 import type { DesignDirectionSelectionInput } from '../shared/design-direction-selection'
 import type { ProjectWorkContext } from '../shared/project-work-context'
 
 const desktopApi: DesktopApi = Object.freeze({
   getRuntimeInfo: (): Promise<RuntimeInfo> => ipcRenderer.invoke(DESKTOP_CHANNELS.runtimeInfo),
+  listLocalFonts: (rescan?: boolean) => ipcRenderer.invoke(DESKTOP_CHANNELS.localFonts, rescan === true),
+  takeOpenFileRequests: () => ipcRenderer.invoke(DESKTOP_CHANNELS.openFileRequests),
+  readPsd: (bytes: Uint8Array) => ipcRenderer.invoke(DESKTOP_CHANNELS.psdRead, bytes),
+  bakePaint: (elementId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.paintBake, elementId),
+  onOpenFileRequested: (listener: () => void) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(DESKTOP_EVENTS.openFileRequested, handler)
+    return () => ipcRenderer.removeListener(DESKTOP_EVENTS.openFileRequested, handler)
+  },
+  matchImageTone: (input: { readonly elementId: string; readonly strength: number }) => ipcRenderer.invoke(DESKTOP_CHANNELS.imageToneMatch, input),
   getAppearanceSettings: (): Promise<AppearanceSettingsSnapshot> => ipcRenderer.invoke(DESKTOP_CHANNELS.appearanceSettings),
   setAppearanceSettings: (input: AppearanceSettingsUpdate): Promise<AppearanceSettingsSnapshot> =>
     ipcRenderer.invoke(DESKTOP_CHANNELS.appearanceSettingsSet, input),
@@ -56,13 +67,19 @@ const desktopApi: DesktopApi = Object.freeze({
   readGenerationAsset: (assetId: string, thumbnail = true, projectId?: string) =>
     ipcRenderer.invoke(DESKTOP_CHANNELS.generationAsset, { assetId, thumbnail, projectId }),
   generateFromCanvas: (input: CanvasGenerationInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.canvasGeneration, input),
+  startUnifiedRender: (input: { readonly requirement: string; readonly count: number }) => ipcRenderer.invoke(DESKTOP_CHANNELS.unifiedRender, input),
   editFromCanvas: (input: CanvasEditInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.canvasEdit, input),
   getProviderSettings: () => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSettings),
   validateProviderConnection: (input: ProviderConnectionTestInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConnectionTest, input),
-  setProviderConfig: (input: ProviderPublicConfig) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConfigSet, input),
+  getAgentEngine: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineGet),
+  setAgentEngine: (engine: AgentEngine) => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineSet, engine),
+  setProviderConfig: (input: ProviderPublicConfigInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConfigSet, input),
   setProviderExecutionPolicy: (input: ProviderExecutionPolicy) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerExecutionPolicySet, input),
   setProviderSecret: (input: ProviderSecretInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretSet, input),
   deleteProviderSecret: (providerId: ConfigurableProviderId) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretDelete, providerId),
+  addImageProvider: () => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageAdd),
+  removeImageProvider: (providerId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageRemove, providerId),
+  setDefaultImageProvider: (providerId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageDefaultSet, providerId),
   listRecentProjects: () => ipcRenderer.invoke(DESKTOP_CHANNELS.projectRecent),
   createProject: (input: ProjectCreateInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectCreate, input),
   openProject: () => ipcRenderer.invoke(DESKTOP_CHANNELS.projectOpen),
@@ -73,6 +90,7 @@ const desktopApi: DesktopApi = Object.freeze({
   changeProjectLibraryLocation: (mode: ProjectLibraryChangeMode) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectLibraryChange, mode),
   saveProjectAs: (input: ProjectCreateInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectSaveAs, input),
   importAsset: (input: AssetImportInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.assetImport, input),
+  importPixels: (input: PixelImportInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.assetImportPixels, input),
   getWorkspaceBootstrap: () => ipcRenderer.invoke(DESKTOP_CHANNELS.workspaceBootstrap),
   saveProjectWorkContext: (context: ProjectWorkContext) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectWorkContextSave, context),
   onWindowClosing: (listener: () => Promise<void>) => {

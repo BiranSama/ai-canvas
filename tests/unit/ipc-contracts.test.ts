@@ -61,11 +61,21 @@ describe('runtimeInfoSchema', () => {
 })
 
 describe('Product Provider policy IPC contract', () => {
-  it('requires an explicit confirmation for the single LLM connection request', () => {
+  it('requires an explicit confirmation for the LLM connection requests', () => {
     expect(providerConnectionTestSchema.parse({
       providerId: 'openai-compatible-llm',
       confirmed: true
-    })).toEqual({ providerId: 'openai-compatible-llm', confirmed: true })
+    })).toEqual({ providerId: 'openai-compatible-llm', confirmed: true, scope: 'tool_call' })
+    expect(providerConnectionTestSchema.parse({
+      providerId: 'openai-compatible-llm',
+      confirmed: true,
+      scope: 'agent_loop'
+    })).toMatchObject({ scope: 'agent_loop' })
+    expect(providerConnectionTestSchema.safeParse({
+      providerId: 'openai-compatible-llm',
+      confirmed: true,
+      scope: 'unbounded'
+    }).success).toBe(false)
     expect(providerConnectionTestSchema.safeParse({
       providerId: 'openai-compatible-llm',
       confirmed: false

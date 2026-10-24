@@ -1,6 +1,8 @@
 import { z } from 'zod'
-import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
-import { fitFreeImageSize, formatImageSize, nearestPresetSize, type FreeSizeRule, type ImageSize } from './image-size-rules'
+import type { EditRequest, GenerationRequest } from '../../shared/generation'
+import { familyPrompt } from './image-prompt-families'
+import { GPT_IMAGE_1_PRESETS, GPT_IMAGE_FREE_SIZE, GROK_ASPECT_RATIOS, GROK_MAX_REFERENCES, hasPresetSizesOnly, isGptImageModel, isGrokImageModel, OPENAI_IMAGES_CAPABILITIES } from '../../shared/image-model-profiles'
+import { fitFreeImageSize, formatImageSize, nearestPresetSize } from '../../shared/image-size-rules'
 
 const modelSchema = z.string().trim().min(1).max(200)
 const base64Schema = z.string().min(1).max(70 * 1024 * 1024)
@@ -10,17 +12,6 @@ const responseSchema = z.object({
     url: z.string().url().max(8_192).optional()
   }).passthrough()).min(1).max(4)
 }).passthrough()
-
-export const OPENAI_IMAGES_CAPABILITIES: ProviderCapabilities = {
-  textToImage: true,
-  imageReferences: true,
-  maskEditing: true,
-  multipleReferences: true,
-  transparentOutput: true,
-  maxImages: 4,
-  supportedRatios: ['custom'],
-  supportedFormats: ['png', 'jpeg', 'webp']
-}
 
 export interface OpenAiImagesJsonRequest {
   readonly url: string
@@ -62,38 +53,6 @@ function validatedBaseUrl(value: string): URL {
   return new URL(direct.toString().endsWith('/') ? direct.toString() : `${direct.toString()}/`)
 }
 
-function compiledPrompt(request: GenerationRequest | EditRequest): string {
-  const ratio = `画幅比例严格保持 ${request.aspectWidth}:${request.aspectHeight}。`
-  const negative = request.negativePrompt.trim()
-  return negative === ''
-    ? `${ratio}\n${request.prompt}`
-    : `${ratio}\n${request.prompt}\n\n避免出现：${negative}`
-}
-
-const GPT_IMAGE_1_PRESETS: readonly ImageSize[] = [
-  { width: 1024, height: 1024 },
-  { width: 1536, height: 1024 },
-  { width: 1024, height: 1536 }
-]
-
-// gpt-image-2 and later accept any size on a 16 px grid within these bounds.
-const GPT_IMAGE_FREE_SIZE: FreeSizeRule = {
-  multipleOf: 16,
-  minPixels: 655_360,
-  maxPixels: 8_294_400,
-  maxEdge: 3_840,
-  maxAspect: 3
-}
-
-/** OpenAI's own image models: they always return Base64 and reject `response_format`. */
-function isGptImageModel(model: string): boolean {
-  return /^(?:gpt-image-|chatgpt-image)/i.test(model)
-}
-
-function hasPresetSizesOnly(model: string): boolean {
-  return /^gpt-image-1(?:$|[.-])/i.test(model) || /^chatgpt-image/i.test(model)
-}
-
 function outputSize(request: GenerationRequest | EditRequest): string {
   const requested = { width: request.outputWidth, height: request.outputHeight }
   const aspect = { width: request.aspectWidth, height: request.aspectHeight }
@@ -101,6 +60,14 @@ function outputSize(request: GenerationRequest | EditRequest): string {
   if (isGptImageModel(request.model)) return formatImageSize(fitFreeImageSize(requested, aspect, GPT_IMAGE_FREE_SIZE))
   // Other OpenAI-compatible image services document their own sizes; send the request as asked.
   return formatImageSize(requested)
+}
+
+function grokFrameFields(request: GenerationRequest | EditRequest): Readonly<Record<string, string>> {
+  const ratio = nearestPresetSize({ width: request.aspectWidth, height: request.aspectHeight }, GROK_ASPECT_RATIOS)
+  return {
+    aspect_ratio: `${ratio.width}:${ratio.height}`,
+    resolution: Math.max(request.outputWidth, request.outputHeight) > 1_536 ? '2k' : '1k'
+  }
 }
 
 function responseFormatField(model: string): Readonly<Record<string, string>> {
@@ -133,13 +100,42 @@ export class OpenAiImagesProtocol {
     }
     return {
       url: new URL('images/generations', this.#baseUrl).toString(),
+      body: isGrokImageModel(request.model)
+        ? { model: request.model, prompt: familyPrompt(request), n: request.count, response_format: 'b64_json', ...grokFrameFields(request) }
+        : {
+            model: request.model,
+            prompt: familyPrompt(request),
+            n: request.count,
+            size: outputSize(request),
+            ...responseFormatField(request.model),
+            ...transparentFields(request)
+          }
+    }
+  }
+
+  /**
+   * Grok Imagine reads references from a JSON body: one `image` or up to three
+   * `images`, each a data URI. The canvas frame is set explicitly, since the
+   * output would otherwise follow the first reference.
+   */
+  buildGrokReferenceRequest(input: {
+    readonly request: GenerationRequest | EditRequest
+    readonly images: readonly OpenAiImagesFileInput[]
+  }): OpenAiImagesJsonRequest {
+    this.#validate(input.request)
+    if (!isGrokImageModel(input.request.model)) throw new Error('Only Grok Imagine models take JSON reference requests.')
+    if (input.images.length === 0) throw new Error('A Grok reference request needs at least one image.')
+    if (input.images.length > GROK_MAX_REFERENCES) throw new Error(`Grok Imagine accepts at most ${GROK_MAX_REFERENCES} reference images.`)
+    const sources = input.images.map((image) => ({ url: `data:${image.mimeType};base64,${image.bytes.toString('base64')}`, type: 'image_url' }))
+    return {
+      url: new URL('images/edits', this.#baseUrl).toString(),
       body: {
-        model: request.model,
-        prompt: compiledPrompt(request),
-        n: request.count,
-        size: outputSize(request),
-        ...responseFormatField(request.model),
-        ...transparentFields(request)
+        model: input.request.model,
+        prompt: familyPrompt(input.request),
+        n: input.request.count,
+        response_format: 'b64_json',
+        aspect_ratio: grokFrameFields(input.request).aspect_ratio,
+        ...(sources.length === 1 ? { image: sources[0] } : { images: sources })
       }
     }
   }
@@ -150,6 +146,7 @@ export class OpenAiImagesProtocol {
     readonly mask: OpenAiImagesFileInput | null
   }): OpenAiImagesMultipartRequest {
     this.#validate(input.request)
+    if (isGrokImageModel(input.request.model)) throw new Error('Grok Imagine takes reference images as JSON; use buildGrokReferenceRequest.')
     if (input.images.length === 0) throw new Error('OpenAI Images multipart editing requires at least one image.')
     if (input.images.length > 8) throw new Error('OpenAI Images accepts at most eight AI Canvas image inputs.')
     const files: OpenAiImagesMultipartFile[] = input.images.map((image) => ({ ...image, field: 'image[]' }))
@@ -158,7 +155,7 @@ export class OpenAiImagesProtocol {
       url: new URL('images/edits', this.#baseUrl).toString(),
       fields: {
         model: input.request.model,
-        prompt: compiledPrompt(input.request),
+        prompt: familyPrompt(input.request),
         n: String(input.request.count),
         size: outputSize(input.request),
         ...responseFormatField(input.request.model),

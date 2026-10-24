@@ -3,6 +3,8 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import sharp from 'sharp'
 import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
+import { GROK_MAX_REFERENCES, isGrokImageModel } from '../../shared/image-model-profiles'
+import { PRIMARY_IMAGE_PROVIDER_ID } from '../../shared/provider-settings'
 import type { ArkHttpClient } from '../security/ark-http-client'
 import type {
   OpenAiImagesFileInput,
@@ -39,7 +41,8 @@ function failure(error: unknown, stage: 'submitting' | 'generating' | 'localizin
 }
 
 export class OpenAiImagesProvider implements ImageProvider {
-  readonly id = 'image-provider'
+  /** Also the id of the key in the vault. */
+  readonly id: string
   readonly label: string
   readonly capabilities: ProviderCapabilities
   readonly #protocol: OpenAiImagesProtocol
@@ -49,6 +52,7 @@ export class OpenAiImagesProvider implements ImageProvider {
   readonly #costCeilingCny: number
 
   constructor(options: {
+    readonly id?: string
     readonly label: string
     readonly capabilities: ProviderCapabilities
     readonly protocol: OpenAiImagesProtocol
@@ -57,6 +61,7 @@ export class OpenAiImagesProvider implements ImageProvider {
     readonly timeoutMs: number
     readonly costCeilingCny: number
   }) {
+    this.id = options.id ?? PRIMARY_IMAGE_PROVIDER_ID
     this.label = options.label
     this.capabilities = options.capabilities
     this.#protocol = options.protocol
@@ -75,6 +80,12 @@ export class OpenAiImagesProvider implements ImageProvider {
       const resolved = await context.resolveAsset(reference.assetId)
       return this.#readInput(resolved.filePath, resolved.asset.format, `reference-${index + 1}`, resolved.asset.contentHash)
     }))
+    if (isGrokImageModel(request.model)) {
+      if (images.length > GROK_MAX_REFERENCES) {
+        throw new ProviderError('GROK_REFERENCE_LIMIT', `${this.label}一次最多参考 ${GROK_MAX_REFERENCES} 张图，请减少参考图。`, 'validating')
+      }
+      return this.#performJson(request, context, this.#protocol.buildGrokReferenceRequest({ request, images }))
+    }
     return this.#performMultipart(request, images, null, context)
   }
 
@@ -127,11 +138,14 @@ export class OpenAiImagesProvider implements ImageProvider {
     }
   }
 
-  async #performJson(request: GenerationRequest, context: ProviderGenerateContext): Promise<readonly ProviderOutput[]> {
-    const built = this.#protocol.buildGenerationRequest(request)
+  async #performJson(
+    request: GenerationRequest,
+    context: ProviderGenerateContext,
+    built = this.#protocol.buildGenerationRequest(request)
+  ): Promise<readonly ProviderOutput[]> {
     return this.#perform(request, context, () => this.#http.postJson({
       ...built,
-      secretId: 'image-provider',
+      secretId: this.id,
       providerId: this.id,
       providerLabel: this.label,
       authorizationScopeId: this.#scopeId(request),
@@ -151,7 +165,7 @@ export class OpenAiImagesProvider implements ImageProvider {
     const built = this.#protocol.buildEditRequest({ request, images, mask })
     return this.#perform(request, context, () => this.#http.postMultipart({
       ...built,
-      secretId: 'image-provider',
+      secretId: this.id,
       providerId: this.id,
       providerLabel: this.label,
       authorizationScopeId: this.#scopeId(request),

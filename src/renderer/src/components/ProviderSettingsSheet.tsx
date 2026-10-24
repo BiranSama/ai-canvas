@@ -9,9 +9,14 @@ import type {
   OpticalQuality
 } from '../../../shared/appearance-settings'
 import type { RuntimeInfo } from '../../../shared/desktop-api'
+import type { AgentEngine, AgentEngineSetting } from '../../../shared/agent-engine'
 import type { DiagnosticExportResult } from '../../../shared/diagnostics'
 import type { GenerationProfileSnapshot } from '../../../shared/generation'
+import type { LlmPricing } from '../../../shared/model-usage'
+import { describeImageModel } from '../../../shared/image-model-profiles'
 import {
+  MAX_IMAGE_PROVIDERS,
+  PRIMARY_IMAGE_PROVIDER_ID,
   providerPublicConfigSchema,
   resolveImageEndpoint,
   resolveLlmEndpoint,
@@ -41,7 +46,8 @@ type DiagnosticDisplayResult = DiagnosticExportResult | {
 const LLM_PROTOCOL_LABELS: Record<LlmProtocol, string> = {
   'ark-responses': '火山方舟 Responses',
   'openai-responses': 'Responses 兼容',
-  'openai-chat-completions': 'Chat Completions 兼容'
+  'openai-chat-completions': 'Chat Completions 兼容',
+  'anthropic-messages': 'Anthropic Messages 兼容'
 }
 
 const IMAGE_PROTOCOL_LABELS: Record<ImageProtocol, string> = {
@@ -66,6 +72,18 @@ const LLM_IMAGE_DETAIL_LABELS: Record<LlmImageDetail, string> = {
   auto: '自动',
   low: '低成本 · 512px',
   original: '保留原图细节'
+}
+
+const LLM_PRICE_FIELDS = [
+  ['inputPerMillionCny', '输入'],
+  ['cachedInputPerMillionCny', '缓存命中输入'],
+  ['outputPerMillionCny', '输出（含思考）']
+] as const satisfies readonly (readonly [keyof LlmPricing, string])[]
+
+/** A price typed into an empty set starts it; fields not yet typed count as free, except cached input, which follows input. */
+function withLlmPrice(pricing: LlmPricing | null, field: keyof LlmPricing, value: number | null): LlmPricing | null {
+  if (pricing === null && value === null) return null
+  return { inputPerMillionCny: 0, cachedInputPerMillionCny: null, outputPerMillionCny: 0, ...pricing, [field]: value ?? (field === 'cachedInputPerMillionCny' ? null : 0) }
 }
 
 const IMAGE_PROTOCOL_CAPABILITIES: Record<ImageProtocol, ReadonlySet<keyof Extract<ProviderPublicConfig, { kind: 'image' }>['capabilities']>> = {
@@ -114,10 +132,8 @@ export function ProviderSettingsSheet({
   const [policyDraft, setPolicyDraft] = useState<ProviderExecutionPolicy | null>(null)
   const [profileSnapshot, setProfileSnapshot] = useState<GenerationProfileSnapshot | null>(null)
   const [drafts, setDrafts] = useState<ProviderDrafts>({})
-  const [secrets, setSecrets] = useState<Record<ConfigurableProviderId, string>>({
-    'openai-compatible-llm': '',
-    'image-provider': ''
-  })
+  const [secrets, setSecrets] = useState<Partial<Record<ConfigurableProviderId, string>>>({})
+  const [removingImageService, setRemovingImageService] = useState<string | null>(null)
   const [busy, setBusy] = useState<ConfigurableProviderId | null>(null)
   const [expandedProvider, setExpandedProvider] = useState<ConfigurableProviderId | null>(initialProviderId)
   const [section, setSection] = useState<'providers' | 'agent' | 'profiles' | 'projects' | 'appearance' | 'privacy'>('providers')
@@ -126,7 +142,9 @@ export function ProviderSettingsSheet({
   const [libraryBusy, setLibraryBusy] = useState(false)
   const [migrationSummary, setMigrationSummary] = useState<string | null>(null)
   const [connectionConfirming, setConnectionConfirming] = useState(false)
+  const [connectionScope, setConnectionScope] = useState<'tool_call' | 'agent_loop'>('tool_call')
   const [connectionResult, setConnectionResult] = useState<ProviderConnectionTestResult | null>(null)
+  const [agentEngine, setAgentEngine] = useState<AgentEngineSetting | null>(null)
   const [appearance, setAppearance] = useState<AppearanceSettingsSnapshot>(() => defaultAppearanceSnapshot())
   const [appearanceBusy, setAppearanceBusy] = useState(false)
   const [diagnosticBusy, setDiagnosticBusy] = useState(false)
@@ -162,7 +180,18 @@ export function ProviderSettingsSheet({
       }).catch(() => setAppearance(defaultAppearanceSnapshot()))
     }
     void window.desktop.listGenerationProfiles().then(setProfileSnapshot).catch(() => undefined)
+    if (desktop.getAgentEngine !== undefined) void desktop.getAgentEngine().then(setAgentEngine).catch(() => undefined)
   }, [onClose])
+
+  const chooseAgentEngine = async (engine: AgentEngine): Promise<void> => {
+    try {
+      const value = await window.desktop.setAgentEngine(engine)
+      setAgentEngine(value)
+      setStatus(value.selected === value.active ? 'Agent 引擎设置未变化。' : 'Agent 引擎已保存，重新打开项目后生效。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能保存 Agent 引擎设置。')
+    }
+  }
 
   const updateAppearance = async (changes: Partial<AppearanceSettingsUpdate>): Promise<void> => {
     if (appearanceBusy) return
@@ -218,11 +247,12 @@ export function ProviderSettingsSheet({
     try {
       const result = await window.desktop.validateProviderConnection({
         providerId: 'openai-compatible-llm',
-        confirmed: true
+        confirmed: true,
+        scope: connectionScope
       })
       setConnectionResult(result)
       setStatus(result.ok
-        ? '连接与结构化工具调用均已验证。'
+        ? result.agentLoop === null ? '连接与结构化工具调用均已验证。' : '多步工具调用已验证：思考内容和工具结果都能交回。'
         : `${result.failure.title}：${result.failure.nextAction}`)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '连接验证未完成；没有自动重试。')
@@ -259,7 +289,7 @@ export function ProviderSettingsSheet({
   }
 
   const saveSecret = async (providerId: ConfigurableProviderId): Promise<void> => {
-    const apiKey = secrets[providerId].trim()
+    const apiKey = (secrets[providerId] ?? '').trim()
     if (apiKey.length < 8 || busy !== null) return
     setBusy(providerId)
     try {
@@ -268,6 +298,51 @@ export function ProviderSettingsSheet({
       setStatus('已由操作系统加密保存；界面不会再次显示密钥。')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '未能保存本地凭据。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const addImageService = async (): Promise<void> => {
+    if (busy !== null) return
+    setBusy('image-service')
+    try {
+      const value = await window.desktop.addImageProvider()
+      publishSnapshot(value)
+      setExpandedProvider(value.providers.at(-1)?.id ?? null)
+      setProfileSnapshot(await window.desktop.listGenerationProfiles())
+      setStatus('已添加生图服务：选好协议、填写地址和模型并保存 Key 后就能用。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能添加生图服务。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const removeImageService = async (providerId: string): Promise<void> => {
+    if (busy !== null) return
+    setBusy(providerId)
+    try {
+      publishSnapshot(await window.desktop.removeImageProvider(providerId))
+      setRemovingImageService(null)
+      setExpandedProvider(null)
+      setProfileSnapshot(await window.desktop.listGenerationProfiles())
+      setStatus('已删除这个生图服务和它的 Key；用它生成过的图片不受影响。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能删除生图服务。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const makeDefaultImageService = async (providerId: string): Promise<void> => {
+    if (busy !== null) return
+    setBusy(providerId)
+    try {
+      publishSnapshot(await window.desktop.setDefaultImageProvider(providerId))
+      setStatus('默认生图服务已更新；Agent 和快速生成会用它。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '未能更改默认生图服务。')
     } finally {
       setBusy(null)
     }
@@ -490,16 +565,19 @@ export function ProviderSettingsSheet({
               <p>{budgetStatus({ ...snapshot, executionPolicy: policyDraft })}</p>
             </aside>
           )}
-          {snapshot?.providers.map((provider) => {
+          {snapshot?.providers.map((provider, index) => {
             const draft = drafts[provider.id]
             if (draft === undefined) return null
-            const prefix = provider.kind === 'llm' ? 'LLM Provider' : 'Image Provider'
+            // Index 1 is the primary image service; added services are numbered after it.
+            const prefix = provider.kind === 'llm' ? 'LLM Provider' : provider.id === PRIMARY_IMAGE_PROVIDER_ID ? 'Image Provider' : `Image Provider ${index}`
+            const imageServices = snapshot.providers.length - 1
+            const isDefaultImage = provider.kind === 'image' && snapshot.defaultImageProviderId === provider.id
             return (
               <article key={provider.id} className="provider-setting-row" data-provider-slot={provider.kind}>
                 <div className="provider-setting-copy">
                   <span className="provider-slot-mark" aria-hidden="true">{provider.kind === 'llm' ? <BrainCircuit size={17} /> : <ImageIcon size={17} />}</span>
                   <div>
-                    <span className="provider-slot-label">{provider.kind === 'llm' ? '语言模型' : '图片模型'}</span>
+                    <span className="provider-slot-label">{provider.kind === 'llm' ? '语言模型' : '图片模型'}{isDefaultImage && imageServices > 1 && <em className="provider-default-mark">默认</em>}</span>
                     <strong>{draft.label}</strong>
                     <small>{draft.kind === 'llm' ? `${LLM_PROTOCOL_LABELS[draft.protocol]} · ${LLM_REASONING_LABELS[draft.reasoningEffort]}思考` : `${IMAGE_PROTOCOL_LABELS[draft.protocol]} · 能力由协议与下方声明共同决定`}</small>
                   </div>
@@ -508,6 +586,7 @@ export function ProviderSettingsSheet({
                     <span className={`provider-state${provider.configured ? ' is-configured' : ''}`}>
                       {provider.configured ? <Check size={11} /> : <KeyRound size={11} />}
                       {provider.configured ? '已配置' : '无凭据'}</span>
+                    {provider.kind === 'image' && !isDefaultImage && <button type="button" className="provider-edit-toggle" aria-label={`把 ${draft.label} 设为默认生图服务`} disabled={busy !== null} onClick={() => void makeDefaultImageService(provider.id)}>设为默认</button>}
                     <button type="button" className="provider-edit-toggle" aria-expanded={expandedProvider === provider.id} onClick={() => setExpandedProvider((current) => current === provider.id ? null : provider.id)}><Pencil size={11} />{expandedProvider === provider.id ? '收起' : '编辑'}</button>
                   </div>
                 </div>
@@ -525,6 +604,7 @@ export function ProviderSettingsSheet({
                     <option value="ark-responses">火山方舟 Responses</option>
                     <option value="openai-responses">Responses 兼容</option>
                     <option value="openai-chat-completions">Chat Completions 兼容</option>
+                    <option value="anthropic-messages">Anthropic Messages 兼容</option>
                   </select></label>}
                   {draft.kind === 'image' && <label><span>调用协议</span><select aria-label="Image Provider 调用协议" value={draft.protocol} onChange={(event) => {
                     const protocol = event.currentTarget.value as ImageProtocol
@@ -548,6 +628,10 @@ export function ProviderSettingsSheet({
                   }} /></label>
                   {draft.kind === 'llm' && <div className="provider-resolved-endpoint"><span>实际请求地址</span><code>{draft.baseUrl === '' ? '填写地址后显示' : resolveLlmEndpoint(draft)}</code></div>}
                   {draft.kind === 'image' && <div className="provider-resolved-endpoint"><span>实际生成地址</span><code>{draft.baseUrl === '' || draft.protocol === 'unconfigured' ? '选择协议并填写地址后显示' : resolveImageEndpoint(draft, 'generate')}</code>{draft.protocol === 'openai-images' && <small>参考与编辑：{resolveImageEndpoint(draft, 'edit')}</small>}{draft.protocol === 'task-images' && <small>状态查询与下载地址会根据该服务的任务标识构造；每任务请求上限至少为 3 才能使用此服务。</small>}</div>}
+                  {draft.kind === 'image' && (() => {
+                    const hint = describeImageModel(draft.protocol, draft.defaultModel)
+                    return hint === null ? null : <p className="provider-model-hint" data-testid="image-model-hint"><strong>这个模型</strong>{hint}</p>
+                  })()}
                   <label><span>默认模型</span><input aria-label={`${prefix} 默认模型`} placeholder="未指定" value={draft.defaultModel} onChange={(event) => {
                     const value = event.currentTarget.value
                     updateDraft(provider.id, (current) => ({ ...current, defaultModel: value }))
@@ -555,7 +639,10 @@ export function ProviderSettingsSheet({
                   {draft.kind === 'llm' && <label><span>思考强度</span><select aria-label="LLM Provider 思考强度" value={draft.reasoningEffort} onChange={(event) => {
                     const reasoningEffort = event.currentTarget.value as LlmReasoningEffort
                     updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, reasoningEffort } : current)
-                  }}>{Object.entries(LLM_REASONING_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                  }}>{Object.entries(LLM_REASONING_LABELS)
+                    // The agent always thinks; an older saved "off" still shows so it can be changed.
+                    .filter(([value]) => value !== 'none' || draft.reasoningEffort === 'none')
+                    .map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
                   {draft.kind === 'llm' && <label><span>图像理解细节</span><select aria-label="LLM Provider 图像细节" disabled={!draft.capabilities.vision} value={draft.imageDetail} onChange={(event) => {
                     const imageDetail = event.currentTarget.value as LlmImageDetail
                     updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, imageDetail } : current)
@@ -568,6 +655,10 @@ export function ProviderSettingsSheet({
                     const value = Number(event.currentTarget.value) * 1000
                     updateDraft(provider.id, (current) => ({ ...current, timeoutMs: value }))
                   }} /></label>
+                  {draft.kind === 'image' && <label><span>每张价格（元，可选）</span><input aria-label={`${prefix} 每张价格`} type="number" min={0} max={10000} step={0.01} placeholder="未设置则费用显示为未知" value={draft.pricePerImageCny ?? ''} onChange={(event) => {
+                    const raw = event.currentTarget.value
+                    updateDraft(provider.id, (current) => current.kind === 'image' ? { ...current, pricePerImageCny: raw === '' ? null : Number(raw) } : current)
+                  }} /></label>}
                 </div>
 
                 <p className="provider-time-policy" data-testid={`${provider.id}-effective-timeout`}>已保存：{provider.timeoutMs / 1000} 秒。{draft.kind === 'image'
@@ -625,6 +716,20 @@ export function ProviderSettingsSheet({
                   </p>
                 </details>}
 
+                {draft.kind === 'llm' && <details className="provider-transport-advanced" data-testid="llm-pricing">
+                  <summary><span>价格</span><small>{draft.pricing === null ? '未设置 · 回执只显示用量' : '用于估算每轮费用'}</small></summary>
+                  <div className="provider-public-grid">
+                    {LLM_PRICE_FIELDS.map(([field, label]) => <label key={field}><span>{label}（元 / 百万 tokens）</span><input aria-label={`LLM Provider ${label}价格`} type="number" min={0} max={10000} step={0.01}
+                      placeholder={field === 'cachedInputPerMillionCny' ? '同输入' : '未设置'} value={draft.pricing?.[field] ?? ''} onChange={(event) => {
+                        const raw = event.currentTarget.value
+                        updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: withLlmPrice(current.pricing, field, raw === '' ? null : Number(raw)) } : current)
+                      }} /></label>)}
+                  </div>
+                  <p className="provider-transport-note">按供应商价目填写。回执里的金额是按 token 用量算的估算，以供应商账单为准。{draft.pricing !== null && <button type="button" onClick={() => {
+                    updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: null } : current)
+                  }}>清除价格</button>}</p>
+                </details>}
+
                 <div className="provider-capabilities" aria-label={`${prefix} 能力`}>
                   {draft.kind === 'llm' ? <>
                     <label><input type="checkbox" checked={draft.capabilities.streaming} onChange={(event) => {
@@ -666,7 +771,7 @@ export function ProviderSettingsSheet({
                       type="password"
                       autoComplete="new-password"
                       aria-label={`${provider.label} API Key`}
-                      value={secrets[provider.id]}
+                      value={secrets[provider.id] ?? ''}
                       placeholder={provider.configured ? '输入新 Key 以替换' : 'Key 仅在本机输入'}
                       onChange={(event) => {
                         const nextValue = event.currentTarget.value
@@ -674,7 +779,7 @@ export function ProviderSettingsSheet({
                       }}
                     />
                   </label>
-                  <button type="button" className="settings-save" aria-label={`安全保存 ${provider.label} 凭据`} disabled={secrets[provider.id].trim().length < 8 || busy !== null} onClick={() => void saveSecret(provider.id)}>
+                  <button type="button" className="settings-save" aria-label={`安全保存 ${provider.label} 凭据`} disabled={(secrets[provider.id] ?? '').trim().length < 8 || busy !== null} onClick={() => void saveSecret(provider.id)}>
                     {busy === provider.id ? '保存中' : '安全保存'}
                   </button>
                   {provider.configured && <button type="button" className="settings-delete" aria-label={`删除 ${provider.label} 凭据`} disabled={busy !== null} onClick={() => void removeSecret(provider.id)}><Trash2 size={14} /></button>}
@@ -687,29 +792,59 @@ export function ProviderSettingsSheet({
                   return <div className="provider-connection-check">
                     <div className="provider-connection-heading">
                       <span><strong>连接与工具调用</strong><small>{draftSaved ? '使用上方已保存配置' : '先保存更改，再验证连接'}</small></span>
-                      <button type="button" disabled={!canValidate || busy !== null} onClick={() => setConnectionConfirming(true)}>验证工具调用</button>
+                      <span className="provider-connection-actions">
+                        <button type="button" disabled={!canValidate || busy !== null} onClick={() => { setConnectionScope('tool_call'); setConnectionConfirming(true) }}>验证工具调用</button>
+                        <button type="button" disabled={!canValidate || busy !== null} onClick={() => { setConnectionScope('agent_loop'); setConnectionConfirming(true) }}>验证多步调用</button>
+                      </span>
                     </div>
                     {connectionConfirming && <div className="provider-connection-confirm" role="alert">
                       <AlertCircle size={16} />
-                      <span><strong>将发出 1 个真实文字请求</strong><small>不生成图片；费用预留上限 ¥0.05；失败后不会自动重试。</small></span>
+                      {connectionScope === 'tool_call'
+                        ? <span><strong>将发出 1 个真实文字请求</strong><small>不生成图片；费用预留上限 ¥0.05；失败后不会自动重试。</small></span>
+                        : <span><strong>将发出 2 个真实文字请求</strong><small>开着思考调用工具，再交回思考内容和工具结果{draft.capabilities.vision ? '（附一张 16×16 的小图）' : ''}；不生成图片；每个请求费用预留上限 ¥0.05；失败后不会自动重试。</small></span>}
                       <button type="button" onClick={() => setConnectionConfirming(false)}>取消</button>
                       <button type="button" className="settings-save" onClick={() => void validateConnection()}>确认验证</button>
                     </div>}
                     {connectionResult !== null && <div className={`provider-connection-result${connectionResult.ok ? ' is-success' : ' is-failure'}`} role="status">
                       {connectionResult.ok ? <Check size={16} /> : <AlertCircle size={16} />}
                       <span>
-                        <strong>{connectionResult.ok ? '连接正常，工具调用可用' : connectionResult.failure.title}</strong>
+                        <strong>{connectionResult.ok ? connectionResult.agentLoop === null ? '连接正常，工具调用可用' : '多步工具调用可用' : connectionResult.failure.title}</strong>
                         <small>{connectionResult.ok
-                          ? `${LLM_PROTOCOL_LABELS[connectionResult.protocol]} · ${connectionResult.model} · 1 个请求`
+                          ? connectionResult.agentLoop === null
+                            ? `${LLM_PROTOCOL_LABELS[connectionResult.protocol]} · ${connectionResult.model} · 1 个请求`
+                            : `${LLM_PROTOCOL_LABELS[connectionResult.protocol]} · ${connectionResult.model} · 按「${connectionResult.agentLoop.dialect}」方言 · ${connectionResult.requestsUsed} 个请求 · 思考${connectionResult.agentLoop.thinkingObserved ? '已开启' : '未观察到'} · ${connectionResult.agentLoop.visionVerified === null ? '未声明看图' : connectionResult.agentLoop.visionVerified ? '看图正常' : '看图未通过（模型没认出图片颜色）'}`
                           : `${connectionResult.failure.detail} ${connectionResult.failure.nextAction}（本次已提交 ${connectionResult.requestsUsed} 个请求）`}</small>
                       </span>
                     </div>}
+                    {agentEngine !== null && <div className="provider-engine-setting">
+                      <span><strong>Agent 引擎（开发者）</strong><small>{agentEngine.forcedByEnvironment
+                        ? '已由环境变量 AI_CANVAS_AGENT_ENGINE 指定。'
+                        : agentEngine.selected === agentEngine.active
+                          ? `当前项目使用${agentEngine.active === 'multi-step' ? '多步工具' : '一次规划'}。多步工具会多次调用文字模型，先用「验证多步调用」确认服务支持。`
+                          : '已保存，重新打开项目后生效。'}</small></span>
+                      <select aria-label="Agent 引擎" value={agentEngine.selected} disabled={agentEngine.forcedByEnvironment || busy !== null} onChange={(event) => void chooseAgentEngine(event.currentTarget.value as AgentEngine)}>
+                        <option value="plan-once">一次规划（默认）</option>
+                        <option value="multi-step">多步工具（实验）</option>
+                      </select>
+                    </div>}
                   </div>
                 })()}
+                {provider.kind === 'image' && provider.id !== PRIMARY_IMAGE_PROVIDER_ID && <div className="provider-service-remove">
+                  <small>删除后这个服务的配置和 Key 都会移除；用它生成过的图片不受影响。</small>
+                  {removingImageService === provider.id
+                    ? <span>
+                        <button type="button" className="settings-delete" disabled={busy !== null} onClick={() => void removeImageService(provider.id)}>确认删除</button>
+                        <button type="button" disabled={busy !== null} onClick={() => setRemovingImageService(null)}>取消</button>
+                      </span>
+                    : <button type="button" className="settings-delete" aria-label={`删除生图服务 ${draft.label}`} disabled={busy !== null} onClick={() => setRemovingImageService(provider.id)}><Trash2 size={13} />删除这个服务</button>}
+                </div>}
                 </div>}
               </article>
             )
           }) ?? <div className="settings-loading">正在读取本地安全状态…</div>}
+          {snapshot !== null && snapshot.providers.length - 1 < MAX_IMAGE_PROVIDERS && <button type="button" className="provider-add-service" disabled={busy !== null} onClick={() => void addImageService()}>
+            <ImageIcon size={14} />添加生图服务<small>可同时保存多个，例如 OpenAI、Grok、火山方舟，再选一个作默认</small>
+          </button>}
           </>}
           </div>
         </div>

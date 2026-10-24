@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PRIMARY_IMAGE_PROVIDER_ID } from '../../shared/provider-settings'
 import type {
   KrillGetRequest,
   KrillImageDownload,
@@ -14,7 +15,7 @@ const MAX_READ_RETRIES = 2
 const TRANSIENT_READ_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504])
 
 interface SecretSource {
-  get(id: 'image-provider'): Promise<string | null>
+  get(id: string): Promise<string | null>
   startRequest?(id: string, send: (secret: string) => Promise<Response>): Promise<Response>
 }
 
@@ -25,7 +26,7 @@ export interface KrillRequestAuthorization {
   reserve(input: {
     readonly operation: KrillHttpOperation
     readonly scopeId: string
-    readonly providerId: 'image-provider'
+    readonly providerId: string
     readonly requests: 1
     readonly expectedImages: 0 | 1
     readonly costCeilingCny: number
@@ -153,6 +154,7 @@ async function waitForReadRetry(attempt: number, signal: AbortSignal): Promise<v
 
 export class KrillHttpTransport implements KrillTransport {
   readonly #secrets: SecretSource
+  readonly #providerId: string
   readonly #authorization: KrillRequestAuthorization
   readonly #fetcher: typeof fetch
   readonly #timeoutMs: number
@@ -168,7 +170,10 @@ export class KrillHttpTransport implements KrillTransport {
     readonly baseUrl?: string
     readonly submissionCostCeilingCny?: number
     readonly providerLabel?: string
+    /** The image service whose key and budget this transport uses. */
+    readonly providerId?: string
   }) {
+    this.#providerId = options.providerId ?? PRIMARY_IMAGE_PROVIDER_ID
     this.#secrets = options.secrets
     this.#authorization = options.authorization
     this.#fetcher = options.fetcher ?? fetch
@@ -251,12 +256,12 @@ export class KrillHttpTransport implements KrillTransport {
     costCeilingCny: number
   ): Promise<Response> {
     if (callerSignal.aborted) throw new KrillHttpError('KRILL_ABORTED', `${this.#providerLabel}请求在发送前已取消。`)
-    const apiKey = await this.#secrets.get('image-provider')
+    const apiKey = await this.#secrets.get(this.#providerId)
     if (apiKey === null) throw new KrillHttpError('KRILL_KEY_MISSING', `请先在供应商设置中安全保存${this.#providerLabel}的 API Key。`)
     await this.#authorization.reserve({
       operation,
       scopeId: scopeId(authorizationScopeId, url),
-      providerId: 'image-provider',
+      providerId: this.#providerId,
       requests: 1,
       expectedImages: operation === 'submit' ? 1 : 0,
       costCeilingCny
@@ -270,7 +275,7 @@ export class KrillHttpTransport implements KrillTransport {
         redirect: 'error',
         signal
       })
-      return await (this.#secrets.startRequest?.('image-provider', send) ?? send(apiKey))
+      return await (this.#secrets.startRequest?.(this.#providerId, send) ?? send(apiKey))
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'REQUEST_IDENTITY_UNAVAILABLE') throw error
       if (callerSignal.aborted) throw new KrillHttpError('KRILL_ABORTED', `${this.#providerLabel}请求已取消。`)

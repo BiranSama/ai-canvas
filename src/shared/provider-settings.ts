@@ -1,11 +1,17 @@
 import { z } from 'zod'
+import { llmPricingSchema } from './model-usage'
 
-export const configurableProviderIdSchema = z.enum(['openai-compatible-llm', 'image-provider'])
+/** The first image service keeps this id, so keys and jobs saved before several services existed still match. */
+export const PRIMARY_IMAGE_PROVIDER_ID = 'image-provider'
+export const MAX_IMAGE_PROVIDERS = 8
+export const imageProviderIdSchema = z.string().regex(/^image-provider(?:-[a-z0-9]{1,24})?$/)
+export const configurableProviderIdSchema = z.union([z.literal('openai-compatible-llm'), imageProviderIdSchema])
 
 export const llmProtocolSchema = z.enum([
   'ark-responses',
   'openai-responses',
-  'openai-chat-completions'
+  'openai-chat-completions',
+  'anthropic-messages'
 ])
 
 export const llmReasoningEffortSchema = z.enum([
@@ -82,7 +88,9 @@ const llmProviderConfigV4Schema = legacyLlmProviderConfigSchema.extend({
 })
 
 export const llmProviderConfigSchema = llmProviderConfigV4Schema.extend({
-  transport: llmTransportSettingsSchema
+  transport: llmTransportSettingsSchema,
+  /** Optional prices for the per-turn cost estimate; null shows tokens only. */
+  pricing: llmPricingSchema.nullable().default(null)
 }).superRefine((value, context) => {
   const timeoutFields = [
     ['transport.connectTimeoutMs', value.transport.connectTimeoutMs],
@@ -112,7 +120,10 @@ const legacyImageProviderConfigSchema = providerPublicFieldsSchema.extend({
 })
 
 export const imageProviderConfigSchema = legacyImageProviderConfigSchema.extend({
-  protocol: imageProtocolSchema
+  id: imageProviderIdSchema,
+  protocol: imageProtocolSchema,
+  /** What the owner pays per image, for estimates; null leaves the cost unknown. */
+  pricePerImageCny: z.number().min(0).max(10_000).nullable().default(null)
 })
 
 export const providerPublicConfigSchema = z.union([
@@ -180,6 +191,26 @@ const providerConfigFileV5Schema = z.object({
   executionPolicy: storedProviderExecutionPolicySchema
 })
 
+/** The text model, then one to eight image services; the first image service is the primary one. */
+const providerListSchema = z.tuple([llmProviderConfigSchema, imageProviderConfigSchema], imageProviderConfigSchema).superRefine((providers, context) => {
+  const images = providers.slice(1)
+  if (images.length > MAX_IMAGE_PROVIDERS) context.addIssue({ code: 'custom', message: `最多保存 ${MAX_IMAGE_PROVIDERS} 个生图服务。` })
+  if (providers[1].id !== PRIMARY_IMAGE_PROVIDER_ID) context.addIssue({ code: 'custom', path: [1, 'id'], message: 'The first image service keeps the primary id.' })
+  if (new Set(images.map((image) => image.id)).size !== images.length) context.addIssue({ code: 'custom', message: 'Image service ids must be unique.' })
+})
+
+const providerConfigFileV6Schema = z.object({
+  version: z.literal(6),
+  providers: providerListSchema,
+  /** The image service the agent and quick generation use unless another is chosen. */
+  defaultImageProviderId: imageProviderIdSchema,
+  executionPolicy: storedProviderExecutionPolicySchema
+}).superRefine((file, context) => {
+  if (!file.providers.slice(1).some((provider) => provider.id === file.defaultImageProviderId)) {
+    context.addIssue({ code: 'custom', path: ['defaultImageProviderId'], message: 'The default image service must be one of the saved services.' })
+  }
+})
+
 export function inferLlmProtocol(baseUrl: string): z.infer<typeof llmProtocolSchema> {
   if (baseUrl === '') return 'openai-responses'
   try {
@@ -209,7 +240,7 @@ function migrateLegacyProviders(
   const [llm, image] = providers
   return [
     withLegacyTransport({ ...llm, protocol: inferLlmProtocol(llm.baseUrl) }),
-    { ...image, protocol: inferImageProtocol(image.baseUrl) }
+    imageProviderConfigSchema.parse({ ...image, protocol: inferImageProtocol(image.baseUrl) })
   ]
 }
 
@@ -217,7 +248,7 @@ function migrateV3Providers(
   providers: z.infer<typeof providerConfigFileV3Schema>['providers']
 ): z.infer<typeof providerConfigFileV5Schema>['providers'] {
   const [llm, image] = providers
-  return [withLegacyTransport(llm), { ...image, protocol: inferImageProtocol(image.baseUrl) }]
+  return [withLegacyTransport(llm), imageProviderConfigSchema.parse({ ...image, protocol: inferImageProtocol(image.baseUrl) })]
 }
 
 function withLegacyTransport(
@@ -240,28 +271,20 @@ function migrateV4Providers(
   return [withLegacyTransport(providers[0]), providers[1]]
 }
 
+function asV6(
+  providers: z.infer<typeof providerConfigFileV5Schema>['providers'],
+  executionPolicy: z.infer<typeof storedProviderExecutionPolicySchema>
+): z.infer<typeof providerConfigFileV6Schema> {
+  return { version: 6, providers, defaultImageProviderId: PRIMARY_IMAGE_PROVIDER_ID, executionPolicy }
+}
+
 export const providerConfigFileSchema = z.union([
-  providerConfigFileV5Schema,
-  providerConfigFileV4Schema.transform((value) => ({
-    version: 5 as const,
-    providers: migrateV4Providers(value.providers),
-    executionPolicy: value.executionPolicy
-  })),
-  providerConfigFileV3Schema.transform((value) => ({
-    version: 5 as const,
-    providers: migrateV3Providers(value.providers),
-    executionPolicy: value.executionPolicy
-  })),
-  providerConfigFileV2Schema.transform((value) => ({
-    version: 5 as const,
-    providers: migrateLegacyProviders(value.providers),
-    executionPolicy: value.executionPolicy
-  })),
-  providerConfigFileV1Schema.transform((value) => ({
-    version: 5 as const,
-    providers: migrateLegacyProviders(value.providers),
-    executionPolicy: DEFAULT_PROVIDER_EXECUTION_POLICY
-  }))
+  providerConfigFileV6Schema,
+  providerConfigFileV5Schema.transform((value) => asV6(value.providers, value.executionPolicy)),
+  providerConfigFileV4Schema.transform((value) => asV6(migrateV4Providers(value.providers), value.executionPolicy)),
+  providerConfigFileV3Schema.transform((value) => asV6(migrateV3Providers(value.providers), value.executionPolicy)),
+  providerConfigFileV2Schema.transform((value) => asV6(migrateLegacyProviders(value.providers), value.executionPolicy)),
+  providerConfigFileV1Schema.transform((value) => asV6(migrateLegacyProviders(value.providers), DEFAULT_PROVIDER_EXECUTION_POLICY))
 ])
 
 export const providerSettingSchema = z.union([
@@ -270,14 +293,17 @@ export const providerSettingSchema = z.union([
 ])
 
 export const providerSettingsSnapshotSchema = z.object({
-  providers: z.array(providerSettingSchema).length(2),
+  providers: z.array(providerSettingSchema).min(2).max(1 + MAX_IMAGE_PROVIDERS),
+  defaultImageProviderId: imageProviderIdSchema,
   realCallsAuthorized: z.boolean(),
   executionPolicy: providerExecutionPolicySchema
 })
 
 export const providerConnectionTestInputSchema = z.object({
   providerId: z.literal('openai-compatible-llm'),
-  confirmed: z.literal(true)
+  confirmed: z.literal(true),
+  /** `agent_loop` runs two steps with thinking and the tool result sent back, as the multi-step agent does. */
+  scope: z.enum(['tool_call', 'agent_loop']).default('tool_call')
 }).strict()
 
 const providerConnectionFailureSchema = z.object({
@@ -296,9 +322,15 @@ const providerConnectionTestBaseSchema = z.object({
   model: z.string().trim().max(160),
   endpoint: z.string().max(2_048),
   checkedAt: z.string().datetime(),
-  requestsUsed: z.number().int().min(0).max(1),
+  requestsUsed: z.number().int().min(0).max(2),
   generatedImages: z.literal(0),
-  costCeilingCny: z.number().min(0).max(10)
+  costCeilingCny: z.number().min(0).max(10),
+  agentLoop: z.object({
+    dialect: z.string().trim().min(1).max(64),
+    thinkingObserved: z.boolean(),
+    /** Null when the model is not declared to see images. */
+    visionVerified: z.boolean().nullable()
+  }).nullable().default(null)
 })
 
 export const providerConnectionTestResultSchema = z.discriminatedUnion('ok', [
@@ -323,18 +355,25 @@ export type LlmTransportSettings = z.infer<typeof llmTransportSettingsSchema>
 export type ImageProtocol = z.infer<typeof imageProtocolSchema>
 export type ProviderSecretInput = z.infer<typeof providerSecretInputSchema>
 export type ProviderPublicConfig = z.infer<typeof providerPublicConfigSchema>
+/** What a caller may send: fields with defaults, such as prices, can be left out. */
+export type ProviderPublicConfigInput = z.input<typeof providerPublicConfigSchema>
 export type ProviderConfigFile = z.infer<typeof providerConfigFileSchema>
 export type ProviderExecutionPolicy = z.infer<typeof providerExecutionPolicySchema>
 export type ProviderSettingsSnapshot = z.infer<typeof providerSettingsSnapshotSchema>
-export type ProviderConnectionTestInput = z.infer<typeof providerConnectionTestInputSchema>
+export type ProviderConnectionTestInput = z.input<typeof providerConnectionTestInputSchema>
 export type ProviderConnectionTestResult = z.infer<typeof providerConnectionTestResultSchema>
 
 export function resolveLlmProtocolEndpoint(baseUrl: string, protocol: z.infer<typeof llmProtocolSchema>): string {
   if (baseUrl === '') return ''
-  const target = protocol === 'openai-chat-completions' ? 'chat/completions' : 'responses'
   const direct = new URL(baseUrl)
   const normalizedPath = direct.pathname.replace(/\/+$/, '')
-  if (normalizedPath.endsWith(`/${target}`)) return direct.toString()
+  // Anthropic-style addresses are given without the version segment, e.g. https://api.anthropic.com or …/anthropic.
+  const target = protocol === 'openai-chat-completions'
+    ? 'chat/completions'
+    : protocol === 'anthropic-messages'
+      ? /\/v\d+$/.test(normalizedPath) ? 'messages' : 'v1/messages'
+      : 'responses'
+  if (normalizedPath.endsWith(protocol === 'anthropic-messages' ? '/messages' : `/${target}`)) return direct.toString()
   const base = new URL(baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`)
   return new URL(target, base).toString()
 }
@@ -379,7 +418,7 @@ export function resolveImageEndpoint(
 }
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
-  version: 5,
+  version: 6,
   providers: [
     {
       id: 'openai-compatible-llm',
@@ -399,7 +438,8 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
         idleTimeoutMs: 30_000
       },
       concurrency: 1,
-      capabilities: { streaming: true, toolCalling: true, vision: true }
+      capabilities: { streaming: true, toolCalling: true, vision: true },
+      pricing: null
     },
     {
       id: 'image-provider',
@@ -416,8 +456,37 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
         maskEditing: true,
         multipleReferences: true,
         transparentOutput: false
-      }
+      },
+      pricePerImageCny: null
     }
   ],
+  defaultImageProviderId: PRIMARY_IMAGE_PROVIDER_ID,
   executionPolicy: DEFAULT_PROVIDER_EXECUTION_POLICY
+}
+
+export type ImageProviderConfig = z.infer<typeof imageProviderConfigSchema>
+
+export function imageProviderConfigs(config: { readonly providers: readonly ProviderPublicConfig[] }): ImageProviderConfig[] {
+  return config.providers.filter((provider): provider is ImageProviderConfig => provider.kind === 'image')
+}
+
+/** The default image service; falls back to the primary one, which always exists. */
+export function defaultImageProviderConfig(config: Pick<ProviderConfigFile, 'providers' | 'defaultImageProviderId'>): ImageProviderConfig {
+  const images = imageProviderConfigs(config)
+  return images.find((image) => image.id === config.defaultImageProviderId) ?? images[0]!
+}
+
+/** A new, empty image service; nothing is sent until a protocol, address and model are filled in. */
+export function newImageProviderConfig(id: string): ImageProviderConfig {
+  return imageProviderConfigSchema.parse({
+    id,
+    kind: 'image',
+    label: '新的生图服务',
+    baseUrl: '',
+    defaultModel: '',
+    protocol: 'unconfigured',
+    timeoutMs: 120_000,
+    concurrency: 1,
+    capabilities: { textToImage: true, imageReferences: false, maskEditing: false, multipleReferences: false, transparentOutput: false }
+  })
 }

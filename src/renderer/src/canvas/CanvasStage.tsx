@@ -1,6 +1,6 @@
 import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
-import { AlignCenterHorizontal, AlignCenterVertical, Check, Circle as CircleIcon, Copy, Crop, Group as GroupIcon, Lock, Minus, Square, Trash2, Type as TypeIcon, Ungroup } from 'lucide-react'
+import { AlignCenterHorizontal, AlignCenterVertical, Check, Circle as CircleIcon, Copy, Crop, Group as GroupIcon, Lock, Minus, Spline, Square, Trash2, Type as TypeIcon, Ungroup } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -19,13 +19,14 @@ import {
   Label,
   Layer,
   Line,
+  Path,
   Rect,
   Stage,
   Tag,
   Text,
   Transformer
 } from 'react-konva'
-import { ELEMENT_SCHEMA_VERSION, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
+import { ELEMENT_SCHEMA_VERSION, pathInBox, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
 import type { EphemeralAnnotationRegion } from '../../../shared/agent'
 import { blendModeLabel, blendModeToCanvasOperation, resolveBlendMode } from '../../../shared/blend-mode'
 import {
@@ -39,9 +40,12 @@ import type { EphemeralAnnotationTool } from '../agent/ephemeral-annotation-stor
 import { activeModal, canvasKeyboardBlocked, isInteractiveTarget, MODAL_SCOPE_CHANGED } from '../interaction/keyboard-scope'
 import { islandFitInsets } from '../islands/island-layout'
 import { useIslandLayoutStore } from '../islands/island-layout-store'
-import { groupBoundsForChildTransforms, useWorkspaceStore } from '../store/workspace-store'
+import { groupBoundsForChildTransforms, isPaintTool, useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
+import { paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
+import { setLayerRenderer } from './layer-render'
+import { constrainAngle, fillAt, gradientBetween, paintTarget, startStroke, type PaintGeometry, type PaintSession } from './paint-controller'
 import {
   boundsForElements,
   clampCrop,
@@ -60,6 +64,7 @@ import {
   type SnapGuide
 } from './direct-canvas-geometry'
 import { SemanticSketchVisual } from './SemanticSketchVisual'
+import { drawRect, renderImageEffects } from './image-effects'
 
 interface Size {
   width: number
@@ -189,7 +194,21 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   useSyncExternalStore(subscribeRuntimeAssets, getRuntimeAssetVersion, getRuntimeAssetVersion)
   const assetUrl = getRuntimeAssetUrl(element.assetId)
   const image = useHtmlImage(assetUrl)
-  if (image === null) {
+  const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
+  // With paint on it, the layer is drawn from its asset with the operations replayed.
+  const source = useMemo(
+    () => image === null ? null : paintedSource(element.id, image, element.paint),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas
+    [image, element.id, element.paint, paintVersion]
+  )
+  const shownWidth = Math.round(width)
+  const shownHeight = Math.round(height)
+  const effected = useMemo(
+    () => source === null ? null : renderImageEffects(source, element, shownWidth, shownHeight),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
+    [source, paintVersion, element.crop, element.fit, element.effects, shownWidth, shownHeight]
+  )
+  if (image === null || source === null) {
     const missing = isRuntimeAssetMissing(element.assetId)
     const loading = isRuntimeAssetLoading(element.assetId)
     const status = missing
@@ -200,45 +219,38 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
           ? '正在显示图片…'
           : '正在准备图片…'
     return (
-      <Group>
+      // Named so merging waits for the picture instead of drawing this stand-in into a layer.
+      <Group name="image-pending">
         <Rect width={width} height={height} fill={missing ? '#E9E1DE' : '#DCE3EA'} cornerRadius={8} />
         <Text width={width} y={height / 2 - 8} align="center" text={status} fill={missing ? '#925F58' : '#6D7783'} fontSize={13} />
       </Group>
     )
   }
-  const cropX = image.width * element.crop.x
-  const cropY = image.height * element.crop.y
-  const cropWidth = image.width * element.crop.width
-  const cropHeight = image.height * element.crop.height
-  const sourceRatio = cropWidth / cropHeight
-  const targetRatio = width / height
-  let drawWidth = width
-  let drawHeight = height
-  let x = 0
-  let y = 0
-  if (element.fit !== 'fill') {
-    const contain = element.fit === 'contain'
-    const useWidth = contain ? sourceRatio > targetRatio : sourceRatio < targetRatio
-    if (useWidth) {
-      drawHeight = width / sourceRatio
-      y = (height - drawHeight) / 2
-    } else {
-      drawWidth = height * sourceRatio
-      x = (width - drawWidth) / 2
-    }
+  if (effected !== null) {
+    // Drawn at the shown size; scaled back to the box while a resize is between whole pixels.
+    const scaleX = width / effected.drawn.width
+    const scaleY = height / effected.drawn.height
+    return (
+      <Group>
+        {effected.shadow !== null && <KonvaImage image={effected.shadow.canvas} x={effected.shadow.x * scaleX} y={effected.shadow.y * scaleY} scaleX={scaleX} scaleY={scaleY} listening={false} />}
+        <KonvaImage image={effected.drawn} width={width} height={height} />
+      </Group>
+    )
   }
+  const { crop, draw } = drawRect(source, element, width, height)
   return (
     <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
       <KonvaImage
-        image={image}
-        x={x}
-        y={y}
-        width={drawWidth}
-        height={drawHeight}
-        cropX={cropX}
-        cropY={cropY}
-        cropWidth={cropWidth}
-        cropHeight={cropHeight}
+        name={`pixels-${element.id}`}
+        image={source}
+        x={draw.x}
+        y={draw.y}
+        width={draw.width}
+        height={draw.height}
+        cropX={crop.x}
+        cropY={crop.y}
+        cropWidth={crop.width}
+        cropHeight={crop.height}
       />
     </Group>
   )
@@ -291,6 +303,9 @@ function ElementVisual({ element, width, height, outputScale }: { element: Scene
         </Group>
       )
     case 'shape':
+      if (element.shape === 'path' && element.path !== undefined) {
+        return <Path data={pathInBox(element.path, width, height)} fill={element.fill} {...(element.stroke === null ? {} : { stroke: element.stroke })} strokeWidth={element.strokeWidth * Math.min(width, height)} lineJoin="round" lineCap="round" />
+      }
       if (element.shape === 'ellipse') {
         return <Ellipse x={width / 2} y={height / 2} radiusX={width / 2} radiusY={height / 2} fill={element.fill} {...(element.stroke === null ? {} : { stroke: element.stroke })} strokeWidth={element.strokeWidth * Math.min(width, height)} />
       }
@@ -369,9 +384,31 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
   const activeTool = useWorkspaceStore((state) => state.activeTool)
   const enterGroupEditing = useWorkspaceStore((state) => state.enterGroupEditing)
   const dragOccurredRef = useRef(false)
+  // Alt held when a drag starts drops a copy and leaves the original, as in Photoshop.
+  const copyOnDropRef = useRef(false)
   const displayTransform = shapeTransformOverride ?? element.transform
   const width = displayTransform.width * artboard.width
   const height = displayTransform.height * artboard.height
+
+  /**
+   * Puts every dragged node back where the scene has it and adds copies
+   * where they were dropped. False when nothing dragged can be copied (a
+   * locked layer, or a layer inside a group being edited), so the drag
+   * moves it instead.
+   */
+  const dropCopies = (stage: Konva.Stage | null, delta: { readonly x: number; readonly y: number }): boolean => {
+    const copyable = scene.elements.some((candidate) => selectedIds.includes(candidate.id) && candidate.groupId === null && !candidate.locked)
+    if (!copyable) return false
+    for (const candidate of scene.elements) {
+      stage?.findOne(`#element-${candidate.id}`)?.position({
+        x: candidate.transform.x * artboard.width,
+        y: candidate.transform.y * artboard.height
+      })
+    }
+    void useWorkspaceStore.getState().duplicateSelection(delta)
+    return true
+  }
+
   if (element.type === 'group') {
     const isEditing = editingGroupId === element.id
     const children = scene.elements.filter((candidate) => element.childIds.includes(candidate.id))
@@ -449,12 +486,14 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         onClick={(event) => { if (!event.evt.altKey) onSelect(event) }}
         onTap={onSelect}
         onDblClick={(event) => {
-          if (element.locked) return
+          // An Alt+click cycles through what is under the pointer; it never completes a double-click.
+          if (element.locked || event.evt.altKey) return
           event.cancelBubble = true
           enterGroupEditing(element.id)
         }}
-        onDragStart={() => {
+        onDragStart={(event) => {
           dragOccurredRef.current = true
+          copyOnDropRef.current = event.evt.altKey
           if (!selectedIds.includes(element.id)) select(element.id, false)
           onBeginDrag(element.id)
         }}
@@ -481,6 +520,10 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
             onFinishDrag(element.id)
             return
           }
+          const groupDelta = {
+            x: event.target.x() / artboard.width - element.transform.x,
+            y: event.target.y() / artboard.height - element.transform.y
+          }
           if (isDragCancelled()) {
             for (const candidate of scene.elements) {
               event.target.getStage()?.findOne(`#element-${candidate.id}`)?.position({
@@ -488,6 +531,8 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
                 y: candidate.transform.y * artboard.height
               })
             }
+          } else if (copyOnDropRef.current && dropCopies(event.target.getStage(), groupDelta)) {
+            // The copies are in; the originals went back where they were.
           } else if (selectedIds.includes(element.id) && selectedIds.length > 1) {
             const delta = {
               x: event.target.x() / artboard.width - element.transform.x,
@@ -533,19 +578,22 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
       onTap={onSelect}
       onDblClick={(event) => {
         if (element.type !== 'text' && element.type !== 'image' && element.type !== 'shape') return
-        if (element.locked) return
+        // An Alt+click cycles through what is under the pointer; it never completes a double-click.
+        if (element.locked || event.evt.altKey) return
         event.cancelBubble = true
         select(element.id, false)
         onRequestEdit(element)
       }}
-      onDragStart={() => {
+      onDragStart={(event) => {
         dragOccurredRef.current = true
+        copyOnDropRef.current = event.evt.altKey
         if (!selectedIds.includes(element.id)) select(element.id, false)
         onBeginDrag(element.id)
       }}
       onDragMove={(event) => {
         const node = event.target
-        if (event.evt.altKey) {
+        // Ctrl suspends snapping while it is held, as in Photoshop.
+        if (event.evt.ctrlKey || event.evt.metaKey) {
           onGuides([])
           return
         }
@@ -619,6 +667,10 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         const delta = {
           x: event.target.x() / artboard.width - element.transform.x,
           y: event.target.y() / artboard.height - element.transform.y
+        }
+        if (copyOnDropRef.current && dropCopies(event.target.getStage(), delta)) {
+          onFinishDrag(element.id)
+          return
         }
         const movableRoots = scene.elements.filter((candidate) =>
           selectedIds.includes(candidate.id) && !candidate.locked && (candidate.type === 'group' || candidate.groupId === null || candidate.groupId === editingGroupId)
@@ -775,6 +827,14 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const auxiliaryLayerRef = useRef<Konva.Layer>(null)
+  const contentLayerRef = useRef<Konva.Layer>(null)
+  const paintSessionRef = useRef<PaintSession | null>(null)
+  const gradientStartRef = useRef<{ x: number, y: number } | null>(null)
+  /** Where the last stroke ended on each layer, in layer pixels, for Shift+click straight lines. */
+  const lastStrokeEndRef = useRef(new Map<string, { x: number, y: number }>())
+  // A small element moved by hand on every pointer move: redrawing a canvas layer instead would re-blur every glass panel over it.
+  const brushRingRef = useRef<HTMLDivElement>(null)
+  const [gradientLine, setGradientLine] = useState<{ from: { x: number, y: number }, to: { x: number, y: number } } | null>(null)
   const [guides, setGuides] = useState<Guide[]>([])
   const [draftStroke, setDraftStroke] = useState<number[]>([])
   const [draftMask, setDraftMask] = useState<number[]>([])
@@ -1473,6 +1533,60 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     }
   }), [artboard.height, artboard.width, artboard.x, artboard.y, pan.x, pan.y, scene.canvas.outputHeight, scene.canvas.outputWidth, setClampedViewport, unsupportedBlendModes.length, viewFit, zoom])
 
+  // Merging and rasterizing draw layers as they are shown here, at the canvas's output size, with nothing behind them.
+  useEffect(() => {
+    setLayerRenderer((ids, options) => {
+      const stage = stageRef.current
+      const content = contentLayerRef.current
+      const auxiliary = auxiliaryLayerRef.current
+      if (stage === null || content === null || auxiliary === null) return null
+      const keep = new Set(ids)
+      const nodes = [...content.find('.final-content'), ...content.find('.editor-reference')]
+      const pending = content.find('.image-pending').some((stand) => {
+        const owner = stand.findAncestor((ancestor: Konva.Node) => ancestor.id().startsWith('element-'))
+        return owner !== null && owner !== undefined && keep.has(owner.id().slice('element-'.length))
+      })
+      if (pending) return 'pending'
+      const restore: Array<() => void> = []
+      const change = <T,>(read: () => T, write: (value: T) => void, value: T): void => {
+        const before = read()
+        write(value)
+        restore.push(() => write(before))
+      }
+      for (const node of nodes) {
+        const id = node.id().startsWith('element-') ? node.id().slice('element-'.length) : null
+        if (id === null) continue
+        if (!keep.has(id)) change(() => node.visible(), (value) => node.visible(value), false)
+        else if (options.showHidden === true) change(() => node.visible(), (value) => node.visible(value), true)
+        if (id === options.base) {
+          change(() => node.opacity(), (value) => node.opacity(value), 1)
+          change(() => node.globalCompositeOperation(), (value) => node.globalCompositeOperation(value), 'source-over')
+        }
+      }
+      const background = content.findOne('.artboard-background')
+      if (background !== undefined) change(() => background.visible(), (value) => background.visible(value), false)
+      for (const chrome of stage.find('.editor-chrome')) change(() => chrome.visible(), (value) => chrome.visible(value), false)
+      change(() => auxiliary.visible(), (value) => auxiliary.visible(value), false)
+      try {
+        const renderScale = Math.max(scene.canvas.outputWidth / (artboard.width * zoom), scene.canvas.outputHeight / (artboard.height * zoom))
+        const rendered = stage.toCanvas({ x: artboard.x, y: artboard.y, width: artboard.width * zoom, height: artboard.height * zoom, pixelRatio: renderScale })
+        const output = document.createElement('canvas')
+        output.width = scene.canvas.outputWidth
+        output.height = scene.canvas.outputHeight
+        const context = output.getContext('2d')
+        if (context === null) return null
+        context.imageSmoothingEnabled = true
+        context.imageSmoothingQuality = 'high'
+        context.drawImage(rendered, 0, 0, output.width, output.height)
+        return output
+      } finally {
+        for (const undo of restore.reverse()) undo()
+        stage.draw()
+      }
+    })
+    return () => setLayerRenderer(null)
+  }, [artboard.height, artboard.width, artboard.x, artboard.y, scene.canvas.outputHeight, scene.canvas.outputWidth, zoom])
+
   const handleWheel = useCallback((event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault()
     const stage = stageRef.current
@@ -1749,8 +1863,127 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     return true
   }
 
+  // [ and ] resize the ring where it is, before the pointer moves again.
+  const brushSize = useWorkspaceStore((state) => state.activeTool === 'brush' || state.activeTool === 'eraser' ? state.paintSettings[state.activeTool].size : 0)
+  useEffect(() => {
+    const ring = brushRingRef.current
+    if (ring === null || brushSize === 0) return
+    ring.style.width = ring.style.height = `${Math.max(1, brushSize * zoom)}px`
+  }, [brushSize, zoom])
+
+  const paintGeometry = (): PaintGeometry => ({
+    origin: { x: displayedArtboard.x, y: displayedArtboard.y },
+    zoom,
+    canvasWidth: scene.canvas.outputWidth,
+    canvasHeight: scene.canvas.outputHeight
+  })
+  const stagePoint = (event: { clientX: number, clientY: number }): { x: number, y: number } | null => {
+    const rect = stageRef.current?.container().getBoundingClientRect()
+    return rect === undefined ? null : { x: event.clientX - rect.left, y: event.clientY - rect.top }
+  }
+  const redrawContent = (): void => { contentLayerRef.current?.batchDraw() }
+
+  const beginPaint = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isPaintTool(activeTool) || event.button !== 0 || spacePressed) return
+    if (!(event.target instanceof Element) || event.target.closest('.konvajs-content') === null) return
+    const point = stagePoint(event)
+    if (point === null) return
+    // Alt with a painting tool picks a colour instead, as in Photoshop.
+    if (event.altKey && activeTool !== 'gradient') {
+      stageRef.current?.setPointersPositions(event.nativeEvent)
+      sampleColor(false)
+      return
+    }
+    const element = paintTarget()
+    if (element === null) return
+    event.preventDefault()
+    if (activeTool === 'bucket') {
+      fillAt(element, paintGeometry(), point.x, point.y, redrawContent)
+      return
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    if (activeTool === 'gradient') {
+      gradientStartRef.current = point
+      setGradientLine({ from: point, to: point })
+      return
+    }
+    const pressure = event.pointerType === 'pen' ? event.pressure : null
+    paintSessionRef.current = startStroke(
+      activeTool, element, paintGeometry(), point.x, point.y, pressure,
+      event.shiftKey ? lastStrokeEndRef.current.get(element.id) ?? null : null,
+      redrawContent,
+      (end) => lastStrokeEndRef.current.set(element.id, end)
+    )
+  }
+
+  const continuePaint = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isPaintTool(activeTool)) return
+    const point = stagePoint(event)
+    if (point === null) return
+    if (activeTool === 'brush' || activeTool === 'eraser') {
+      const size = useWorkspaceStore.getState().paintSettings[activeTool].size
+      const ring = brushRingRef.current
+      const root = containerRef.current?.getBoundingClientRect()
+      if (ring !== null && root !== undefined) {
+        const diameter = `${Math.max(1, size * zoom)}px`
+        if (ring.style.width !== diameter) { ring.style.width = diameter; ring.style.height = diameter }
+        ring.style.transform = `translate(${event.clientX - root.left}px, ${event.clientY - root.top}px) translate(-50%, -50%)`
+        ring.hidden = false
+      }
+    }
+    const start = gradientStartRef.current
+    if (start !== null) {
+      setGradientLine({ from: start, to: event.shiftKey ? constrainAngle(start, point) : point })
+      return
+    }
+    const session = paintSessionRef.current
+    if (session === null) return
+    // A pen sends more samples than frames; every one of them goes into the stroke.
+    const samples = typeof event.nativeEvent.getCoalescedEvents === 'function' ? event.nativeEvent.getCoalescedEvents() : []
+    for (const sample of samples.length > 0 ? samples : [event.nativeEvent]) {
+      const at = stagePoint(sample)
+      if (at !== null) session.move(at.x, at.y, sample.pointerType === 'pen' ? sample.pressure : 1)
+    }
+  }
+
+  const finishPaint = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const point = stagePoint(event)
+    const session = paintSessionRef.current
+    paintSessionRef.current = null
+    if (session !== null && point !== null) session.end(point.x, point.y, event.shiftKey)
+    const start = gradientStartRef.current
+    gradientStartRef.current = null
+    if (start !== null) {
+      setGradientLine(null)
+      const element = point === null ? null : paintTarget()
+      if (element !== null && point !== null) gradientBetween(element, paintGeometry(), start, event.shiftKey ? constrainAngle(start, point) : point, redrawContent)
+    }
+  }
+
+  /**
+   * The eyedropper reads the picture as drawn under the pointer, background
+   * included, and sets the foreground colour, or with Alt the background.
+   * A transparent pixel reads as it shows, over white.
+   */
+  const sampleColor = (toBackground: boolean): void => {
+    const layer = contentLayerRef.current
+    const pointer = stageRef.current?.getPointerPosition()
+    if (layer === null || pointer === null || pointer === undefined) return
+    if (pointer.x < displayedArtboard.x || pointer.y < displayedArtboard.y
+      || pointer.x >= displayedArtboard.x + displayedArtboard.width || pointer.y >= displayedArtboard.y + displayedArtboard.height) return
+    const ratio = layer.getCanvas().getPixelRatio()
+    const pixel = layer.getNativeCanvasElement().getContext('2d')?.getImageData(Math.floor(pointer.x * ratio), Math.floor(pointer.y * ratio), 1, 1).data
+    if (pixel === undefined) return
+    const alpha = pixel[3]! / 255
+    const hex = `#${[pixel[0]!, pixel[1]!, pixel[2]!].map((channel) => Math.round(channel * alpha + 255 * (1 - alpha)).toString(16).padStart(2, '0')).join('').toUpperCase()}`
+    const store = useWorkspaceStore.getState()
+    if (toBackground) store.setBackgroundColor(hex)
+    else store.setForegroundColor(hex)
+  }
+
   const handleElementSelect = (element: SceneElement, event: KonvaEventObject<MouseEvent | TouchEvent>): void => {
     event.cancelBubble = true
+    if (activeTool === 'eyedropper' || isPaintTool(activeTool)) return
     const targetId = element.groupId !== null && element.groupId !== editingGroupId ? element.groupId : element.id
     if (!event.evt.altKey) {
       select(targetId, event.evt.shiftKey || event.evt.ctrlKey || event.evt.metaKey)
@@ -1771,7 +2004,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     cancelShapeRadiusGesture()
     cancelShapeLineGesture()
     if (element.shape === shape) return
-    void updateElement(element.id, { shape }, `将“${element.name}”改为${shape === 'rectangle' ? '矩形' : shape === 'ellipse' ? '椭圆' : '直线'}`)
+    void updateElement(element.id, { shape }, `将“${element.name}”改为${shape === 'rectangle' ? '矩形' : shape === 'ellipse' ? '椭圆' : shape === 'path' ? '自由形状' : '直线'}`)
   }, [cancelShapeLineGesture, cancelShapeRadiusGesture, updateElement])
 
   const selectionDefaultsToRatio = (
@@ -1901,7 +2134,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   return (
     <div
       ref={containerRef}
-      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}`}
+      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}${activeTool === 'eyedropper' ? ' is-eyedropper' : ''}${isPaintTool(activeTool) && !spacePressed ? ` is-painting is-${activeTool}` : ''}`}
       data-testid="canvas-stage"
       tabIndex={preview ? -1 : 0}
       aria-label={preview ? '作品预览' : '画布编辑区'}
@@ -1910,6 +2143,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           containerRef.current?.focus({ preventScroll: true })
         }
       }}
+      onPointerDown={(event) => { if (!preview) beginPaint(event) }}
+      onPointerMove={(event) => { if (!preview) continuePaint(event) }}
+      onPointerUp={(event) => { if (!preview) finishPaint(event) }}
+      onPointerCancel={() => { paintSessionRef.current?.cancel(); paintSessionRef.current = null; gradientStartRef.current = null; setGradientLine(null) }}
+      onPointerLeave={() => { if (brushRingRef.current !== null) brushRingRef.current.hidden = true }}
       data-scene-revision={scene.revision}
       data-shape-editing={shapeEditId ?? ''}
       data-shape-edit-kind={shapeEditElement?.shape ?? ''}
@@ -1936,6 +2174,12 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
             beginEphemeralAnnotation()
             return
           }
+          if (activeTool === 'eyedropper' && event.evt.button === 0 && !spacePressed) {
+            sampleColor(event.evt.altKey)
+            return
+          }
+          // Painting runs on pointer events, for pen pressure and every sample the pen sends.
+          if (isPaintTool(activeTool) && event.evt.button === 0 && !spacePressed) return
           if (event.evt.button === 1 || ((spacePressed || activeTool === 'hand') && event.evt.button === 0)) {
             event.evt.preventDefault()
             panningRef.current = true
@@ -2012,7 +2256,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
             cornerRadius={3}
           />
         </Layer>
-        <Layer>
+        <Layer ref={contentLayerRef}>
           <Group
             id="artboard-content"
             x={artboard.x}
@@ -2060,6 +2304,13 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           </Group>
         </Layer>
         <Layer ref={auxiliaryLayerRef} name="editor-auxiliary" listening={!preview}>
+          {!preview && gradientLine !== null && (
+            <Group listening={false} name="gradient-line">
+              <Line points={[gradientLine.from.x, gradientLine.from.y, gradientLine.to.x, gradientLine.to.y]} stroke="rgba(0,0,0,.55)" strokeWidth={3} />
+              <Line points={[gradientLine.from.x, gradientLine.from.y, gradientLine.to.x, gradientLine.to.y]} stroke="#FFFFFF" strokeWidth={1} />
+              <Circle x={gradientLine.from.x} y={gradientLine.from.y} radius={4} fill="#FFFFFF" stroke="#1F242B" strokeWidth={1} />
+            </Group>
+          )}
           {!preview && marquee !== null && (() => {
             const rect = rectFromPoints(marquee.start, marquee.current)
             return (
@@ -2205,6 +2456,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           {!preview && <Circle listening={false} x={artboard.x + 14} y={artboard.y + 14} radius={3} fill="rgba(255,255,255,.55)" />}
         </Layer>
       </Stage>
+      {/* The brush's real size on the canvas, light over dark so it reads on any picture. */}
+      {!preview && (activeTool === 'brush' || activeTool === 'eraser') && !spacePressed && <div ref={brushRingRef} className="brush-ring" aria-hidden="true" hidden />}
       {!preview && inlineText !== undefined && (
         <ImeSafeTextarea
           className="canvas-inline-text-editor"
@@ -2255,6 +2508,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
             <button type="button" className={shapeEditElement.shape === 'rectangle' ? 'is-active' : ''} aria-label="矩形" aria-pressed={shapeEditElement.shape === 'rectangle'} title="矩形" onClick={() => changeShapeKind(shapeEditElement, 'rectangle')}><Square size={15} /></button>
             <button type="button" className={shapeEditElement.shape === 'ellipse' ? 'is-active' : ''} aria-label="椭圆" aria-pressed={shapeEditElement.shape === 'ellipse'} title="椭圆" onClick={() => changeShapeKind(shapeEditElement, 'ellipse')}><CircleIcon size={15} /></button>
             <button type="button" className={shapeEditElement.shape === 'line' ? 'is-active' : ''} aria-label="直线" aria-pressed={shapeEditElement.shape === 'line'} title="直线" onClick={() => changeShapeKind(shapeEditElement, 'line')}><Minus size={16} /></button>
+            {/* A shape keeps its outline when switched to another kind, so it can switch back. */}
+            {shapeEditElement.path !== undefined && <button type="button" className={shapeEditElement.shape === 'path' ? 'is-active' : ''} aria-label="自由形状" aria-pressed={shapeEditElement.shape === 'path'} title="自由形状" onClick={() => changeShapeKind(shapeEditElement, 'path')}><Spline size={15} /></button>}
           </div>
           <span className="shape-toolbar-divider" aria-hidden="true" />
           <label className="shape-color-well" title="填充">

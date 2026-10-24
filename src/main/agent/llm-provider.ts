@@ -83,6 +83,10 @@ export type OpenAiCompatibleRequest = z.infer<typeof openAiCompatibleRequestSche
 export interface LlmProtocolRequest {
   readonly url: string
   readonly body: Readonly<Record<string, unknown>>
+  /** How the saved key is sent; Bearer unless the protocol says otherwise. */
+  readonly authScheme?: 'bearer' | 'x-api-key'
+  /** Non-secret protocol headers such as an API version. */
+  readonly headers?: Readonly<Record<string, string>>
 }
 
 export interface NormalizedToolCall {
@@ -109,7 +113,7 @@ export interface LlmProtocolAdapter {
   readonly capabilities: { readonly streaming: boolean; readonly toolCalling: boolean; readonly vision: boolean }
   buildRequest(input: OpenAiCompatibleRequest, stream: boolean): LlmProtocolRequest
   parseResponse(value: unknown): NormalizedLlmResponse
-  parseEventStream(value: string): readonly NormalizedLlmStreamEvent[]
+  parseEventStream?(value: string): readonly NormalizedLlmStreamEvent[]
   createStreamAccumulator(): LlmStreamAccumulator
 }
 

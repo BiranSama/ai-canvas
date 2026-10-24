@@ -41,14 +41,25 @@ function withCriterion(plan: AgentPlan, criterion: string | readonly string[]): 
       ? command : { ...command, creativeContext: { ...command.creativeContext, brief } })
   }) }
 }
+// About 0.5 s locally. A turn that ends any other way fails at once with its state, and a timeout
+// names the last state seen, so a slow runner and a turn that went wrong read differently.
 async function wait(runtime: GenerationRuntime) {
-  await expect.poll(async () => {
-    const state = await runtime.getAgentHarnessSnapshot()
-    const latest = state.turns[0]
-    if (latest === undefined || !isTerminalAgentTurnStatus(latest.status)) return false
-    return (await runtime.getConversation()).runs.find((run) => run.id === latest.inputMessageId)?.status === 'completed'
-  }, { timeout: 8000 }).toBe(true)
-  return runtime.getAgentHarnessSnapshot()
+  const deadline = Date.now() + 15_000
+  let seen = 'no turn yet'
+  while (Date.now() < deadline) {
+    const latest = (await runtime.getAgentHarnessSnapshot()).turns[0]
+    if (latest !== undefined) {
+      const run = (await runtime.getConversation()).runs.find((candidate) => candidate.id === latest.inputMessageId)
+      seen = `turn ${latest.status}${latest.errorCode === null ? '' : ` (${latest.errorCode}: ${latest.errorMessage ?? ''})`}, run ${run?.status ?? 'missing'}`
+      if (isTerminalAgentTurnStatus(latest.status) && run?.status === 'completed') return runtime.getAgentHarnessSnapshot()
+      // The run is projected after the turn; only a run that itself ended differently is a failure.
+      if (isTerminalAgentTurnStatus(latest.status) && run !== undefined && ['failed', 'cancelled', 'timed_out', 'interrupted'].includes(run.status)) {
+        throw new Error(`The turn ended without completing: ${seen}`)
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error(`The turn did not finish in 15 s; last seen: ${seen}`)
 }
 async function createReviewed(h: Awaited<ReturnType<typeof fixture>>, criterion: string, text?: string) {
   const input = request(h.runtime, text)
@@ -103,7 +114,7 @@ it.each([false, true, 'overflow'] as const)('retains every result and unknown mu
   db.prepare('DELETE FROM generation_results WHERE id = ?').run(jobs.find(job => job.request.prompt === 'G1')!.results[0]!.id); db.close()
   await expect(h.runtime.acceptDesignReview(acceptance)).rejects.toThrow(/结果已删除或失效/)
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it.each([false, true, 'quoted'] as const)('applies only the explicit user aspect revision and retains unrelated must (wrong canvas: %s)', async (wrongCanvas) => {
   const h = await fixture()
@@ -134,7 +145,7 @@ it.each([false, true, 'quoted'] as const)('applies only the explicit user aspect
   }
   expect(await h.runtime.listJobs()).toHaveLength(1)
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it('preserves distinct 500-character criteria with a shared prefix and bounds long evidence notes', async () => {
   const h = await fixture()
@@ -159,7 +170,7 @@ it('preserves distinct 500-character criteria with a shared prefix and bounds lo
   expect(assessment.facts.unverifiedMust.every(item => item.label.length <= 240)).toBe(true)
   expect(assessment.notes.every(note => note.length <= 1000)).toBe(true)
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it('finishes a legal contract with 100 must criteria without losing any unknown requirement', async () => {
   const h = await fixture()
@@ -175,7 +186,7 @@ it('finishes a legal contract with 100 must criteria without losing any unknown 
   expect(message.receipt?.completion?.unverifiedMust).toHaveLength(100)
   expect(message.receipt?.completion?.unverifiedMust.at(-1)?.label).toBe('必须：视觉标准100符合要求')
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it('retains visual must criteria when the user keeps the canvas instead of generating', async () => {
   const h = await fixture()
@@ -194,7 +205,7 @@ it('retains visual must criteria when the user keeps the canvas instead of gener
   expect(message.receipt?.completion?.unverifiedMust).toEqual(expect.arrayContaining([expect.objectContaining({ label: '必须：人物面部自然且符合品牌调性' })]))
   expect(await h.runtime.listJobs()).toHaveLength(0)
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it.each(['人物面部自然且符合品牌调性', '主体面部自然且符合品牌调性', '面部自然且比例 4:5'])('keeps the complete must criterion "%s" unverified through real Main and persistence', async (criterion) => {
   const h = await fixture()
@@ -212,7 +223,7 @@ it.each(['人物面部自然且符合品牌调性', '主体面部自然且符合
   const reopened = await GenerationRuntime.create(h.userData); runtimes.push(reopened)
   expect((await reopened.getConversation()).messages.find((entry) => entry.id === message.id)?.receipt?.completion).toEqual(message.receipt?.completion)
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it('records explicit acceptance once for the exact Scene, keeps unknown evidence, and invalidates its current scope after edits', async () => {
   const h = await fixture()
@@ -238,7 +249,7 @@ it('records explicit acceptance once for the exact Scene, keeps unknown evidence
   await expect(reopened.acceptDesignReview(input)).rejects.toThrow(/PROJECT_CHANGED/)
   expect(() => reopened.startAgentRun({ ...fixtureAgentRequest(before.scene, '解释比例'), projectId: before.projectId })).toThrow(/PROJECT_CHANGED/)
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it('requires actual execution evidence for an edit/generation claim while ordinary explanation completes as text', async () => {
   const h = await fixture()
@@ -258,7 +269,7 @@ it('requires actual execution evidence for an edit/generation claim while ordina
   expect((await h.runtime.getConversation()).messages.at(-1)?.content).toContain('请求尚未执行')
   expect(h.runtime.getWorkspaceBootstrap().scene).toEqual(before)
   expect(await h.runtime.listJobs()).toHaveLength(0); expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it('pins the exact generated result in acceptance and marks the scope unavailable after that result is deleted', async () => {
   const h = await fixture()
@@ -275,7 +286,7 @@ it('pins the exact generated result in acceptance and marks the scope unavailabl
   expect(updated.receipt?.completion?.scopeUnavailableReason).toContain('原接受范围不再完整')
   await expect(h.runtime.acceptDesignReview(input)).rejects.toThrow(/结果已删除或失效/)
   expect(h.network).not.toHaveBeenCalled()
-})
+}, 20_000)
 
 it('keeps failed structure distinct from visual review and never infers acceptance from legacy high scores', async () => {
   const h = await fixture()
@@ -293,4 +304,4 @@ it('keeps failed structure distinct from visual review and never infers acceptan
   await expect(h.runtime.acceptDesignReview({ projectId: historical.projectId, messageId: historical.id, sceneRevision: h.runtime.getWorkspaceBootstrap().scene.revision })).rejects.toThrow()
   const check = new Database(join(h.path, 'project.db'), { readonly: true })
   expect(check.prepare('SELECT receipt_json FROM conversation_messages WHERE id = ?').get(message.id)).toEqual({ receipt_json: JSON.stringify(legacy) }); check.close()
-})
+}, 20_000)

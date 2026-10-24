@@ -123,13 +123,14 @@ function toolProjection(tool: AgentPlan['tools'][number]): Pick<CreateActivityIn
     }
   }
   if (tool.kind === 'canvas_edit') {
+    const inContext = tool.mode === 'in-context'
     return {
       kind: 'tool',
-      label: '创建局部修改',
-      objectLabel: '选中图片',
-      actionLabel: '编译本轮圈选并创建编辑任务',
-      impactLabel: '源图保持不变，结果另存为新版本',
-      scopeLabel: '当前选区',
+      label: inContext ? '按区域重画' : '创建局部修改',
+      objectLabel: inContext ? '目标区域' : '选中图片',
+      actionLabel: inContext ? '参照下方画面重画这一块' : '编译本轮圈选并创建编辑任务',
+      impactLabel: inContext ? '画布保持不变，放回时裁出并融入画面' : '源图保持不变，结果另存为新版本',
+      scopeLabel: inContext ? '目标所在的区域' : '当前选区',
       budgetImpact: { requests: 1, images: tool.count, maxCny: 0 }
     }
   }
@@ -202,9 +203,9 @@ function toolProjection(tool: AgentPlan['tools'][number]): Pick<CreateActivityIn
   const count = tool.kind === 'generation' ? tool.request.count : tool.count
   return {
     kind: 'tool',
-    label: tool.kind === 'canvas_generation' ? '编译画布并生成' : '创建生成任务',
+    label: tool.kind === 'canvas_generation' ? tool.mode === 'unified' ? '统一重绘整张画面' : '编译画布并生成' : '创建生成任务',
     objectLabel: '图片生成',
-    actionLabel: tool.kind === 'canvas_generation' ? '编译参考图与语义提示' : '提交文生图任务',
+    actionLabel: tool.kind === 'canvas_generation' ? tool.mode === 'unified' ? '把除文字外的画面交给生图模型统一重绘' : '编译参考图与语义提示' : '提交文生图任务',
     impactLabel: `将创建 ${count} 张图片`,
     scopeLabel: tool.kind === 'generation'
       ? `${tool.request.aspectWidth}:${tool.request.aspectHeight} · ${tool.request.model}`
@@ -351,11 +352,14 @@ export class ActivityLedgerRepository {
     }
   }
 
-  async ensureToolActivity(projectId: string, runId: string, ordinal: number, tool: AgentPlan['tools'][number]): Promise<void> {
+  async ensureToolActivity(projectId: string, runId: string, ordinal: number, tool: AgentPlan['tools'][number], actionLabel?: string): Promise<void> {
     const existing = await this.#connection.kysely.selectFrom('agent_activities').select('id')
       .where('run_id', '=', runId).where('kind', '=', 'tool').where('ordinal', '=', ordinal).executeTakeFirst()
     if (existing !== undefined) return
-    await this.create({ projectId, runId, ordinal, eventType: 'tool.queued', state: 'queued', ...toolProjection(tool) })
+    await this.create({
+      projectId, runId, ordinal, eventType: 'tool.queued', state: 'queued', ...toolProjection(tool),
+      ...(actionLabel === undefined ? {} : { actionLabel })
+    })
   }
 
   async transitionTool(runId: string, ordinal: number, eventType: string, state: AgentActivityState, outcome?: AgentToolOutcome): Promise<void> {

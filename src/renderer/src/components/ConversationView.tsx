@@ -19,6 +19,7 @@ import { activeModal } from '../interaction/keyboard-scope'
 import { CompletionReview } from './CompletionReview'
 import { useProjectScope } from '../store/use-project-scope'
 import { completionFactsSchema } from '../../../shared/design-capability'
+import { formatTurnModelUsage } from '../../../shared/model-usage'
 
 const ACTIVE_STATUSES = new Set<AgentRun['status']>([
   'queued', 'planning', 'awaiting_confirmation', 'awaiting_execution', 'executing'
@@ -891,6 +892,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                       </section>
                       </details>
                     )}
+                    {message.receipt.modelUsage !== undefined && <small className="receipt-model-usage" data-testid="receipt-model-usage">{formatTurnModelUsage(message.receipt.modelUsage)}</small>}
                     {(message.receipt.nextAction !== null || message.receipt.undoable) && (
                       <footer>
                         {message.receipt.nextAction !== null && <span>{message.receipt.nextAction}</span>}

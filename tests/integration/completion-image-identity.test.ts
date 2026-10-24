@@ -11,7 +11,7 @@ import { FileProviderConfigStore } from '../../src/main/security/provider-config
 import { sceneSchema, ELEMENT_SCHEMA_VERSION } from '../../src/domain'
 import { openDatabase } from '../../src/main/storage/database'
 import type { GenerationProfileRequest } from '../../src/shared/generation'
-import type { ProviderPublicConfig } from '../../src/shared/provider-settings'
+import type { ProviderPublicConfigInput } from '../../src/shared/provider-settings'
 
 // Only synthetic secrets. Production Main, protocol, HTTP, workflow and SQLite remain real.
 vi.mock('electron', () => ({ safeStorage: {
@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true, maxRetries: 5 })
 })
 
-function configuration(tag: string, protocol: 'openai-images' | 'task-images' = 'openai-images'): ProviderPublicConfig {
+function configuration(tag: string, protocol: 'openai-images' | 'task-images' = 'openai-images'): ProviderPublicConfigInput {
   return { id: 'image-provider', kind: 'image', label: `Synthetic ${tag}`, baseUrl: `https://${tag}.example.test/v1`,
     defaultModel: `model-${tag}`, protocol, timeoutMs: tag === 'a' ? 300_000 : 45_000, concurrency: 1,
     capabilities: { textToImage: true, imageReferences: protocol === 'openai-images', maskEditing: protocol === 'openai-images',
@@ -92,7 +92,7 @@ it('pins queued HTTP identity and timeout across key, model, protocol, policy ch
   await value.queue().activate(next.id)
   await completed(value.runtime, next.id)
   expect(calls.at(-1)).toEqual({ url: 'https://b.example.test/v1/images/generations', key: 'Bearer synthetic-B', model: 'model-b' })
-  await value.runtime.setProviderConfig({ ...configuration('b'), protocol: 'unconfigured' } as ProviderPublicConfig)
+  await value.runtime.setProviderConfig({ ...configuration('b'), protocol: 'unconfigured' } as ProviderPublicConfigInput)
   expect((await value.runtime.enqueueProfile(request())).id).toBe(original.id)
   const changed = request()
   await expect(value.runtime.enqueueProfile({ ...changed, draft: { ...changed.draft, prompt: 'A different request under the same key' } }))
@@ -293,7 +293,7 @@ it('replays raw enqueue and both canvas entrypoints using their original request
   const editInput = { scene, targetElementId: target.id, prompt: 'Change only the masked background', negativePrompt: '', providerId: 'image-provider',
     model: 'model-a', count: 1, profileId: 'configured-final', confirmed: true, sourceMessageId: null, parentResultId: null }
   const edit = await value.runtime.editFromCanvas(editInput, 'edit-id', undefined, true)
-  await value.runtime.setProviderConfig({ ...configuration('b'), protocol: 'unconfigured' } as ProviderPublicConfig)
+  await value.runtime.setProviderConfig({ ...configuration('b'), protocol: 'unconfigured' } as ProviderPublicConfigInput)
   expect((await value.runtime.enqueue(raw)).id).toBe(original.id)
   expect(await value.runtime.generateFromCanvas(canvasInput, 'canvas-id', undefined, true)).toEqual(canvas)
   expect(await value.runtime.editFromCanvas(editInput, 'edit-id', undefined, true)).toEqual(edit)
