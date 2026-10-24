@@ -619,7 +619,7 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
       <WorkspaceHeader onExport={exportCanvas} onShowLibrary={onShowLibrary} />
       <main
         ref={workspaceRef}
-        className={`canvas-workspace${inspectorOpen ? '' : ' inspector-collapsed'}${focusMode ? ' is-focus-mode' : ''}`}
+        className={`canvas-workspace${inspectorOpen ? '' : ' inspector-collapsed'}${focusMode ? ' is-focus-mode' : ''}${isPaintTool(activeTool) ? ' is-painting' : ''}`}
         onDragOver={(event) => {
           if ([...(event.dataTransfer?.items ?? [])].some((item) => item.kind === 'file')) event.preventDefault()
         }}

@@ -2684,6 +2684,9 @@ button.knowledge-copy { cursor: pointer; }
   :root:not([data-appearance-theme]) .result-family-branches button.is-active { color: #aac8ee; border-color: rgba(119,166,224,.24); background: rgba(106,151,207,.14); }
 }
 
+/* With a painting tool in hand the panels over the canvas are solid: a stroke changes the canvas every frame, and a blurred panel above it would be blurred again each time, which a modest graphics chip cannot keep up with. */
+.canvas-workspace.is-painting :is(.glass-island, .glass-surface) { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; background: var(--solid-surface) !important; }
+
 @media (prefers-reduced-transparency: reduce) {
   .workspace-header,
   .glass-surface,

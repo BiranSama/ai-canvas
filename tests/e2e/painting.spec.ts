@@ -110,7 +110,7 @@ test('a brush stroke paints the new layer as one undo step, and the export match
     // The ring shows the brush's real size on the canvas, and [ ] resize it in place.
     const ring = page.locator('.brush-ring')
     await expect(ring).toBeVisible()
-    const scale = await page.getByTestId('canvas-stage').evaluate((root) => Number((root as HTMLElement).dataset.artboardWidth) / 1024)
+    const scale = Number(await page.getByTestId('canvas-stage').getAttribute('data-artboard-width')) / 1024
     expect((await ring.boundingBox())!.width).toBeCloseTo(50 * scale, 0)
     await page.keyboard.press(']')
     await expect.poll(async () => Math.round((await ring.boundingBox())!.width)).toBe(Math.round(60 * scale))
