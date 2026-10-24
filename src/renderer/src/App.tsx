@@ -5,6 +5,7 @@ import {
   FilePlus2,
   FolderOpen,
   ImagePlus,
+  Keyboard,
   LayoutTemplate,
   Layers3,
   LayoutDashboard,
@@ -41,13 +42,16 @@ import { GenerateView } from './components/GenerateView'
 import { Inspector } from './components/Inspector'
 import { ProviderSettingsSheet } from './components/ProviderSettingsSheet'
 import { ProjectLibrary } from './components/ProjectLibrary'
+import { createProjectFromImage, OPENABLE_IMAGE_TYPES } from './project/open-image-project'
+import { ShortcutSheet } from './components/ShortcutSheet'
 import { WorkspaceRecoveryView } from './components/RendererErrorBoundary'
 import { createVisualExampleScene, VISUAL_EXAMPLE_KEYS, visualExampleLabels, type VisualExampleKey } from './fixtures/visual-examples'
 import { groupBoundsForChildTransforms, hydrateWorkspaceScene, useWorkspaceStore, type CanvasTool, type WorkspaceView } from './store/workspace-store'
 import { GlassIsland } from './islands/GlassIsland'
 import { resetAllGlassIslands } from './islands/island-events'
 import { waitForWorkspaceStartup } from './startup/workspace-startup'
-import { activeModal, canvasKeyboardBlocked, canvasPasteBlocked } from './interaction/keyboard-scope'
+import { activeModal, canvasKeyboardBlocked, canvasPasteBlocked, toolLetterAllowed } from './interaction/keyboard-scope'
+import { handlePhotoshopShortcut } from './interaction/photoshop-shortcuts'
 import { useModalScope } from './interaction/use-modal-scope'
 import { flushProjectWorkContext, startProjectContextSync } from './store/project-context-sync'
 import { projectContextWritable, projectGeneration, setProjectContextWritable } from './store/project-context-lifecycle'
@@ -145,8 +149,10 @@ function WorkspaceHeader({
   const [projectBusy, setProjectBusy] = useState(false)
   const [projectProblem, setProjectProblem] = useState<string | null>(null)
   const [online, setOnline] = useState(() => navigator.onLine)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const settingsButtonRef = useRef<HTMLButtonElement>(null)
   const projectImageInputRef = useRef<HTMLInputElement>(null)
+  const fileShortcutsRef = useRef<{ readonly create: () => void; readonly saveAs: () => void } | null>(null)
   const closeSettings = useCallback((): void => {
     setSettingsOpen(false)
     window.setTimeout(() => settingsButtonRef.current?.focus(), 0)
@@ -233,46 +239,33 @@ function WorkspaceHeader({
     }
   }
 
-  const createFromImage = async (file: File): Promise<void> => {
-    const suggestedName = file.name.replace(/\.[^.]+$/, '') || 'Image Project'
-    setProjectBusy(true)
-    setProjectProblem(null)
-    try {
-      await flushProjectWorkContext()
-      const result = await window.desktop.createProject({ suggestedName })
-      if (result.cancelled || result.bootstrap === null) return
-      await hydrateRuntimeWorkspace(result.bootstrap)
-      const projectId = result.bootstrap.scene.projectId
-      const generation = projectGeneration()
-      const isCurrent = (): boolean => generation === projectGeneration() && useWorkspaceStore.getState().scene.projectId === projectId
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      if (!isCurrent()) return
-      const asset = await window.desktop.importAsset({
-        projectId,
-        name: file.name,
-        mimeType: file.type as 'image/png' | 'image/jpeg' | 'image/webp',
-        bytes
-      })
-      if (!isCurrent()) return
-      const url = await window.desktop.readGenerationAsset(asset.id, false, projectId)
-      if (!isCurrent()) return
-      registerRuntimeAsset(asset.id, url)
-      const existing = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.type === 'image' && candidate.assetId === asset.id)
-      if (existing !== undefined) {
-        useWorkspaceStore.getState().setSelection([existing.id])
-        setProjectProblem(`已重新关联“${file.name}”。`)
-        setProjectMenuOpen(false)
-        return
-      }
-      const element = createElementForTool('image', useWorkspaceStore.getState().scene, asset.id)
-      if (element !== null) useWorkspaceStore.getState().addElement(element, `从“${file.name}”开始项目`)
-      setProjectMenuOpen(false)
-    } catch (error) {
-      setProjectProblem(error instanceof Error ? error.message : '未能从图片创建项目。')
-    } finally {
-      setProjectBusy(false)
-    }
+  const createFromImage = (file: File): void => {
+    clearEphemeralAnnotation()
+    void runProjectAction(async () => ({ cancelled: false, bootstrap: await createProjectFromImage(file) }))
   }
+
+  useLayoutEffect(() => {
+    fileShortcutsRef.current = {
+      create: () => { clearEphemeralAnnotation(); void runProjectAction(() => window.desktop.createProject({ suggestedName: 'Untitled' })) },
+      saveAs: () => void runProjectAction(() => window.desktop.saveProjectAs({ suggestedName: projectName }))
+    }
+  })
+
+  // Photoshop's file keys work wherever focus is, short of an open dialog.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || event.defaultPrevented || event.isComposing || activeModal() !== null) return
+      const key = event.key.toLowerCase()
+      const handle = (action: () => void): void => { event.preventDefault(); action() }
+      if (event.altKey && event.shiftKey && event.code === 'KeyK') handle(() => setShortcutsOpen(true))
+      else if (event.altKey) return
+      else if (!event.shiftKey && key === 'n') handle(() => fileShortcutsRef.current?.create())
+      else if (!event.shiftKey && key === 'o') handle(() => projectImageInputRef.current?.click())
+      else if (event.shiftKey && key === 's') handle(() => fileShortcutsRef.current?.saveAs())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   return (
     <>
@@ -319,10 +312,11 @@ function WorkspaceHeader({
     {projectMenuOpen && (
       <div className="project-menu glass-surface" role="menu" aria-label="项目菜单">
         <div className="project-menu-primary">
-          <button type="button" role="menuitem" disabled={projectBusy} onClick={() => { clearEphemeralAnnotation(); void runProjectAction(() => window.desktop.createProject({ suggestedName: 'Untitled' })) }}><FilePlus2 size={14} /><span>新建空白项目</span></button>
-          <button type="button" role="menuitem" disabled={projectBusy} onClick={() => projectImageInputRef.current?.click()}><ImagePlus size={14} /><span>从图片开始</span></button>
+          <button type="button" role="menuitem" disabled={projectBusy} onClick={() => { clearEphemeralAnnotation(); void runProjectAction(() => window.desktop.createProject({ suggestedName: 'Untitled' })) }}><FilePlus2 size={14} /><span>新建空白项目</span><kbd aria-hidden="true">Ctrl+N</kbd></button>
+          <button type="button" role="menuitem" disabled={projectBusy} onClick={() => projectImageInputRef.current?.click()}><ImagePlus size={14} /><span>从图片开始</span><kbd aria-hidden="true">Ctrl+O</kbd></button>
           <button type="button" role="menuitem" disabled={projectBusy} onClick={() => void runProjectAction(() => window.desktop.openProject())}><FolderOpen size={14} /><span>打开项目</span></button>
-          <button type="button" role="menuitem" disabled={projectBusy} onClick={() => void runProjectAction(() => window.desktop.saveProjectAs({ suggestedName: projectName }))}><Save size={14} /><span>另存为</span></button>
+          <button type="button" role="menuitem" disabled={projectBusy} onClick={() => void runProjectAction(() => window.desktop.saveProjectAs({ suggestedName: projectName }))}><Save size={14} /><span>另存为</span><kbd aria-hidden="true">Ctrl+Shift+S</kbd></button>
+          <button type="button" role="menuitem" onClick={() => { setProjectMenuOpen(false); setShortcutsOpen(true) }}><Keyboard size={14} /><span>快捷键</span><kbd aria-hidden="true">Ctrl+Alt+Shift+K</kbd></button>
         </div>
         <div className="example-projects" aria-label="示例作品">
           <span><LayoutTemplate size={12} />示例作品</span>
@@ -332,12 +326,13 @@ function WorkspaceHeader({
         {projectProblem !== null && <p role="alert">{projectProblem}</p>}
       </div>
     )}
-    <input ref={projectImageInputRef} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => {
+    <input ref={projectImageInputRef} className="visually-hidden" type="file" accept={OPENABLE_IMAGE_TYPES.join(',')} onChange={(event) => {
       const file = event.currentTarget.files?.[0]
       event.currentTarget.value = ''
-      if (file !== undefined) void createFromImage(file)
+      if (file !== undefined) createFromImage(file)
     }} />
     {settingsOpen && <ProviderSettingsSheet initialProviderId={settingsProviderId} onClose={closeSettings} />}
+    {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
     </>
   )
 }
@@ -452,7 +447,7 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
       return
     }
     setActiveTool(tool)
-    if (tool === 'select' || tool === 'hand') return
+    if (tool === 'select' || tool === 'hand' || tool === 'eyedropper') return
     if (tool === 'sketch') return
     if (tool === 'image') {
       setImportChooserOpen(true)
@@ -465,7 +460,12 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
 
   useLayoutEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (canvasKeyboardBlocked(event)) return
+      const shortcutContext = { chooseTool, toggleFocusMode: () => setFocusMode((current: boolean) => !current) }
+      if (canvasKeyboardBlocked(event)) {
+        if (toolLetterAllowed(event)) handlePhotoshopShortcut(event, shortcutContext)
+        return
+      }
+      if (handlePhotoshopShortcut(event, shortcutContext)) return
       const command = event.ctrlKey || event.metaKey
       if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.length > 0) {
         event.preventDefault()
@@ -561,14 +561,6 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
           if (transform !== null) commands.push({ kind: 'element.update', elementId: groupId, changes: { transform } })
         }
         if (commands.length > 0) current.execute(`移动 ${current.selectedIds.length} 个元素`, commands)
-      } else if (!command && event.key.toLowerCase() === 'v') {
-        chooseTool('select')
-      } else if (!command && event.key.toLowerCase() === 'h') {
-        chooseTool('hand')
-      } else if (!command && event.key.toLowerCase() === 'b') {
-        chooseTool('sketch')
-      } else if (!command && event.key.toLowerCase() === 't') {
-        chooseTool('text')
       }
     }
     const handlePaste = (event: ClipboardEvent): void => {
@@ -775,6 +767,38 @@ export function App(): React.JSX.Element {
     await hydrateRuntimeWorkspace(bootstrap)
     setScreen('workspace')
   }, [])
+  // Images opened from the system (打开方式, a file dropped on the app's icon) become projects once the app is up.
+  const openingFilesRef = useRef(false)
+  const openRequestedFiles = useCallback(async (): Promise<void> => {
+    const desktop = window.desktop as Partial<DesktopApi> | undefined
+    if (desktop?.takeOpenFileRequests === undefined || openingFilesRef.current) return
+    openingFilesRef.current = true
+    try {
+      for (let requests = await desktop.takeOpenFileRequests(); requests.length > 0; requests = await desktop.takeOpenFileRequests()) {
+        for (const request of requests) {
+          try {
+            await flushProjectWorkContext()
+            clearEphemeralAnnotation()
+            const bootstrap = await createProjectFromImage(new File([request.bytes as Uint8Array<ArrayBuffer>], request.name, { type: request.mimeType }))
+            if (bootstrap === null) continue
+            await openWorkspace(bootstrap)
+            useWorkspaceStore.getState().setActiveView('canvas')
+          } catch (error) {
+            useWorkspaceStore.setState({ sceneProblem: error instanceof Error ? error.message : `没有打开“${request.name}”。` })
+          }
+        }
+      }
+    } finally {
+      openingFilesRef.current = false
+    }
+  }, [openWorkspace])
+  const appReady = screen === 'library' || screen === 'workspace'
+  useEffect(() => {
+    if (!appReady) return
+    void openRequestedFiles()
+    return (window.desktop as Partial<DesktopApi> | undefined)?.onOpenFileRequested?.(() => void openRequestedFiles())
+  }, [appReady, openRequestedFiles])
+
   const showLibrary = (): void => { void flushProjectWorkContext().then(() => setScreen('library')).catch((error: unknown) => {
     useWorkspaceStore.setState({ sceneProblem: error instanceof Error ? error.message : '工作状态尚未保存，请重试。' })
   }) }

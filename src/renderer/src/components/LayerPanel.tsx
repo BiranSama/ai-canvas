@@ -135,6 +135,8 @@ export function LayerPanel(): React.JSX.Element {
   const [dragged, setDragged] = useState<string | null>(null)
   const [drop, setDrop] = useState<DropTarget | null>(null)
   const [anchor, setAnchor] = useState<string | null>(null)
+  // Alt+click on an eye shows only that layer; the visibility before it, to restore on the next Alt+click.
+  const [solo, setSolo] = useState<{ readonly id: string; readonly before: ReadonlyMap<string, boolean> } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -232,6 +234,32 @@ export function LayerPanel(): React.JSX.Element {
     else if (action === 'lock') void updateElement(id, { locked: !element.locked }, element.locked ? '解锁图层' : '锁定图层')
     else if (action === 'group') void group()
     else void ungroup()
+  }
+
+  /** Photoshop's Alt+click on an eye: only this layer (with its group and contents) stays visible; again restores the rest. */
+  const toggleSolo = (element: SceneElement): void => {
+    if (solo !== null && solo.id === element.id) {
+      const commands = elements.flatMap((candidate) => {
+        const before = solo.before.get(candidate.id)
+        return before === undefined || before === candidate.visible || candidate.locked ? [] : [{ kind: 'element.update' as const, elementId: candidate.id, changes: { visible: before } }]
+      })
+      setSolo(null)
+      if (commands.length > 0) void execute('恢复图层显示', commands)
+      return
+    }
+    const keep = new Set<string>([element.id])
+    const addContents = (id: string): void => {
+      const current = byId.get(id)
+      for (const child of current === undefined ? [] : childrenOf(elements, current)) { keep.add(child.id); addContents(child.id) }
+    }
+    addContents(element.id)
+    for (let parent = element.groupId; parent !== null; parent = byId.get(parent)?.groupId ?? null) keep.add(parent)
+    const commands = elements.flatMap((candidate) => {
+      const visible = keep.has(candidate.id)
+      return candidate.visible === visible || candidate.locked ? [] : [{ kind: 'element.update' as const, elementId: candidate.id, changes: { visible } }]
+    })
+    setSolo({ id: element.id, before: new Map(elements.map((candidate) => [candidate.id, candidate.visible])) })
+    if (commands.length > 0) void execute(`只显示“${element.name}”`, commands)
   }
 
   const onListKey = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -339,7 +367,7 @@ export function LayerPanel(): React.JSX.Element {
               onDrop={(event) => { event.preventDefault(); finishDrop(dropAt(event, element)) }}
             >
               <button type="button" className={`layer-eye${element.visible ? '' : ' is-off'}`} aria-label={element.visible ? `隐藏${element.name}` : `显示${element.name}`} title={element.visible ? '隐藏' : '显示'}
-                disabled={element.locked} onClick={(event) => { event.stopPropagation(); act(element.id, 'visibility') }}>
+                disabled={element.locked} onClick={(event) => { event.stopPropagation(); if (event.altKey) toggleSolo(element); else act(element.id, 'visibility') }}>
                 {element.visible ? <Eye size={14} /> : <EyeOff size={14} />}
               </button>
               <span className="layer-indent" aria-hidden="true" />

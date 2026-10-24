@@ -7,6 +7,7 @@ import { generationReferencePreviewInputSchema } from '../../shared/generation-r
 import type { AppearanceSettingsService } from '../appearance/appearance-settings-service'
 import type { GenerationRuntime } from '../generation/generation-runtime'
 import { localFontCatalog } from '../fonts/local-font-catalog'
+import { takeOpenFileRequests } from '../open-file-requests'
 import { inspectNativeModules } from '../native-health'
 import {
   activityBatchIdSchema,
@@ -120,6 +121,7 @@ export function registerDesktopIpc(
   for (const channel of Object.values(DESKTOP_CHANNELS)) ipcMain.removeHandler(channel)
   ipcMain.handle(DESKTOP_CHANNELS.runtimeInfo, async (): Promise<RuntimeInfo> => createRuntimeInfo(backgroundMaterial, generationRuntime))
   ipcMain.handle(DESKTOP_CHANNELS.localFonts, async (_event, rescan: unknown) => localFontCatalog.list({ rescan: rescan === true }))
+  ipcMain.handle(DESKTOP_CHANNELS.openFileRequests, () => takeOpenFileRequests())
   ipcMain.handle(DESKTOP_CHANNELS.imageToneMatch, async (_event, input: unknown) => (await generationRuntime).matchImageTone(imageToneMatchSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettings, async () => appearanceSettings.snapshot())
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettingsSet, async (_event, input: unknown) => {

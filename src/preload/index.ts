@@ -34,6 +34,12 @@ import type { ProjectWorkContext } from '../shared/project-work-context'
 const desktopApi: DesktopApi = Object.freeze({
   getRuntimeInfo: (): Promise<RuntimeInfo> => ipcRenderer.invoke(DESKTOP_CHANNELS.runtimeInfo),
   listLocalFonts: (rescan?: boolean) => ipcRenderer.invoke(DESKTOP_CHANNELS.localFonts, rescan === true),
+  takeOpenFileRequests: () => ipcRenderer.invoke(DESKTOP_CHANNELS.openFileRequests),
+  onOpenFileRequested: (listener: () => void) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(DESKTOP_EVENTS.openFileRequested, handler)
+    return () => ipcRenderer.removeListener(DESKTOP_EVENTS.openFileRequested, handler)
+  },
   matchImageTone: (input: { readonly elementId: string; readonly strength: number }) => ipcRenderer.invoke(DESKTOP_CHANNELS.imageToneMatch, input),
   getAppearanceSettings: (): Promise<AppearanceSettingsSnapshot> => ipcRenderer.invoke(DESKTOP_CHANNELS.appearanceSettings),
   setAppearanceSettings: (input: AppearanceSettingsUpdate): Promise<AppearanceSettingsSnapshot> =>

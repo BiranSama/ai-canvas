@@ -148,6 +148,7 @@ export function createElementForTool(tool: CanvasTool, scene: Scene, assetId?: s
     }
     case 'select':
     case 'hand':
+    case 'eyedropper':
       return null
   }
 }

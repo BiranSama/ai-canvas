@@ -54,6 +54,18 @@ export function canvasKeyboardBlocked(event: KeyboardEvent): boolean {
   return !(event.ctrlKey || event.metaKey) && isInteractiveTarget(event.target)
 }
 
+/**
+ * Photoshop's tool and colour letters work wherever focus is except where
+ * typing or a control's own keys need them: a text field, a dialog, a
+ * resize handle, a slider or a keyboard-driven toolbar. So a plain letter
+ * still reaches the canvas from a focused button, tab or layer row.
+ */
+export function toolLetterAllowed(event: KeyboardEvent): boolean {
+  if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || activeModal() !== null || isTextInputTarget(event.target)) return false
+  if (event.ctrlKey || event.metaKey || event.altKey || !/^Key[A-Z]$/.test(event.code)) return false
+  return targetElement(event.target)?.closest('[role="separator"], [role="slider"], [role="toolbar"][tabindex]') == null
+}
+
 export function canvasPasteBlocked(event: ClipboardEvent): boolean {
   return event.defaultPrevented || activeModal() !== null || isTextInputTarget(event.target)
 }

@@ -26,7 +26,8 @@ test('creates a persistent project from the native image-first menu path', async
     await chooser.setFiles(resolve('tests/visual/__screenshots__/m3-canvas-1024x700.png'))
 
     await expect(window.getByRole('button', { name: '项目菜单：Image Start' })).toBeVisible({ timeout: 10_000 })
-    await expect(window.getByRole('listbox', { name: '图层' }).getByText('导入图片')).toBeVisible({ timeout: 10_000 })
+    // Opened as Photoshop opens an image: one layer, 背景 or, with transparency, 图层 0.
+    await expect(window.getByRole('listbox', { name: '图层' }).getByText(/^(背景|图层 0)$/)).toBeVisible({ timeout: 10_000 })
     const bootstrap = await window.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop
       return api.getWorkspaceBootstrap()

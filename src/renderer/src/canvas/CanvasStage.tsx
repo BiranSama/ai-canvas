@@ -372,9 +372,31 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
   const activeTool = useWorkspaceStore((state) => state.activeTool)
   const enterGroupEditing = useWorkspaceStore((state) => state.enterGroupEditing)
   const dragOccurredRef = useRef(false)
+  // Alt held when a drag starts drops a copy and leaves the original, as in Photoshop.
+  const copyOnDropRef = useRef(false)
   const displayTransform = shapeTransformOverride ?? element.transform
   const width = displayTransform.width * artboard.width
   const height = displayTransform.height * artboard.height
+
+  /**
+   * Puts every dragged node back where the scene has it and adds copies
+   * where they were dropped. False when nothing dragged can be copied (a
+   * locked layer, or a layer inside a group being edited), so the drag
+   * moves it instead.
+   */
+  const dropCopies = (stage: Konva.Stage | null, delta: { readonly x: number; readonly y: number }): boolean => {
+    const copyable = scene.elements.some((candidate) => selectedIds.includes(candidate.id) && candidate.groupId === null && !candidate.locked)
+    if (!copyable) return false
+    for (const candidate of scene.elements) {
+      stage?.findOne(`#element-${candidate.id}`)?.position({
+        x: candidate.transform.x * artboard.width,
+        y: candidate.transform.y * artboard.height
+      })
+    }
+    void useWorkspaceStore.getState().duplicateSelection(delta)
+    return true
+  }
+
   if (element.type === 'group') {
     const isEditing = editingGroupId === element.id
     const children = scene.elements.filter((candidate) => element.childIds.includes(candidate.id))
@@ -456,8 +478,9 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
           event.cancelBubble = true
           enterGroupEditing(element.id)
         }}
-        onDragStart={() => {
+        onDragStart={(event) => {
           dragOccurredRef.current = true
+          copyOnDropRef.current = event.evt.altKey
           if (!selectedIds.includes(element.id)) select(element.id, false)
           onBeginDrag(element.id)
         }}
@@ -484,6 +507,10 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
             onFinishDrag(element.id)
             return
           }
+          const groupDelta = {
+            x: event.target.x() / artboard.width - element.transform.x,
+            y: event.target.y() / artboard.height - element.transform.y
+          }
           if (isDragCancelled()) {
             for (const candidate of scene.elements) {
               event.target.getStage()?.findOne(`#element-${candidate.id}`)?.position({
@@ -491,6 +518,8 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
                 y: candidate.transform.y * artboard.height
               })
             }
+          } else if (copyOnDropRef.current && dropCopies(event.target.getStage(), groupDelta)) {
+            // The copies are in; the originals went back where they were.
           } else if (selectedIds.includes(element.id) && selectedIds.length > 1) {
             const delta = {
               x: event.target.x() / artboard.width - element.transform.x,
@@ -541,14 +570,16 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         select(element.id, false)
         onRequestEdit(element)
       }}
-      onDragStart={() => {
+      onDragStart={(event) => {
         dragOccurredRef.current = true
+        copyOnDropRef.current = event.evt.altKey
         if (!selectedIds.includes(element.id)) select(element.id, false)
         onBeginDrag(element.id)
       }}
       onDragMove={(event) => {
         const node = event.target
-        if (event.evt.altKey) {
+        // Ctrl suspends snapping while it is held, as in Photoshop.
+        if (event.evt.ctrlKey || event.evt.metaKey) {
           onGuides([])
           return
         }
@@ -622,6 +653,10 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         const delta = {
           x: event.target.x() / artboard.width - element.transform.x,
           y: event.target.y() / artboard.height - element.transform.y
+        }
+        if (copyOnDropRef.current && dropCopies(event.target.getStage(), delta)) {
+          onFinishDrag(element.id)
+          return
         }
         const movableRoots = scene.elements.filter((candidate) =>
           selectedIds.includes(candidate.id) && !candidate.locked && (candidate.type === 'group' || candidate.groupId === null || candidate.groupId === editingGroupId)
@@ -778,6 +813,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const stageRef = useRef<Konva.Stage>(null)
   const transformerRef = useRef<Konva.Transformer>(null)
   const auxiliaryLayerRef = useRef<Konva.Layer>(null)
+  const contentLayerRef = useRef<Konva.Layer>(null)
   const [guides, setGuides] = useState<Guide[]>([])
   const [draftStroke, setDraftStroke] = useState<number[]>([])
   const [draftMask, setDraftMask] = useState<number[]>([])
@@ -1752,8 +1788,30 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     return true
   }
 
+  /**
+   * The eyedropper reads the picture as drawn under the pointer, background
+   * included, and sets the foreground colour, or with Alt the background.
+   * A transparent pixel reads as it shows, over white.
+   */
+  const sampleColor = (toBackground: boolean): void => {
+    const layer = contentLayerRef.current
+    const pointer = stageRef.current?.getPointerPosition()
+    if (layer === null || pointer === null || pointer === undefined) return
+    if (pointer.x < displayedArtboard.x || pointer.y < displayedArtboard.y
+      || pointer.x >= displayedArtboard.x + displayedArtboard.width || pointer.y >= displayedArtboard.y + displayedArtboard.height) return
+    const ratio = layer.getCanvas().getPixelRatio()
+    const pixel = layer.getNativeCanvasElement().getContext('2d')?.getImageData(Math.floor(pointer.x * ratio), Math.floor(pointer.y * ratio), 1, 1).data
+    if (pixel === undefined) return
+    const alpha = pixel[3]! / 255
+    const hex = `#${[pixel[0]!, pixel[1]!, pixel[2]!].map((channel) => Math.round(channel * alpha + 255 * (1 - alpha)).toString(16).padStart(2, '0')).join('').toUpperCase()}`
+    const store = useWorkspaceStore.getState()
+    if (toBackground) store.setBackgroundColor(hex)
+    else store.setForegroundColor(hex)
+  }
+
   const handleElementSelect = (element: SceneElement, event: KonvaEventObject<MouseEvent | TouchEvent>): void => {
     event.cancelBubble = true
+    if (activeTool === 'eyedropper') return
     const targetId = element.groupId !== null && element.groupId !== editingGroupId ? element.groupId : element.id
     if (!event.evt.altKey) {
       select(targetId, event.evt.shiftKey || event.evt.ctrlKey || event.evt.metaKey)
@@ -1904,7 +1962,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   return (
     <div
       ref={containerRef}
-      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}`}
+      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}${activeTool === 'eyedropper' ? ' is-eyedropper' : ''}`}
       data-testid="canvas-stage"
       tabIndex={preview ? -1 : 0}
       aria-label={preview ? '作品预览' : '画布编辑区'}
@@ -1937,6 +1995,10 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         onMouseDown={(event) => {
           if (preview) {
             beginEphemeralAnnotation()
+            return
+          }
+          if (activeTool === 'eyedropper' && event.evt.button === 0 && !spacePressed) {
+            sampleColor(event.evt.altKey)
             return
           }
           if (event.evt.button === 1 || ((spacePressed || activeTool === 'hand') && event.evt.button === 0)) {
@@ -2015,7 +2077,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
             cornerRadius={3}
           />
         </Layer>
-        <Layer>
+        <Layer ref={contentLayerRef}>
           <Group
             id="artboard-content"
             x={artboard.x}

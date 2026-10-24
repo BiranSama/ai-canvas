@@ -59,6 +59,7 @@ import type { ImageEffects } from '../domain'
 export const DESKTOP_CHANNELS = {
   runtimeInfo: 'desktop:runtime-info',
   localFonts: 'desktop:local-fonts',
+  openFileRequests: 'desktop:open-file-requests',
   imageToneMatch: 'scene:image-tone-match',
   unifiedRender: 'generation:unified-render',
   appearanceSettings: 'appearance:settings',
@@ -132,7 +133,8 @@ export const DESKTOP_EVENTS = {
   windowClosing: 'window:closing',
   sceneChanged: 'scene:changed',
   agentEvent: 'agent:event',
-  appearanceChanged: 'appearance:changed'
+  appearanceChanged: 'appearance:changed',
+  openFileRequested: 'desktop:open-file-requested'
 } as const
 
 export type DesktopPlatform =
@@ -177,11 +179,22 @@ export interface GenerationProviderInfo {
   }[]
 }
 
+/** An image the system asked the app to open, as from Explorer's 打开方式 or a file dropped on the app's icon. */
+export interface OpenFileRequest {
+  readonly name: string
+  readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
+  readonly bytes: Uint8Array
+}
+
 export interface DesktopApi {
   onWindowClosing(listener: () => Promise<void>): () => void
   getRuntimeInfo(): Promise<RuntimeInfo>
   /** Font families installed on this computer, scanned once per run unless asked to rescan. */
   listLocalFonts(rescan?: boolean): Promise<readonly LocalFontFamily[]>
+  /** Images waiting to be opened as projects; each is handed over once. */
+  takeOpenFileRequests(): Promise<readonly OpenFileRequest[]>
+  /** Called when the system asks to open another image; take it with takeOpenFileRequests. */
+  onOpenFileRequested(listener: () => void): () => void
   /** How to shift an image's colour part of the way (strength 0–1) towards the picture around it; null when it cannot be measured. */
   matchImageTone(input: { readonly elementId: string; readonly strength: number }): Promise<{ readonly colorMatch: NonNullable<ImageEffects['colorMatch']>; readonly opaque: boolean } | null>
   getAppearanceSettings(): Promise<AppearanceSettingsSnapshot>
