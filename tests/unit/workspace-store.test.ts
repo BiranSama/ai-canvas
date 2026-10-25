@@ -30,6 +30,24 @@ describe('workspace CommandBus projection', () => {
     expect(useWorkspaceStore.getState().scene.elements).toEqual(createNightVeilScene().elements)
   })
 
+  it('works out a queued batch from the scene left by the changes before it, or sends nothing', async () => {
+    const store = useWorkspaceStore.getState()
+    const title = () => useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!
+    expect(await store.execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])).toBe(true)
+    // An undo queued first lands before the batch is worked out, as a background bake meeting an undo would.
+    const undone = store.undo()
+    const seen: string[] = []
+    const later = store.execute('跟着改', (scene) => {
+      const current = scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!
+      seen.push(current.name)
+      return current.name === '标题一' ? [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题二' } }] : null
+    })
+    await undone
+    expect(await later).toBe(false)
+    expect(seen).toEqual([createNightVeilScene().elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!.name])
+    expect(title().name).toBe(seen[0])
+  })
+
   it('enters a Group, edits one child atomically and recomputes the Group bounds', async () => {
     const store = useWorkspaceStore.getState()
     store.setSelection([NIGHT_VEIL_IDS.bottle, NIGHT_VEIL_IDS.title])

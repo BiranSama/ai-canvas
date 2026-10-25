@@ -183,7 +183,12 @@ interface WorkspaceState {
   setTransformRatioLocked(locked: boolean): void
   setGeometryUnit(unit: 'px' | 'percent'): void
   fitViewport(): void
-  execute(summary: string, commands: readonly SceneCommand[]): Promise<boolean>
+  /**
+   * Sends one batch after the changes queued before it. Commands that
+   * depend on those changes are worked out from the scene as it is then;
+   * null sends nothing.
+   */
+  execute(summary: string, commands: readonly SceneCommand[] | ((scene: Scene) => readonly SceneCommand[] | null)): Promise<boolean>
   updateElement(id: string, changes: Record<string, unknown>, summary?: string): Promise<boolean>
   deleteSelection(): Promise<boolean>
   /** Copies the selected layers in place, each directly above its source, or moved by offset (Alt+drag). */
@@ -427,14 +432,16 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         set({ sceneProblem: 'Main SceneService 不可用，画布未修改。' })
         return false
       }
+      const current = get().scene
+      const list = typeof commands === 'function' ? commands(current) : commands
+      if (list === null) return false
       set({ mutationPending: true })
       try {
-        const current = get().scene
         const batch: CommandBatchInput = {
           id: createId(),
           origin: 'user',
           summary,
-          commands: [...commands]
+          commands: [...list]
         }
         ownBatchIds.add(batch.id)
         if (ownBatchIds.size > MAX_HISTORY_STEPS) ownBatchIds.delete(ownBatchIds.values().next().value!)

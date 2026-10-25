@@ -54,11 +54,11 @@ function toBytes(pixels: PixelData): Uint8Array {
 }
 
 /**
- * The layer's mask over the layer's own pixels, as a grayscale PNG. A
+ * The layer's mask over the layer's own pixels, as gray values. A
  * Photoshop mask can have its own bounds and a colour outside them; a
  * turned-off mask comes along turned off.
  */
-async function layerMask(layer: Layer, width: number, height: number): Promise<PsdLayerImport['mask']> {
+function layerMask(layer: Layer, width: number, height: number): { readonly gray: Uint8Array<ArrayBuffer>; readonly enabled: boolean } | null {
   const mask = layer.mask
   if (mask === undefined) return null
   const maskPixels = getLayerMaskImageData(layer)
@@ -77,8 +77,11 @@ async function layerMask(layer: Layer, width: number, height: number): Promise<P
       gray[y * width + x] = mx >= 0 && my >= 0 && mx < maskPixels.width && my < maskPixels.height ? maskBytes[(my * maskPixels.width + mx) * 4]! : outside
     }
   }
-  const png = new Uint8Array(await sharp(Buffer.from(gray.buffer), { raw: { width, height, channels: 1 } }).png({ compressionLevel: 6 }).toBuffer())
-  return { png, enabled: mask.disabled !== true }
+  return { gray, enabled: mask.disabled !== true }
+}
+
+async function grayPng(gray: Uint8Array<ArrayBuffer>, width: number, height: number): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(await sharp(Buffer.from(gray.buffer), { raw: { width, height, channels: 1 } }).png({ compressionLevel: 6 }).toBuffer())
 }
 
 async function png(rgba: Uint8Array, width: number, height: number): Promise<Uint8Array<ArrayBuffer>> {
@@ -144,7 +147,12 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     if (layer.text !== undefined) notes.text += 1
     const blendMode = BLEND_MODES[layer.blendMode ?? 'normal']
     if (blendMode === undefined) notes.blends += 1
-    if (layers.length === 0) bottomOpaque = left <= 0 && top <= 0 && left + width >= psd.width && top + height >= psd.height && opacity >= 1 && isOpaque(rgba)
+    const mask = layerMask(layer, width, height)
+    // A mask that is on hides what it covers, so the bottom layer is opaque only if its mask hides nothing.
+    if (layers.length === 0) {
+      bottomOpaque = left <= 0 && top <= 0 && left + width >= psd.width && top + height >= psd.height && opacity >= 1 && isOpaque(rgba)
+        && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))
+    }
     layers.push({
       name: layer.name?.trim() || `图层 ${layers.length + 1}`,
       left, top, width, height,
@@ -153,7 +161,7 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       blendMode: blendMode ?? 'normal',
       groupIndex: group?.index ?? null,
       png: await png(rgba, width, height),
-      mask: await layerMask(layer, width, height)
+      mask: mask === null ? null : { png: await grayPng(mask.gray, width, height), enabled: mask.enabled }
     })
   }
   for (const layer of psd.children ?? []) await visit(layer, null)

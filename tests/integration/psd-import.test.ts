@@ -1,3 +1,4 @@
+import { writePsdUint8Array } from 'ag-psd'
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
 import { PsdImportError, readPsdForImport } from '../../src/main/psd/psd-import'
@@ -43,6 +44,20 @@ describe('reading a PSD for import', () => {
     expect(document.composite).not.toBeNull()
     const composite = await pixels(document.composite!)
     expect([composite.width, composite.height]).toEqual([200, 100])
+  })
+
+  it('counts the bottom layer as an opaque background only where its mask, when on, hides nothing', async () => {
+    const opaqueUnder = async (maskValue: number | null, disabled = false) => {
+      const data = new Uint8ClampedArray(20 * 10 * 4).fill(255)
+      const mask = maskValue === null ? undefined
+        : { left: 0, top: 0, right: 20, bottom: 10, defaultColor: maskValue, disabled, imageData: { width: 20, height: 10, data: new Uint8ClampedArray(20 * 10 * 4).fill(maskValue) } }
+      const psd = writePsdUint8Array({ width: 20, height: 10, children: [{ name: '底', left: 0, top: 0, right: 20, bottom: 10, opacity: 1, imageData: { width: 20, height: 10, data }, ...(mask === undefined ? {} : { mask }) }] })
+      return (await readPsdForImport(psd)).opaqueBackground
+    }
+    expect(await opaqueUnder(null)).toBe(true)
+    expect(await opaqueUnder(255)).toBe(true)
+    expect(await opaqueUnder(0)).toBe(false)
+    expect(await opaqueUnder(0, true)).toBe(true)
   })
 
   it('refuses what is over its limits before decoding it, and what is not a PSD', async () => {

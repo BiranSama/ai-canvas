@@ -109,10 +109,12 @@ async function bakeIfLong(elementId: string): Promise<void> {
   try {
     const baked = await window.desktop.bakePaint(elementId)
     if (baked === null) return
-    const current = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === elementId)
-    if (current?.type !== 'image' || current.assetId !== element.assetId || !startsWithBaked(current.paint, baked.paintIds)) return
-    const covered = new Set(baked.paintIds)
-    await useWorkspaceStore.getState().updateElement(elementId, { assetId: baked.assetId, paint: (current.paint ?? []).filter((op) => !covered.has(op.id)) }, '合并绘制记录')
+    // Checked when the batch runs, after any undo queued before it.
+    await useWorkspaceStore.getState().execute('合并绘制记录', (scene) => {
+      const current = scene.elements.find((candidate) => candidate.id === elementId)
+      if (current?.type !== 'image' || current.assetId !== element.assetId || !startsWithBaked(current.paint, baked.paintIds)) return null
+      return [{ kind: 'element.update', elementId, changes: { assetId: baked.assetId, paint: (current.paint ?? []).slice(baked.paintIds.length) } }]
+    })
   } catch {
     // The operations stay recorded; the next stroke tries again.
   } finally {
@@ -169,10 +171,13 @@ async function bakeMaskIfLong(elementId: string): Promise<void> {
   try {
     const { scene } = useWorkspaceStore.getState()
     const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: '蒙版.png', width: snapshot.width, height: snapshot.height, gray: snapshot.coverage })
-    const current = currentElement(elementId)?.mask
-    if (current === null || current === undefined || current.assetId !== mask.assetId || !startsWithBaked(current.paint, snapshot.applied)) return
-    const covered = new Set(snapshot.applied)
-    await useWorkspaceStore.getState().updateElement(elementId, { mask: { ...current, assetId: asset.id, paint: (current.paint ?? []).filter((op) => !covered.has(op.id)) } }, '合并蒙版绘制记录')
+    // Checked when the batch runs, after any undo queued before it.
+    await useWorkspaceStore.getState().execute('合并蒙版绘制记录', (scene) => {
+      const element = scene.elements.find((candidate) => candidate.id === elementId)
+      const current = element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape') ? element.mask : null
+      if (current === null || current === undefined || current.assetId !== mask.assetId || !startsWithBaked(current.paint, snapshot.applied)) return null
+      return [{ kind: 'element.update', elementId, changes: { mask: { ...current, assetId: asset.id, paint: (current.paint ?? []).slice(snapshot.applied.length) } } }]
+    })
   } catch {
     // The operations stay recorded; the next stroke tries again.
   } finally {
