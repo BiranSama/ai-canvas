@@ -521,6 +521,21 @@ test('header actions and project-card actions stay separate and More opens a rea
     await expect(confirmation).toBeVisible()
     await confirmation.getByRole('button', { name: '取消' }).click()
     await expect(confirmation).toBeHidden()
+
+    // Deleting it shows the notice whole, inside the window, at every size and zoom.
+    await more.click()
+    await menu.getByRole('menuitem', { name: '删除项目…' }).click()
+    await confirmation.getByRole('button', { name: '移到回收站' }).click()
+    const notice = window.getByRole('status').filter({ hasText: '项目已移到系统回收站。' })
+    await expect(notice).toBeVisible()
+    for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }]) {
+      await window.setViewportSize(viewport)
+      await expect.poll(async () => {
+        const box = await notice.boundingBox()
+        return box !== null && box.x >= 0 && box.y >= 0 && box.x + box.width <= viewport.width && box.y + box.height <= viewport.height
+      }).toBe(true)
+    }
+    await window.screenshot({ path: test.info().outputPath('delete-notice.png') })
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })

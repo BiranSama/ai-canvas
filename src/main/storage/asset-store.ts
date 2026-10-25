@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, stat } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, join, posix } from 'node:path'
 import sharp from 'sharp'
 import type { AssetMetadata, ProjectRepository } from './project-repository'
@@ -13,16 +12,6 @@ export interface ImportAssetInput {
   readonly sourcePath: string
   readonly sourceType?: AssetMetadata['sourceType']
   readonly sourceId?: string | null
-}
-
-async function hashFile(filePath: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256')
-    const stream = createReadStream(filePath)
-    stream.on('data', (chunk) => hash.update(chunk))
-    stream.on('error', reject)
-    stream.on('end', () => resolve(hash.digest('hex')))
-  })
 }
 
 function normalizeFormat(format: string | undefined): AssetMetadata['format'] {
@@ -81,25 +70,28 @@ export class AssetStore {
       throw new Error('Image must be between 1 byte and 100 MB.')
     }
 
-    const metadata = await sharp(input.sourcePath, { limitInputPixels: MAX_PIXELS }).metadata()
+    // Read once through Node, which reaches long Windows paths that Sharp's own file reading cannot.
+    const bytes = await readFile(input.sourcePath)
+    const metadata = await sharp(bytes, { limitInputPixels: MAX_PIXELS }).metadata()
     const format = normalizeFormat(metadata.format)
     const width = metadata.width ?? 0
     const height = metadata.height ?? 0
     if (width <= 0 || height <= 0 || width > MAX_DIMENSION || height > MAX_DIMENSION || width * height > MAX_PIXELS) {
       throw new Error('Image dimensions exceed the safe import limit.')
     }
+    const thumbnail = (): Promise<Buffer> => sharp(bytes, { limitInputPixels: MAX_PIXELS })
+      .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 82 })
+      .toBuffer()
 
-    const contentHash = await hashFile(input.sourcePath)
+    const contentHash = createHash('sha256').update(bytes).digest('hex')
     const existing = await this.#repository.findAssetByHash(this.#projectId, contentHash)
     if (existing !== null) {
       if (existing.status === 'missing') {
         await mkdir(join(this.#projectDirectory, 'assets', 'original'), { recursive: true })
         await mkdir(join(this.#projectDirectory, 'assets', 'thumbnails'), { recursive: true })
-        await copyFile(input.sourcePath, this.resolveOriginal(existing))
-        await sharp(this.resolveOriginal(existing), { limitInputPixels: MAX_PIXELS })
-          .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
-          .webp({ quality: 82 })
-          .toFile(this.resolveThumbnail(existing))
+        await writeFile(this.resolveOriginal(existing), bytes)
+        await writeFile(this.resolveThumbnail(existing), await thumbnail())
         await this.#repository.updateAssetStatus(existing.id, 'available')
         return { ...existing, status: 'available' }
       }
@@ -119,12 +111,6 @@ export class AssetStore {
     const originalPath = join(this.#projectDirectory, relativePath)
     const thumbnailPath = join(this.#projectDirectory, thumbnailRelativePath)
 
-    await copyFile(input.sourcePath, originalPath)
-    await sharp(originalPath, { limitInputPixels: MAX_PIXELS })
-      .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
-      .webp({ quality: 82 })
-      .toFile(thumbnailPath)
-
     const asset: AssetMetadata = {
       id: assetId,
       projectId: this.#projectId,
@@ -139,6 +125,14 @@ export class AssetStore {
       sourceId: input.sourceId ?? null,
       status: 'available',
       createdAt: this.#now()
+    }
+    try {
+      await writeFile(originalPath, bytes)
+      await writeFile(thumbnailPath, await thumbnail())
+    } catch (error) {
+      // No asset is registered under this content, so a half-finished import leaves nothing behind.
+      await Promise.allSettled([rm(originalPath, { force: true }), rm(thumbnailPath, { force: true })])
+      throw error
     }
     await this.#repository.insertAsset(asset)
     return asset

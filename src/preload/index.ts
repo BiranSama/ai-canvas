@@ -22,7 +22,7 @@ import type { GenerationResultFavoriteInput, PlaceGenerationResultInput } from '
 import type {
   ConfigurableProviderId,
   ProviderConnectionTestInput,
-  ProviderExecutionPolicy,
+  ProviderExecutionPolicyInput,
   ProviderPublicConfigInput,
   ProviderSecretInput
 } from '../shared/provider-settings'
@@ -85,7 +85,7 @@ const desktopApi: DesktopApi = Object.freeze({
   getAgentEngine: () => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineGet),
   setAgentEngine: (engine: AgentEngine) => ipcRenderer.invoke(DESKTOP_CHANNELS.agentEngineSet, engine),
   setProviderConfig: (input: ProviderPublicConfigInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerConfigSet, input),
-  setProviderExecutionPolicy: (input: ProviderExecutionPolicy) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerExecutionPolicySet, input),
+  setProviderExecutionPolicy: (input: ProviderExecutionPolicyInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerExecutionPolicySet, input),
   setProviderSecret: (input: ProviderSecretInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretSet, input),
   deleteProviderSecret: (providerId: ConfigurableProviderId) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretDelete, providerId),
   addImageProvider: () => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageAdd),

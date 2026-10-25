@@ -381,6 +381,22 @@ export const STEPWISE_AUTO_BUDGET = agentRunBudgetSchema.parse({
   ...DEFAULT_AUTO_BUDGET, maxModelTurns: 30, maxToolCalls: 40, maxSceneWriteBatches: 20
 })
 
+/**
+ * A per-turn allowance raised by the owner's setting: that many times the
+ * model turns, tool calls, canvas writes and time. Image jobs, images and
+ * spending keep their own limits.
+ */
+export function scaledAgentBudget(budget: AgentRunBudget, scale: number): AgentRunBudget {
+  if (scale === 1) return budget
+  return agentRunBudgetSchema.parse({
+    ...budget,
+    maxModelTurns: budget.maxModelTurns * scale,
+    maxToolCalls: budget.maxToolCalls * scale,
+    maxSceneWriteBatches: budget.maxSceneWriteBatches * scale,
+    maxWallTimeMs: budget.maxWallTimeMs * scale
+  })
+}
+
 const TERMINAL_TURN_STATUSES = new Set<AgentTurnStatus>([
   'interrupted', 'completed', 'completed_with_notes', 'needs_user_review', 'blocked',
   'budget_limited', 'usage_limited', 'failed', 'cancelled'

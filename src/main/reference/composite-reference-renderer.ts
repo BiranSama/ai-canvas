@@ -5,6 +5,7 @@ import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
 import { layoutTextLines } from './text-layout'
+import { imageBytes } from '../storage/image-file'
 
 export type ReferenceAssetResolver = (assetId: string) => Promise<string | Buffer | null>
 
@@ -45,7 +46,8 @@ export function elementPresentation(element: SceneElement, mode: RenderMode): 'o
 }
 
 async function imageDataUri(path: string | Buffer, element: Extract<SceneElement, { type: 'image' }>): Promise<string> {
-  const metadata = await sharp(path).metadata()
+  const bytes = await imageBytes(path)
+  const metadata = await sharp(bytes).metadata()
   const width = metadata.width ?? 1
   const height = metadata.height ?? 1
   const crop = element.crop
@@ -53,7 +55,7 @@ async function imageDataUri(path: string | Buffer, element: Extract<SceneElement
   const top = Math.min(height - 1, Math.max(0, Math.round(crop.y * height)))
   const cropWidth = Math.max(1, Math.min(width - left, Math.round(crop.width * width)))
   const cropHeight = Math.max(1, Math.min(height - top, Math.round(crop.height * height)))
-  const cropped = await sharp(path).extract({ left, top, width: cropWidth, height: cropHeight }).png().toBuffer()
+  const cropped = await sharp(bytes).extract({ left, top, width: cropWidth, height: cropHeight }).png().toBuffer()
   return `data:image/png;base64,${cropped.toString('base64')}`
 }
 
@@ -156,7 +158,7 @@ async function elementSvg(
     if (element.resultAssetId !== null && element.renderStrategy !== 'standard') {
       const path = await resolveAsset(element.resultAssetId)
       if (path !== null) {
-        const bytes = await sharp(path).png().toBuffer()
+        const bytes = await sharp(await imageBytes(path)).png().toBuffer()
         return `${groupStart}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="data:image/png;base64,${bytes.toString('base64')}" preserveAspectRatio="xMidYMid contain"/>${groupEnd}`
       }
     }

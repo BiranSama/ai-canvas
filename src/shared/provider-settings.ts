@@ -136,7 +136,9 @@ const providerExecutionPolicyFields = {
   autoGenerate: z.boolean(),
   maxRequestsPerJob: z.number().int().min(1).max(100),
   maxImagesPerJob: z.number().int().min(1).max(16),
-  maxCostCnyPerJob: z.number().min(0).max(10_000)
+  maxCostCnyPerJob: z.number().min(0).max(10_000),
+  /** How many times the Agent's standard per-turn allowance of model turns, tool calls, canvas writes and time. */
+  agentStepScale: z.union([z.literal(1), z.literal(2), z.literal(4)]).default(1)
 } as const
 
 export const providerExecutionPolicySchema = z.object(providerExecutionPolicyFields).strict()
@@ -146,12 +148,13 @@ export const providerExecutionPolicySchema = z.object(providerExecutionPolicyFie
 const storedProviderExecutionPolicySchema = z.object({
   ...providerExecutionPolicyFields,
   unlimitedSpend: z.boolean().optional()
-}).transform(({ approvalMode, autoGenerate, maxRequestsPerJob, maxImagesPerJob, maxCostCnyPerJob }) => providerExecutionPolicySchema.parse({
+}).transform(({ approvalMode, autoGenerate, maxRequestsPerJob, maxImagesPerJob, maxCostCnyPerJob, agentStepScale }) => providerExecutionPolicySchema.parse({
   approvalMode,
   autoGenerate,
   maxRequestsPerJob,
   maxImagesPerJob,
-  maxCostCnyPerJob
+  maxCostCnyPerJob,
+  agentStepScale
 }))
 
 export const DEFAULT_PROVIDER_EXECUTION_POLICY = providerExecutionPolicySchema.parse({
@@ -359,6 +362,8 @@ export type ProviderPublicConfig = z.infer<typeof providerPublicConfigSchema>
 export type ProviderPublicConfigInput = z.input<typeof providerPublicConfigSchema>
 export type ProviderConfigFile = z.infer<typeof providerConfigFileSchema>
 export type ProviderExecutionPolicy = z.infer<typeof providerExecutionPolicySchema>
+/** A policy as it may be sent: fields with a default can be left out. */
+export type ProviderExecutionPolicyInput = z.input<typeof providerExecutionPolicySchema>
 export type ProviderSettingsSnapshot = z.infer<typeof providerSettingsSnapshotSchema>
 export type ProviderConnectionTestInput = z.input<typeof providerConnectionTestInputSchema>
 export type ProviderConnectionTestResult = z.infer<typeof providerConnectionTestResultSchema>

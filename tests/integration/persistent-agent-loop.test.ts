@@ -95,6 +95,7 @@ async function harness(options: {
     context: AgentLoopToolContext
   ) => Promise<AgentToolOutcome>
   readonly budget?: typeof DEFAULT_AUTO_BUDGET
+  readonly budgetScale?: number
   readonly withContext?: boolean
   readonly now?: () => string
 }) {
@@ -119,6 +120,7 @@ async function harness(options: {
     ...(contextRepository === null ? {} : { contextRepository }),
     planner: options.planner,
     ...(options.budget === undefined ? {} : { budget: options.budget }),
+    ...(options.budgetScale === undefined ? {} : { budgetScale: () => options.budgetScale! }),
     now: options.now ?? (() => '2026-08-22T12:00:01.000+08:00'),
     loadRequest: async (runId) => {
       const value = requests.get(runId)
@@ -614,6 +616,18 @@ describe('AH1 S4 persistent agent loop', () => {
     expect((await value.loop.snapshot()).turns[0]).toMatchObject({
       status: 'budget_limited', errorCode: 'BUDGET_TOOL_CALLS'
     })
+  })
+
+  it('stops a Collaboration turn at its canvas-write allowance, and the owner\'s multiple raises it', async () => {
+    const steps = [1, 2, 3, 4, 5].map((step) => ({ kind: 'tool' as const, call: sceneTool(`step-${step}`), toolIndex: step - 1, plan: null }))
+    for (const [budgetScale, written, status] of [[undefined, 4, 'budget_limited'], [2, 5, 'completed_with_notes']] as const) {
+      const value = await harness({ planner: new ScriptedPlannerAdapter(steps), ...(budgetScale === undefined ? {} : { budgetScale }) })
+      await value.start(`run-steps-${budgetScale ?? 1}`, request('分五批改画布'), 'collaboration')
+      await value.loop.waitForIdle()
+      const snapshot = await value.loop.snapshot()
+      expect(snapshot.activeGoal?.budget.maxSceneWriteBatches).toBe(DEFAULT_COLLABORATION_BUDGET.maxSceneWriteBatches * (budgetScale ?? 1))
+      expect(snapshot.turns[0]).toMatchObject({ status, sceneWriteBatchesUsed: written, ...(status === 'budget_limited' ? { errorCode: 'BUDGET_SCENE_WRITES' } : {}) })
+    }
   })
 
   it('makes Review mode a real per-step write gate with the Review budget', async () => {

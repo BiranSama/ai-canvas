@@ -76,6 +76,7 @@ import {
 import type { AgentLoopToolContext } from '../agent'
 import { createMultiStepPlannerAdapter, environmentAgentEngine } from '../agent/multi-step/runtime-adapter'
 import type { SubjectSegmentation } from '../segmentation/subject-segmentation'
+import { imageBytes } from '../storage/image-file'
 import { AgentEngineSettingStore } from '../agent/multi-step/engine-setting-store'
 import type { AgentEngine, AgentEngineSetting } from '../../shared/agent-engine'
 import { projectWorkContextSchema, type ProjectWorkContext } from '../../shared/project-work-context'
@@ -101,6 +102,7 @@ import { DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imagePro
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
+  ProviderExecutionPolicyInput,
   ProviderConfigFile,
   ProviderConnectionTestInput,
   ProviderConnectionTestResult,
@@ -682,6 +684,7 @@ export class GenerationRuntime {
       planner,
       ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: 40 }),
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
+      budgetScale: () => this.#executionPolicy.agentStepScale,
       logger: this.#diagnosticLog,
       activityLedger,
       toolExecutor,
@@ -1443,7 +1446,7 @@ export class GenerationRuntime {
     return snapshot
   }
 
-  async setProviderExecutionPolicy(input: ProviderExecutionPolicy): Promise<ProviderSettingsSnapshot> {
+  async setProviderExecutionPolicy(input: ProviderExecutionPolicyInput): Promise<ProviderSettingsSnapshot> {
     const snapshot = await this.#providerSettings.setExecutionPolicy(input)
     await this.#refreshConfiguredImageProvider()
     return snapshot
@@ -1912,7 +1915,7 @@ export class GenerationRuntime {
       const selection = await resolve(input.selectionMaskAssetId!)
       if (selection === null) throw new Error('选区没有存好，请重新选择后再试。')
       // An image service takes a hard mask: whatever the selection touches may be repainted; the soft edge returns as the layer's mask.
-      const hard = await sharp(selection).extractChannel(0).resize(source.width, source.height, { fit: 'fill' }).threshold(1).png().toBuffer()
+      const hard = await sharp(await imageBytes(selection)).extractChannel(0).resize(source.width, source.height, { fit: 'fill' }).threshold(1).png().toBuffer()
       const maskAsset = await this.#importDerivedImage(owner, hard, 'reference', `fill-mask:${invocation}`)
       inContextMask = { asset: maskAsset, width: maskAsset.width, height: maskAsset.height, contributingMaskIds: [] }
     } else {
@@ -2202,7 +2205,7 @@ export class GenerationRuntime {
     let fillMask: { readonly assetId: string; readonly enabled: boolean } | null = null
     if (fill !== null) {
       const selection = await owner.workspace.assets.resolveAsset(fill.selectionMaskAssetId)
-      const fitted = await sharp(selection.filePath).extractChannel(0).resize(asset.width, asset.height, { fit: 'fill' }).png().toBuffer()
+      const fitted = await sharp(await imageBytes(selection.filePath)).extractChannel(0).resize(asset.width, asset.height, { fit: 'fill' }).png().toBuffer()
       fillMask = { assetId: (await this.#importDerivedImage(owner, fitted, 'reference', `fill-layer-mask:${match.result.id}`)).id, enabled: true }
       layerTransform = { x: 0, y: 0, width: 1, height: 1, rotation: 0 }
     }

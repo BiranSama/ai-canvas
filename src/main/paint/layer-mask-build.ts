@@ -2,6 +2,7 @@ import sharp from 'sharp'
 import type { Scene, SceneElement } from '../../domain'
 import { boxLayerSpace, boxMaskSize, canvasToLayer, imageLayerSpace, maskInLayerSpace, type LayerSpace, type Size } from '../../shared/layer-space'
 import { combineMasks, createMask, ellipseMask, featherMask, invertMask, polygonMask, rectMask, type GrayMask, type MaskCombine } from '../../shared/mask-raster'
+import { imageBytes } from '../storage/image-file'
 import { layerMaskCoverage, paintedImageBytes, type PaintAssetResolver } from './painted-image'
 
 /*
@@ -63,7 +64,7 @@ async function subjectOf(element: PictureLayer, deps: LayerMaskDeps): Promise<Gr
   if (deps.subject === null) return '选择主体用的模型还没有下载。'
   const source = await deps.resolveAsset(element.assetId)
   if (source === null) return '现在读不到这张图的像素。'
-  const bytes = (element.paint?.length ?? 0) === 0 ? source : await paintedImageBytes(source, element.paint, deps.resolveAsset)
+  const bytes = (element.paint?.length ?? 0) === 0 ? await imageBytes(source) : await paintedImageBytes(source, element.paint, deps.resolveAsset)
   const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
   const coverage = await deps.subject(new Uint8Array(data), info.width, info.height)
   // Only what the layer covers can be its subject.

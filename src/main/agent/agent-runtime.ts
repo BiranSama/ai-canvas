@@ -52,6 +52,8 @@ export interface AgentRuntimeOptions {
   readonly repository: ConversationRepository
   readonly planner: AgentPlanner
   readonly generationPolicy?: GenerationPolicy
+  /** The owner's multiple of the standard per-turn allowance. */
+  readonly budgetScale?: () => number
   readonly maxSteps?: number
   readonly now?: () => string
   readonly logger?: DiagnosticLogger
@@ -123,6 +125,7 @@ export class AgentRuntime {
   readonly #repository: ConversationRepository
   readonly #generationPolicy: GenerationPolicy
   readonly #maxSteps: number
+  readonly #budgetScale: () => number
   readonly #now: () => string
   readonly #logger: DiagnosticLogger
   readonly #activityLedger: ActivityLedgerRepository | null
@@ -136,6 +139,7 @@ export class AgentRuntime {
     this.#repository = options.repository
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
     this.#maxSteps = Math.max(1, Math.floor(options.maxSteps ?? 8))
+    this.#budgetScale = options.budgetScale ?? (() => 1)
     this.#now = options.now ?? (() => new Date().toISOString())
     this.#logger = options.logger ?? new RedactedLogger()
     this.#activityLedger = options.activityLedger ?? null
@@ -155,9 +159,15 @@ export class AgentRuntime {
       ...(options.loadGenerationJob === undefined ? {} : { loadGenerationJob: options.loadGenerationJob }),
       ...(options.activateGenerationJob === undefined ? {} : { activateGenerationJob: options.activateGenerationJob }),
       generationPolicy: this.#generationPolicy,
+      ...(options.budgetScale === undefined ? {} : { budgetScale: options.budgetScale }),
       now: this.#now,
       projection: this.#persistentProjection()
     })
+  }
+
+  /** A run's tool steps grow with the owner's multiple of the per-turn allowance, so the larger allowance is not cut short here. */
+  #runStepLimit(): number {
+    return this.#maxSteps * this.#budgetScale()
   }
 
   async initialize(): Promise<number> {
@@ -175,7 +185,7 @@ export class AgentRuntime {
     this.#assertOpen()
     const parsedRequest = agentRequestSchema.parse(requestInput)
     const request = agentRequestSchema.parse({ ...parsedRequest, text: redactSensitive(parsedRequest.text) })
-    const created = await this.#repository.createRun(this.#projectId, request, this.#maxSteps)
+    const created = await this.#repository.createRun(this.#projectId, request, this.#runStepLimit())
     await this.#activityLedger?.create({
       projectId: this.#projectId,
       runId: created.run.id,
@@ -336,7 +346,7 @@ export class AgentRuntime {
       resultRun = await this.#repository.getRun(activeTurn.inputMessageId)
     }
     const persistQueuedRun = async (queuedRequest: AgentRequest): Promise<{ readonly runId: string; readonly sourceMessageId: string }> => {
-      const created = await this.#repository.createRun(this.#projectId, queuedRequest, this.#maxSteps)
+      const created = await this.#repository.createRun(this.#projectId, queuedRequest, this.#runStepLimit())
       await this.#activityLedger?.create({
         projectId: this.#projectId,
         runId: created.run.id,
