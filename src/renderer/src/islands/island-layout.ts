@@ -67,8 +67,8 @@ export function createDefaultIslandLayout(id: GlassIslandId, bounds: IslandBound
   const safeWidth = Math.max(640, bounds.width)
   const safeHeight = Math.max(240, bounds.height)
   if (id === 'tools') {
-    // Thirteen 36px tool slots, the colour swatches, the grip and the resize handle.
-    const height = Math.min(640, safeHeight - EDGE_GAP * 2)
+    // Thirteen 40px tool slots, the colour swatches, the grip and the resize handle; a shorter window scrolls them.
+    const height = Math.min(680, safeHeight - EDGE_GAP * 2)
     return { mode: 'floating', x: EDGE_GAP, y: Math.round((safeHeight - height) / 2), width: 58, height, previous: null }
   }
   if (id === 'inspector') {
