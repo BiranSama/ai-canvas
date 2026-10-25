@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHundredElementScene } from '../../src/renderer/src/fixtures/hundred-elements'
 import { createNightVeilScene, NIGHT_VEIL_IDS } from '../../src/renderer/src/fixtures/night-veil'
 import { resetWorkspace, setWorkspaceSceneClientForTests, useWorkspaceStore } from '../../src/renderer/src/store/workspace-store'
+import { setSelectionMask, useSelectionStore } from '../../src/renderer/src/selection/selection-store'
+import { rectMask } from '../../src/shared/mask-raster'
 import { createLocalWorkspaceSceneClient } from '../helpers/local-workspace-scene-client'
 
 describe('workspace CommandBus projection', () => {
@@ -11,6 +13,7 @@ describe('workspace CommandBus projection', () => {
     resetWorkspace(scene)
   })
   afterEach(() => {
+    setSelectionMask(null)
     setWorkspaceSceneClientForTests(null)
     resetWorkspace()
   })
@@ -46,6 +49,37 @@ describe('workspace CommandBus projection', () => {
     expect(await later).toBe(false)
     expect(seen).toEqual([createNightVeilScene().elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!.name])
     expect(title().name).toBe(seen[0])
+  })
+
+  it('keeps a selection change made while a batch is on its way after that batch in the history', async () => {
+    const scene = createNightVeilScene()
+    const local = createLocalWorkspaceSceneClient(scene)
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => { release = resolve })
+    setWorkspaceSceneClientForTests({ ...local, execute: async (input) => { await held; return local.execute(input) } })
+    resetWorkspace(scene)
+    const renamed = useWorkspaceStore.getState().execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])
+    // The person selects while Main has not answered yet.
+    setSelectionMask(rectMask(scene.canvas.outputWidth, scene.canvas.outputHeight, { x: 10, y: 10, width: 50, height: 50 }))
+    release()
+    expect(await renamed).toBe(true)
+    // Ctrl+Z takes back the selection, the later of the two, and leaves the rename.
+    await useWorkspaceStore.getState().undo()
+    expect(useSelectionStore.getState().mask).toBeNull()
+    expect(useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)?.name).toBe('标题一')
+    await useWorkspaceStore.getState().undo()
+    expect(useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)?.name).not.toBe('标题一')
+  })
+
+  it('takes a batch that did not land out of the history again', async () => {
+    const scene = createNightVeilScene()
+    setWorkspaceSceneClientForTests({ ...createLocalWorkspaceSceneClient(scene), execute: async () => { throw new Error('Main is gone') } })
+    resetWorkspace(scene)
+    setSelectionMask(rectMask(scene.canvas.outputWidth, scene.canvas.outputHeight, { x: 10, y: 10, width: 50, height: 50 }))
+    expect(await useWorkspaceStore.getState().execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])).toBe(false)
+    expect(useWorkspaceStore.getState().selectionUndo).toBe(true)
+    await useWorkspaceStore.getState().undo()
+    expect(useSelectionStore.getState().mask).toBeNull()
   })
 
   it('enters a Group, edits one child atomically and recomputes the Group bounds', async () => {

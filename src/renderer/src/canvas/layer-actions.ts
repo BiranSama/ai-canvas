@@ -2,7 +2,7 @@ import type { NormalizedTransform, PaintOp, SceneCommand, SceneElement } from '.
 import { imageLayerSpace } from '../../../shared/layer-space'
 import type { GrayMask } from '../../../shared/mask-raster'
 import { showAppNotice } from '../components/app-notice'
-import { selectionClip } from '../selection/selection-clip'
+import { selectionClip, type SelectionClip } from '../selection/selection-clip'
 import { currentSelection } from '../selection/selection-store'
 import { layerSourceImage } from './pixel-layers'
 import { useWorkspaceStore } from '../store/workspace-store'
@@ -218,16 +218,20 @@ export async function layerViaSelection(cut: boolean): Promise<boolean> {
   if (cut && element.type !== 'image') return refuse(`「${element.name}」要先栅格化（图层右键菜单），才能剪切出选区里的像素。`)
   if (cut && element.locked) return refuse(`「${element.name}」已锁定，解锁后才能剪切。`)
   const summary = cut ? '通过剪切的图层' : '通过拷贝的图层'
-  const drawn = await drawnAsset([element.id], summary, { base: element.id, showHidden: true }, selection)
-  if (drawn === null) return false
-  const also: SceneCommand[] = []
+  // What is cleared comes from the same selection as what is copied, taken now, before anything waits.
+  let cutClip: SelectionClip | null = null
   if (cut && element.type === 'image') {
     const image = layerSourceImage(element.id)
     if (image === null) return refuse(`「${element.name}」还没画好，稍后再试。`)
     const space = imageLayerSpace(element, { width: image.naturalWidth, height: image.naturalHeight }, { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight })
-    const clip = selectionClip(element, space, 'layer')
-    const clipId = clip.kind === 'clip' ? await clip.assetId : null
-    if (clip.kind === 'clip' && clipId === null) return refuse('选区没有存好，没有剪切。')
+    cutClip = selectionClip(element, space, 'layer')
+  }
+  const drawn = await drawnAsset([element.id], summary, { base: element.id, showHidden: true }, selection)
+  if (drawn === null) return false
+  const also: SceneCommand[] = []
+  if (cutClip !== null && cutClip.kind !== 'outside') {
+    const clipId = cutClip.kind === 'clip' ? await cutClip.assetId : null
+    if (cutClip.kind === 'clip' && clipId === null) return refuse('选区没有存好，没有剪切。')
     const clear: PaintOp = clipId === null ? { id: globalThis.crypto.randomUUID(), kind: 'clear' } : { id: globalThis.crypto.randomUUID(), kind: 'clear', clip: clipId }
     const current = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === element.id)
     also.push({ kind: 'element.update', elementId: element.id, changes: { paint: [...(current?.type === 'image' ? current.paint ?? [] : []), clear] } })
