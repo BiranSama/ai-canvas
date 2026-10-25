@@ -52,3 +52,41 @@ test('the current Creative Brief is inspectable and can be corrected through the
     await rm(userData, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
   }
 })
+
+test('opening the Creative Brief keeps the conversation readable and its details clickable', async () => {
+  test.setTimeout(60_000)
+  const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-brief-layout-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userData}`],
+    cwd: resolve('.'),
+    env: { ...process.env, AI_CANVAS_E2E: '1', AI_CANVAS_STARTUP: 'workspace' }
+  })
+
+  try {
+    const window = await app.firstWindow()
+    await window.setViewportSize({ width: 1440, height: 900 })
+    await window.getByRole('button', { name: '对话', exact: true }).click()
+    await window.getByRole('textbox', { name: '对话输入' }).fill('创建一张 4:5 咖啡店海报，标题写‘晨光咖啡’，主体是一杯拿铁，暖色调，先不要生成图片。')
+    await window.getByRole('button', { name: '发送要求' }).click()
+    await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
+
+    await window.locator('summary[aria-label="查看当前创作简报"]').click()
+    await expect(window.getByRole('region', { name: '当前创作简报详情' })).toBeVisible()
+    const thread = window.locator('.conversation-thread')
+    const composer = window.locator('.conversation-composer')
+    const [threadBox, composerBox] = await Promise.all([thread.boundingBox(), composer.boundingBox()])
+    expect(threadBox!.height).toBeGreaterThan(300)
+    // The composer starts below the conversation; nothing in the conversation sits under it.
+    expect(composerBox!.y).toBeGreaterThanOrEqual(threadBox!.y + threadBox!.height - 1)
+    await window.screenshot({ path: test.info().outputPath('brief-open.png') })
+
+    // A real click reaches the receipt's details below the open brief.
+    const review = window.locator('summary').filter({ hasText: '方向与结构检查' }).first()
+    await review.scrollIntoViewIfNeeded()
+    await review.click()
+    await expect(review.locator('xpath=..')).toHaveAttribute('open', '')
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
+  }
+})

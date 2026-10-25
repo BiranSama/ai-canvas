@@ -762,9 +762,10 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
             </div>
             <h1>{workTitle}</h1>
             <p>{scene.canvas.aspectWidth}:{scene.canvas.aspectHeight} · 可编辑画布 · {scene.elements.length} 个元素</p>
-            {creativeBrief !== null && <CreativeBriefSummary brief={creativeBrief} onRevise={reviseCreativeBrief} />}
           </div>
           <div ref={threadRef} className="conversation-thread" aria-live="polite">
+            {/* The brief scrolls with the conversation, so opening it never squeezes the messages. */}
+            {creativeBrief !== null && <CreativeBriefSummary brief={creativeBrief} onRevise={reviseCreativeBrief} />}
             {snapshot?.messages.length === 0 && (
               <div className="conversation-opening">
                 <Circle size={11} fill="currentColor" />
