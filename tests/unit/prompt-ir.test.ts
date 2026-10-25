@@ -137,7 +137,7 @@ describe('Prompt IR and provider prompt compiler', () => {
       }
     ).prompt
 
-    expect(prompt).toContain('语义组件')
+    expect(prompt).toContain('成组的部分')
     expect(prompt).toContain('香水主体组件')
     expect(prompt).toContain('香水瓶')
     expect(prompt).toContain('NIGHT VEIL')

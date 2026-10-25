@@ -289,7 +289,7 @@ describe('Provider and Agent P0 contracts without external calls', () => {
     expect(sent).toContain('标题一律使用衬线体')
     expect(sent).toContain('偏好清晨的冷光')
     expect(sent).toContain('第一版用了暖色侧光。')
-    expect(String(body.instructions ?? '')).toContain('遵守 rules')
+    expect(String(body.instructions ?? '')).toContain('rules 是用户确认过的项目规则，必须遵守')
   })
 
   it('instructs the live planner to build editable semantic parts without claiming bitmap auto-layering', async () => {
@@ -316,9 +316,9 @@ describe('Provider and Agent P0 contracts without external calls', () => {
     await planner.plan(request('聊聊这个构图给人的感受'), new AbortController().signal)
     const body = postJson.mock.calls[0]?.[0].body as { instructions?: unknown }
     const instructions = String(body.instructions ?? '')
-    expect(instructions).toContain('独立可编辑元素')
+    expect(instructions).toContain('独立的可编辑元素')
     expect(instructions).toContain('先添加子元素，再执行 element.group')
-    expect(instructions).toContain('不得把最终位图描述成已经自动拆层')
+    expect(instructions).toContain('不要说它已经自动拆层')
 
     const failure = createAgentFailureEnvelope({
       error: new Error('仅替换失败操作'), fallbackCode: 'SCENE_REVISION_CONFLICT',

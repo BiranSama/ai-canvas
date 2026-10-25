@@ -6,36 +6,48 @@ function percentage(value: unknown): string {
   return typeof value === 'number' ? `${Math.round(value * 100)}%` : '未指定'
 }
 
+/** Where an element sits, in words an image model reads well: 「画面上部居中，约占宽 40%、高 12%」. */
+function placement(bounds: PromptIrElement['bounds']): string {
+  const centerX = bounds.x + bounds.width / 2
+  const centerY = bounds.y + bounds.height / 2
+  const row = centerY < 0.36 ? '上部' : centerY > 0.64 ? '下部' : '中部'
+  const column = centerX < 0.36 ? '偏左' : centerX > 0.64 ? '偏右' : '居中'
+  const covers = bounds.width >= 0.9 && bounds.height >= 0.9 ? '铺满整个画面' : `位于画面${row}${column}，约占宽 ${percentage(bounds.width)}、高 ${percentage(bounds.height)}`
+  return covers
+}
+
+const WEIGHT_COPY: Readonly<Record<string, string>> = { hero: '画面主视觉', primary: '醒目', secondary: '次要', whisper: '很轻' }
+const ACCURACY_COPY: Readonly<Record<string, string>> = { strict: '一字不差', balanced: '内容不变，排列可微调', expressive: '可以艺术化处理' }
+
 function describeElement(element: PromptIrElement, promptPackage?: PromptPackage): string {
-  const bounds = element.bounds
-  const position = `位置 x=${percentage(bounds.x)} y=${percentage(bounds.y)}，尺寸 ${percentage(bounds.width)}×${percentage(bounds.height)}，层级 ${element.zIndex}`
-  const blend = element.blendMode === 'normal' ? '' : `；混合：${blendModeLabel(element.blendMode)}，${blendModeIntent(element.blendMode)}`
+  const position = placement(element.bounds)
+  const blend = element.blendMode === 'normal' ? '' : `；与下方画面的混合：${blendModeLabel(element.blendMode)}，${blendModeIntent(element.blendMode)}`
   if (element.type === 'text') {
     const contract = promptPackage?.textContract.find((entry) => entry.elementId === element.id)
     const content = contract?.content ?? String(element.attributes.content ?? '')
     const style = contract?.style ?? String(element.attributes.styleDescription ?? element.description)
     const accuracy = contract?.accuracy ?? (element.attributes.accuracy as 'strict' | 'balanced' | 'expressive')
     const mode = contract?.mode ?? (element.attributes.renderStrategy === 'editable-overlay' ? 'exact-overlay' : element.attributes.renderStrategy === 'standard' ? 'reference' : 'image-text')
-    const visualWeight = contract?.visualWeight ?? String(element.attributes.visualWeight ?? 'secondary')
-    const accuracyCopy = accuracy === 'strict' ? '内容需严格准确' : accuracy === 'balanced' ? '尽量保持内容，允许为整体节奏做有限调整' : '内容可服从字效表现'
+    const visualWeight = WEIGHT_COPY[contract?.visualWeight ?? String(element.attributes.visualWeight ?? 'secondary')] ?? '次要'
     if (mode === 'exact-overlay') {
-      return `可编辑文字预留区“${content}”：不要在背景中生成或烘焙字形，只保留适合后续独立文字图层的负空间；视觉权重 ${visualWeight}；${style}；${position}${blend}`
+      return `留给文字“${content}”的位置：不要在这里画任何字，只留出干净、适合之后叠放文字的空间（${visualWeight}）；${position}${blend}`
     }
     if (mode === 'image-text') {
-      return `AI 字效“${content}”：${accuracyCopy}；由模型重新设计字形、材质、笔触与光影，当前占位字体和字号不是最终形态；视觉权重 ${visualWeight}；${style}；${position}${blend}`
+      return `画进画面的文字“${content}”：${ACCURACY_COPY[accuracy] ?? ''}；字形、材质和光影由你重新设计，参考图里的字体和字号只是占位（${visualWeight}）；${style}；${position}${blend}`
     }
-    return `文字参考“${content}”：${accuracyCopy}；内容、区域、层级和节奏是参考，重新设计字形与尺度，不复制当前占位字体或字号；视觉权重 ${visualWeight}；${style}；${position}${blend}`
+    return `文字参考“${content}”：内容${ACCURACY_COPY[accuracy] ?? ''}，位置和大小节奏照参考，字形重新设计，不照搬当前占位字体或字号（${visualWeight}）；${style}；${position}${blend}`
   }
   if (element.type === 'placeholder') {
-    return `主体：${String(element.attributes.subject ?? element.name)}；姿态 ${String(element.attributes.pose ?? '')}，朝向 ${String(element.attributes.facing ?? '')}；${String(element.attributes.generationNotes ?? '')}；${position}${blend}`
+    const details = [element.attributes.pose, element.attributes.facing, element.attributes.generationNotes].map((value) => String(value ?? '').trim()).filter((value) => value !== '')
+    return `主体：${String(element.attributes.subject ?? element.name)}${details.length === 0 ? '' : `，${details.join('，')}`}；${position}${blend}`
   }
   if (element.type === 'light') {
-    return `光影：${element.description || element.name}；颜色 ${String(element.attributes.color ?? '')}，方向 ${String(element.attributes.direction ?? '')}°，强度 ${percentage(element.attributes.intensity)}，柔和度 ${percentage(element.attributes.softness)}；${position}${blend}`
+    return `光线：${element.description || element.name}，颜色 ${String(element.attributes.color ?? '')}，从 ${String(element.attributes.direction ?? '')}° 方向照来，强度 ${percentage(element.attributes.intensity)}，柔和度 ${percentage(element.attributes.softness)}；${position}${blend}`
   }
-  if (element.type === 'image') return `图片参考“${element.name}”，用途 ${String(element.attributes.referenceRole ?? 'general')}；${element.description}；${position}${blend}`
-  if (element.type === 'shape') return `${element.attributes.role === 'placeholder' ? '构图形状参考' : '最终形状'}“${element.name}”；${element.description}；${position}${blend}`
-  if (element.type === 'sketch') return `构图草图“${element.name}”，轮廓保真 ${percentage(element.attributes.fidelity)}；${element.description}；${position}${blend}`
-  return `${element.type}“${element.name}”；${element.description}；${position}${blend}`
+  if (element.type === 'image') return `图片“${element.name}”（照参考图里的样子画进画面）${element.description ? `：${element.description}` : ''}；${position}${blend}`
+  if (element.type === 'shape') return `${element.attributes.role === 'placeholder' ? '构图示意的色块' : '图形'}“${element.name}”${element.description ? `：${element.description}` : ''}；${position}${blend}`
+  if (element.type === 'sketch') return `构图草图“${element.name}”，轮廓照着画的程度 ${percentage(element.attributes.fidelity)}${element.description ? `；${element.description}` : ''}；${position}${blend}`
+  return `“${element.name}”${element.description ? `：${element.description}` : ''}；${position}${blend}`
 }
 
 export class ProviderPromptCompiler {
@@ -68,16 +80,15 @@ export class ProviderPromptCompiler {
       '本次使用画面参考；参考图片表达观感、构图、色彩和质感，不附带可编辑元素关系的约束。'
     ] : [
       ir.originalRequirement,
-      promptPackage === undefined ? '' : `创作目标：${promptPackage.sceneIntent.purpose}；媒介：${promptPackage.sceneIntent.medium.join('、')}。`,
+      promptPackage === undefined ? '' : `这是一幅完整的成品画面，用途：${promptPackage.sceneIntent.purpose}；媒介：${promptPackage.sceneIntent.medium.join('、')}。`,
       `输出画布：${output.aspectWidth}:${output.aspectHeight}，${output.outputWidth}×${output.outputHeight}。`,
-      ir.canvas.globalStyle ? `全局风格：${ir.canvas.globalStyle}` : '',
-      `按从后到前的层级组织：\n${visible.map((element) => `- ${describeElement(element, promptPackage)}${element.presentation === 'semantic-guide' ? '。这是构图语义参考，不是透明材质或最终标签' : ''}`).join('\n')}`,
-      semanticGroupLines.length > 0 ? `语义组件：\n${semanticGroupLines.map((line) => `- ${line}`).join('\n')}` : '',
-      relationLines.length > 0 ? `关系：\n${relationLines.map((line) => `- ${line}`).join('\n')}` : '',
-      ir.occlusions.length > 0 ? `遮挡：\n${ir.occlusions.map((item) => `- ${item.instruction}`).join('\n')}` : '',
-      protectedNames.length > 0 ? `保护：保持 ${protectedNames.map((name) => `“${name}”`).join('、')} 的位置、内容和身份不变。` : '',
-      promptPackage === undefined || promptPackage.textContract.length === 0 ? '' : `文字合同：\n${promptPackage.textContract.map((text) => `- “${text.content}” / ${text.mode} / ${text.accuracy} / 视觉权重 ${text.visualWeight}；风格：${text.style}`).join('\n')}`,
-      promptPackage === undefined || promptPackage.styleBible.length === 0 ? '' : `风格圣经：${promptPackage.styleBible.join('；')}`,
+      ir.canvas.globalStyle ? `整体风格：${ir.canvas.globalStyle}` : '',
+      promptPackage === undefined || promptPackage.styleBible.length === 0 ? '' : `风格、色彩与光影：${promptPackage.styleBible.join('；')}`,
+      `画面里有什么，从最远到最近：\n${visible.map((element) => `- ${describeElement(element, promptPackage)}${element.presentation === 'semantic-guide' ? '。这是构图示意，不是透明材质或要画出来的标签' : ''}`).join('\n')}`,
+      semanticGroupLines.length > 0 ? `成组的部分：\n${semanticGroupLines.map((line) => `- ${line}`).join('\n')}` : '',
+      relationLines.length > 0 ? `相互关系：\n${relationLines.map((line) => `- ${line}`).join('\n')}` : '',
+      ir.occlusions.length > 0 ? `前后遮挡：\n${ir.occlusions.map((item) => `- ${item.instruction}`).join('\n')}` : '',
+      protectedNames.length > 0 ? `保持不变：${protectedNames.map((name) => `“${name}”`).join('、')} 的位置、内容和样子。` : '',
       promptPackage?.referenceMode === 'structure'
         ? '本次使用结构参考；依照元素关系、层级和语义构图，不要模仿编辑器占位形态。'
         : '画面参考只表达构图与光影；其中的辅助轮廓和文字区域不是最终材质或字形。'

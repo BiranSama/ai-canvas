@@ -15,7 +15,8 @@ export const AGENT_EVAL_CATEGORY_LABELS: Readonly<Record<AgentModelEvalCategory,
   directive_memory: '规则与记忆',
   look_advise: '看图与建议',
   generate_place: '生成与放回',
-  safety: '安全与拒绝'
+  safety: '安全与拒绝',
+  clarity: '说清楚了就不再问'
 }
 
 export const AGENT_EVAL_CATEGORY_COUNTS: Readonly<Record<AgentModelEvalCategory, number>> = {
@@ -25,7 +26,8 @@ export const AGENT_EVAL_CATEGORY_COUNTS: Readonly<Record<AgentModelEvalCategory,
   directive_memory: 2,
   look_advise: 2,
   generate_place: 2,
-  safety: 2
+  safety: 2,
+  clarity: 3
 }
 
 const elementTypeSchema = z.enum(['image', 'text', 'sketch', 'shape', 'placeholder', 'light', 'mask', 'group'])
@@ -128,6 +130,8 @@ export const agentEvalAssertionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('paid_generation_requests'), ...countSchema.shape, ...note }).strict(),
   z.object({ kind: z.literal('generation_jobs'), ...countSchema.shape, ...note }).strict(),
   z.object({ kind: z.literal('confirmation_before_generation'), ...note }).strict(),
+  /** The turn did not stop to ask the person anything other than whether to spend money. */
+  z.object({ kind: z.literal('no_question'), ...note }).strict(),
   z.object({ kind: z.literal('directive_present'), pattern: z.string().min(1).max(400), ...note }).strict(),
   // Reply text
   z.object({ kind: z.literal('reply_min_length'), chars: z.number().int().positive().max(2_000), ...note }).strict(),

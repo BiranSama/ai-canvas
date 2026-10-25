@@ -41,9 +41,9 @@ function baselineSelections(assertion: AgentEvalAssertion): readonly ElementSele
 }
 
 describe('Phase 1 agent eval set', () => {
-  it('holds 24 schema-valid cases in the agreed category mix', () => {
-    expect(AGENT_EVAL_CASES).toHaveLength(24)
-    expect(new Set(AGENT_EVAL_CASES.map((entry) => entry.id)).size).toBe(24)
+  it('holds 27 schema-valid cases in the agreed category mix', () => {
+    expect(AGENT_EVAL_CASES).toHaveLength(27)
+    expect(new Set(AGENT_EVAL_CASES.map((entry) => entry.id)).size).toBe(27)
     const counts = Object.fromEntries(Object.keys(AGENT_EVAL_CATEGORY_COUNTS).map((category) => [
       category, AGENT_EVAL_CASES.filter((entry) => entry.category === category).length
     ]))
