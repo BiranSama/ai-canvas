@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { maskBounds, traceMaskOutline } from '../../../shared/mask-raster'
+import { maskBounds, simplifyOutline, traceMaskOutline } from '../../../shared/mask-raster'
 import { selectionDraft, selectionMoveOffset, subscribeSelectionDraft, useSelectionStore, type SelectionDraft } from './selection-store'
 
 /*
  * Marching ants: the selection's outline drawn on a page canvas of its own
  * over the stage, so they move without redrawing the picture. The outline
- * is traced once per selection; each tick only strokes it again with the
- * dashes shifted.
+ * is traced once per selection and thinned to what the zoom can show; each
+ * tick only strokes it again with the dashes shifted.
  */
 
 const TICK_MS = 120
@@ -82,7 +82,10 @@ function drawAnts(canvas: HTMLCanvasElement, view: View, outline: Path2D | null,
 export function SelectionOverlay({ originX, originY, zoom, width, height }: View): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const mask = useSelectionStore((state) => state.mask)
-  const outline = useMemo(() => mask === null ? null : outlinePath(traceMaskOutline(mask)), [mask])
+  const traced = useMemo(() => mask === null ? null : traceMaskOutline(mask), [mask])
+  // Points within half a screen pixel of the line add nothing; on a large canvas seen whole they are most of the outline.
+  const tolerance = 2 ** Math.round(Math.log2(Math.max(0.25, 0.5 / zoom)))
+  const outline = useMemo(() => traced === null ? null : outlinePath(traced.map((points) => simplifyOutline(points, tolerance))), [traced, tolerance])
   // Where the selection reaches, in canvas pixels, for tests and assistive reading.
   const bounds = useMemo(() => {
     const rect = mask === null ? null : maskBounds(mask)

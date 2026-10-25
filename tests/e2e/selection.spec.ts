@@ -365,6 +365,70 @@ test('generative fill repaints the selection and comes back as a new layer maske
   }
 })
 
+/** Frames drawn in two seconds, the 95th-percentile time between them, and the tasks that held the page up for over 50 ms. */
+async function frameGaps(page: Page): Promise<{ frames: number, p95: number, longTasks: number }> {
+  const { gaps, longTasks } = await page.evaluate(`new Promise((resolveGaps) => {
+    const found = []
+    let longTasks = 0
+    const observer = new PerformanceObserver((list) => { longTasks += list.getEntries().length })
+    observer.observe({ type: 'longtask' })
+    let last = performance.now()
+    const end = last + 2000
+    const tick = (now) => {
+      found.push(now - last)
+      last = now
+      if (now < end) requestAnimationFrame(tick)
+      else { observer.disconnect(); resolveGaps({ gaps: found, longTasks }) }
+    }
+    requestAnimationFrame(tick)
+  })`) as { gaps: number[], longTasks: number }
+  const sorted = [...gaps].sort((left, right) => left - right)
+  return { frames: gaps.length, p95: Math.round(sorted[Math.floor(sorted.length * 0.95)]! * 10) / 10, longTasks }
+}
+
+test('the marching ants keep a 4000-pixel canvas responsive', async () => {
+  const { app, page } = await launch()
+  try {
+    await newCanvasWithLayer(page)
+    const { scene } = await bootstrap(page)
+    await page.evaluate(async ({ revision, canvas }) => {
+      const desktop = (globalThis as unknown as { desktop: DesktopApi }).desktop
+      await desktop.executeSceneCommands({
+        expectedSceneRevision: revision,
+        batch: { id: globalThis.crypto.randomUUID(), origin: 'user', summary: '画布 4000', commands: [{ kind: 'scene.set-canvas', canvas: { ...canvas, aspectWidth: 1, aspectHeight: 1, outputWidth: 4000, outputHeight: 4000 } }] }
+      })
+    }, { revision: scene.revision, canvas: scene.canvas })
+    await expect.poll(async () => (await bootstrap(page)).scene.canvas.outputWidth).toBe(4000)
+    // Ctrl+0 fits the larger canvas in the window again.
+    await page.keyboard.press('Control+0')
+
+    // An ellipse across the canvas (below the options bar) has one of the longest outlines a selection can have for its size.
+    await page.keyboard.press('Shift+m')
+    await page.keyboard.press('Shift+m')
+    await expect(page.getByRole('button', { name: '椭圆选框', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    const started = Date.now()
+    await drag(page, [0.03, 0.1], [0.97, 0.97])
+    await expect(ants(page)).toHaveAttribute('data-selection', 'some')
+    const selectMs = Date.now() - started
+
+    // Two seconds of frames while the ants march, against two seconds with nothing selected. Without a
+    // graphics card the glass panels blur again in software whenever anything under them changes, the
+    // ants or a brush stroke alike; that cost is the compositor's, so it is taken out here.
+    await page.addStyleTag({ content: '* { backdrop-filter: none !important; }' })
+    const marching = await frameGaps(page)
+    await page.keyboard.press('Control+d')
+    await expect(ants(page)).toHaveAttribute('data-selection', 'none')
+    const still = await frameGaps(page)
+    console.log(`PERF-ANTS-4000 select=${selectMs}ms marching=${JSON.stringify(marching)} still=${JSON.stringify(still)}`)
+    expect(selectMs).toBeLessThan(3_000)
+    expect(marching.longTasks).toBe(0)
+    expect(marching.frames).toBeGreaterThan(still.frames * 0.9)
+    expect(marching.p95).toBeLessThan(still.p95 + 8)
+  } finally {
+    await app.close()
+  }
+})
+
 test('the object selection picks the object under a click with the bundled model', async () => {
   const { app, page } = await launch()
   try {

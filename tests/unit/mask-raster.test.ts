@@ -14,6 +14,7 @@ import {
   maskIoU,
   polygonMask,
   rectMask,
+  simplifyOutline,
   traceMaskOutline,
   translateMask,
   type GrayMask
@@ -179,5 +180,30 @@ describe('layer masks in the shared pixel math', () => {
     const opaque = new Uint8ClampedArray(16).fill(255)
     applyPaintOps(opaque, 2, 2, [{ id: '50000000-0000-4000-8000-000000000006', clip: fill.clip, kind: 'clear' }], new Map([[fill.clip, clip]]))
     expect([opaque[3], opaque[7], opaque[11], opaque[15]]).toEqual([255, 0, 127, 255])
+  })
+})
+
+describe('outline thinning', () => {
+  it('drops the points within the tolerance of the line, and no point the outline needs', () => {
+    const [outline] = traceMaskOutline(ellipseMask(400, 400, { x: 20, y: 20, width: 360, height: 360 }))
+    const thin = simplifyOutline(outline!, 2)
+    expect(thin.length).toBeLessThan(outline!.length / 4)
+    expect(thin.length / 2).toBeGreaterThan(12)
+    // Every traced point is still within the tolerance of the thinned outline.
+    const distance = (x: number, y: number): number => {
+      let nearest = Infinity
+      for (let index = 0, count = thin.length / 2; index < count; index += 1) {
+        const ax = thin[index * 2]!, ay = thin[index * 2 + 1]!
+        const bx = thin[((index + 1) % count) * 2]!, by = thin[((index + 1) % count) * 2 + 1]!
+        const length = Math.max(1e-9, (bx - ax) ** 2 + (by - ay) ** 2)
+        const t = Math.max(0, Math.min(1, ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / length))
+        nearest = Math.min(nearest, Math.hypot(x - (ax + t * (bx - ax)), y - (ay + t * (by - ay))))
+      }
+      return nearest
+    }
+    for (let index = 0; index < outline!.length; index += 2) expect(distance(outline![index]!, outline![index + 1]!)).toBeLessThanOrEqual(2.01)
+    // A triangle has nothing to drop.
+    const triangle = Float32Array.of(0, 0, 10, 0, 0, 10)
+    expect(simplifyOutline(triangle, 5)).toBe(triangle)
   })
 })

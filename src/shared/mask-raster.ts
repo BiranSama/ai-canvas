@@ -360,6 +360,42 @@ export function traceMaskOutline(mask: GrayMask, threshold = 128): Float32Array[
   return outlines
 }
 
+/** Ramer–Douglas–Peucker: the outline with points closer than tolerance to the line between their neighbours left out. */
+export function simplifyOutline(points: Float32Array, tolerance: number): Float32Array {
+  const count = points.length / 2
+  if (count <= 3) return points
+  const keep = new Uint8Array(count)
+  keep[0] = 1
+  keep[count - 1] = 1
+  const stack: Array<[number, number]> = [[0, count - 1]]
+  while (stack.length > 0) {
+    const [from, to] = stack.pop()!
+    const ax = points[from * 2]!
+    const ay = points[from * 2 + 1]!
+    const bx = points[to * 2]!
+    const by = points[to * 2 + 1]!
+    const length = Math.hypot(bx - ax, by - ay) || 1
+    let farthest = -1
+    let distance = tolerance
+    for (let index = from + 1; index < to; index += 1) {
+      const d = Math.abs((bx - ax) * (ay - points[index * 2 + 1]!) - (ax - points[index * 2]!) * (by - ay)) / length
+      if (d > distance) { distance = d; farthest = index }
+    }
+    if (farthest < 0) continue
+    keep[farthest] = 1
+    stack.push([from, farthest], [farthest, to])
+  }
+  let kept = 0
+  for (let index = 0; index < count; index += 1) kept += keep[index]!
+  const out = new Float32Array(kept * 2)
+  for (let index = 0, at = 0; index < count; index += 1) {
+    if (keep[index] !== 1) continue
+    out[at++] = points[index * 2]!
+    out[at++] = points[index * 2 + 1]!
+  }
+  return out
+}
+
 /**
  * Photoshop's magic wand: pixels within tolerance of the one clicked in
  * every channel, joined to it (4-connected) or anywhere, from straight

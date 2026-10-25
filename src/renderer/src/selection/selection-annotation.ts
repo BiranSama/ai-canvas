@@ -1,6 +1,6 @@
 import type { SceneElement } from '../../../domain'
 import type { EphemeralAnnotation } from '../../../shared/agent'
-import { maskBounds, traceMaskOutline, type GrayMask } from '../../../shared/mask-raster'
+import { maskBounds, simplifyOutline, traceMaskOutline, type GrayMask } from '../../../shared/mask-raster'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { currentSelection } from './selection-store'
 
@@ -13,37 +13,7 @@ import { currentSelection } from './selection-store'
 const MAX_REGIONS = 256
 const MAX_POINTS = 4_096
 
-/** Ramer–Douglas–Peucker: the outline with points closer than tolerance to the line between their neighbours left out. */
-function simplify(points: Float32Array, tolerance: number): number[] {
-  const count = points.length / 2
-  if (count <= 3) return [...points]
-  const keep = new Uint8Array(count)
-  keep[0] = 1
-  keep[count - 1] = 1
-  const stack: Array<[number, number]> = [[0, count - 1]]
-  while (stack.length > 0) {
-    const [from, to] = stack.pop()!
-    const ax = points[from * 2]!
-    const ay = points[from * 2 + 1]!
-    const bx = points[to * 2]!
-    const by = points[to * 2 + 1]!
-    const length = Math.hypot(bx - ax, by - ay) || 1
-    let farthest = -1
-    let distance = tolerance
-    for (let index = from + 1; index < to; index += 1) {
-      const d = Math.abs((bx - ax) * (ay - points[index * 2 + 1]!) - (ax - points[index * 2]!) * (by - ay)) / length
-      if (d > distance) { distance = d; farthest = index }
-    }
-    if (farthest < 0) continue
-    keep[farthest] = 1
-    stack.push([from, farthest], [farthest, to])
-  }
-  const out: number[] = []
-  for (let index = 0; index < count; index += 1) if (keep[index] === 1) out.push(points[index * 2]!, points[index * 2 + 1]!)
-  return out
-}
-
-function area(points: readonly number[]): number {
+function area(points: ArrayLike<number>): number {
   let sum = 0
   for (let index = 0, count = points.length / 2; index < count; index += 1) {
     const next = (index + 1) % count
@@ -72,8 +42,8 @@ export function selectionAnnotation(): EphemeralAnnotation | null {
   const outlines = traceMaskOutline(selection)
     .map((outline) => {
       let tolerance = 1
-      let points = simplify(outline, tolerance)
-      while (points.length / 2 > MAX_POINTS) { tolerance *= 2; points = simplify(outline, tolerance) }
+      let points = simplifyOutline(outline, tolerance)
+      while (points.length / 2 > MAX_POINTS) { tolerance *= 2; points = simplifyOutline(outline, tolerance) }
       return points
     })
     .filter((points) => points.length >= 6)
