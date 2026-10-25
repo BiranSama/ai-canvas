@@ -4,6 +4,10 @@ import { App } from '../../src/renderer/src/App'
 import { createNightVeilScene, NIGHT_VEIL_IDS } from '../../src/renderer/src/fixtures/night-veil'
 import { resetWorkspace, setWorkspaceSceneClientForTests, useWorkspaceStore } from '../../src/renderer/src/store/workspace-store'
 import { createLocalWorkspaceSceneClient } from '../helpers/local-workspace-scene-client'
+import { useMaskState } from '../../src/renderer/src/canvas/mask-state'
+import { useEditDialog } from '../../src/renderer/src/components/edit-dialog-store'
+import { rectMask } from '../../src/shared/mask-raster'
+import { setSelectionMask, useSelectionStore } from '../../src/renderer/src/selection/selection-store'
 
 vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
   const React = await import('react')
@@ -52,6 +56,9 @@ describe('Photoshop shortcuts on the canvas', () => {
   })
 
   afterEach(() => {
+    setSelectionMask(null)
+    useEditDialog.getState().close()
+    useMaskState.setState({ editing: null, view: null })
     setWorkspaceSceneClientForTests(null)
     vi.useRealTimers()
     vi.clearAllMocks()
@@ -250,5 +257,78 @@ describe('Photoshop shortcuts on the canvas', () => {
     press({ key: 'E', code: 'KeyE', ctrlKey: true, altKey: true, shiftKey: true })
     expect(await screen.findByText('没能盖印可见图层：画布上的图层还没画好，稍后再试。')).toBeInTheDocument()
     expect(useWorkspaceStore.getState().scene.elements).toHaveLength(4)
+  })
+  it('selects pixels with Ctrl+A, inverts with Ctrl+Shift+I, drops them with Ctrl+D and brings them back with Ctrl+Shift+D', async () => {
+    await renderWorkspace([NIGHT_VEIL_IDS.title])
+    const selection = () => useSelectionStore.getState().mask
+    press({ key: 'a', code: 'KeyA', ctrlKey: true })
+    expect(selection()).toMatchObject({ width: 1024, height: 1280 })
+    expect(selection()!.data.every((value) => value === 255)).toBe(true)
+    // Ctrl+A selects pixels now; the layers stay as they were.
+    expect(useWorkspaceStore.getState().selectedIds).toEqual([NIGHT_VEIL_IDS.title])
+
+    act(() => setSelectionMask(rectMask(1024, 1280, { x: 100, y: 100, width: 200, height: 200 })))
+    press({ key: 'I', code: 'KeyI', ctrlKey: true, shiftKey: true })
+    expect([selection()!.data[0], selection()!.data[150 * 1024 + 150]]).toEqual([255, 0])
+
+    press({ key: 'd', code: 'KeyD', ctrlKey: true })
+    expect(selection()).toBeNull()
+    expect(useWorkspaceStore.getState().selectedIds).toEqual([NIGHT_VEIL_IDS.title])
+    press({ key: 'D', code: 'KeyD', ctrlKey: true, shiftKey: true })
+    expect(selection()!.data[150 * 1024 + 150]).toBe(0)
+    // Ctrl+Z steps back through the selection like any other change.
+    press({ key: 'z', code: 'KeyZ', ctrlKey: true })
+    await waitFor(() => expect(selection()).toBeNull())
+    press({ key: 'd', code: 'KeyD', ctrlKey: true })
+    expect(useWorkspaceStore.getState().selectedIds).toEqual([])
+  })
+
+  it('picks the selection tools with M, L and W, Shift moving to the other tool in the slot', async () => {
+    await renderWorkspace()
+    const tool = () => useWorkspaceStore.getState().activeTool
+    press({ key: 'm', code: 'KeyM' })
+    expect(tool()).toBe('marquee-rect')
+    expect(screen.getByRole('toolbar', { name: '矩形选框选项' })).toBeInTheDocument()
+    press({ key: 'M', code: 'KeyM', shiftKey: true })
+    expect(tool()).toBe('marquee-ellipse')
+    press({ key: 'v', code: 'KeyV' })
+    press({ key: 'm', code: 'KeyM' })
+    expect(tool()).toBe('marquee-ellipse')
+    press({ key: 'l', code: 'KeyL' })
+    expect(tool()).toBe('lasso')
+    press({ key: 'L', code: 'KeyL', shiftKey: true })
+    expect(tool()).toBe('lasso-polygon')
+    press({ key: 'w', code: 'KeyW' })
+    expect(tool()).toBe('object-select')
+    press({ key: 'W', code: 'KeyW', shiftKey: true })
+    expect(tool()).toBe('magic-wand')
+  })
+
+  it('opens Feather with Shift+F6 and Fill with Shift+F5', async () => {
+    await renderWorkspace()
+    press({ key: 'F6', code: 'F6', shiftKey: true })
+    expect(await screen.findByRole('dialog', { name: '羽化选区' })).toBeInTheDocument()
+    act(() => useEditDialog.getState().close())
+    press({ key: 'F5', code: 'F5', shiftKey: true })
+    expect(await screen.findByRole('dialog', { name: '填充' })).toBeInTheDocument()
+  })
+
+  it('with a selection, Delete clears pixels instead of deleting the layer, and asks for a raster layer first', async () => {
+    await renderWorkspace([NIGHT_VEIL_IDS.title])
+    act(() => setSelectionMask(rectMask(1024, 1280, { x: 0, y: 0, width: 512, height: 512 })))
+    press({ key: 'Delete', code: 'Delete' })
+    expect(await screen.findByText('「主标题」要先栅格化（图层右键菜单），才能清除选区里的像素。')).toBeInTheDocument()
+    expect(element(NIGHT_VEIL_IDS.title)).toBeDefined()
+  })
+
+  it('lays a layer\'s mask over it in red with \\ and takes it off again', async () => {
+    await renderWorkspace([NIGHT_VEIL_IDS.title])
+    press({ key: '\\', code: 'Backslash' })
+    expect(useMaskState.getState().view).toBeNull()
+    await act(async () => { await useWorkspaceStore.getState().updateElement(NIGHT_VEIL_IDS.title, { mask: { assetId: '10000000-0000-4000-8000-000000000098', enabled: true } }, '添加蒙版') })
+    press({ key: '\\', code: 'Backslash' })
+    expect(useMaskState.getState().view).toEqual({ elementId: NIGHT_VEIL_IDS.title, mode: 'overlay' })
+    press({ key: '\\', code: 'Backslash' })
+    expect(useMaskState.getState().view).toBeNull()
   })
 })
