@@ -5,6 +5,7 @@ import sharp from 'sharp'
 import type { NormalizedTransform, Scene, SceneElement } from '../../domain'
 import type { AssetStore } from '../storage/asset-store'
 import type { AssetMetadata } from '../storage/project-repository'
+import { writeImage } from '../storage/image-file'
 
 interface Point {
   readonly x: number
@@ -154,7 +155,7 @@ export class EditMaskCompiler {
     await mkdir(this.#stagingDirectory, { recursive: true })
     const stagingPath = join(this.#stagingDirectory, `${id}.png`)
     try {
-      await sharp(output, { raw: { width, height, channels: 1 } }).png().toFile(stagingPath)
+      await writeImage(sharp(output, { raw: { width, height, channels: 1 } }).png(), stagingPath)
       const asset = await this.#assetStore.importImage({ sourcePath: stagingPath, sourceType: 'reference', sourceId: `mask:${id}` })
       return { id, asset, width, height, contributingMaskIds: masks.map((mask) => mask.id) }
     } finally {

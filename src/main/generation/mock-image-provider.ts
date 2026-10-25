@@ -4,6 +4,7 @@ import sharp from 'sharp'
 import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
 import type { ImageProvider, ProviderGenerateContext, ProviderOutput } from './provider'
 import { ProviderError } from './provider'
+import { imageBytes, writeImage } from '../storage/image-file'
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -113,7 +114,7 @@ export class MockImageProvider implements ImageProvider {
     for (let variant = 0; variant < request.count; variant += 1) {
       if (context.signal.aborted) throw context.signal.reason
       const filePath = join(this.#stagingDirectory, `${crypto.randomUUID()}-${variant}.png`)
-      await sharp(Buffer.from(mockSvg(request, variant))).png().toFile(filePath)
+      await writeImage(sharp(Buffer.from(mockSvg(request, variant))).png(), filePath)
       outputs.push({ filePath, mimeType: 'image/png' })
     }
     await context.onStage('localizing')
@@ -145,7 +146,7 @@ export class MockImageProvider implements ImageProvider {
 
     const width = source.asset.width
     const height = source.asset.height
-    const maskAlpha = await sharp(mask.filePath).greyscale().removeAlpha().raw().toBuffer()
+    const maskAlpha = await sharp(await imageBytes(mask.filePath)).greyscale().removeAlpha().raw().toBuffer()
     const hue = (request.prompt.length * 23) % 360
     const color = await sharp({
       create: { width, height, channels: 3, background: `hsl(${hue}, 62%, 54%)` }
@@ -157,12 +158,11 @@ export class MockImageProvider implements ImageProvider {
     for (let variant = 0; variant < request.count; variant += 1) {
       if (context.signal.aborted) throw context.signal.reason
       const filePath = join(this.#stagingDirectory, `${crypto.randomUUID()}-edit-${variant}.png`)
-      await sharp(source.filePath)
+      await writeImage(sharp(await imageBytes(source.filePath))
         .rotate()
         .resize(width, height, { fit: 'fill' })
         .composite([{ input: color, blend: 'over' }])
-        .png()
-        .toFile(filePath)
+        .png(), filePath)
       outputs.push({ filePath, mimeType: 'image/png' })
     }
     await context.onStage('localizing')

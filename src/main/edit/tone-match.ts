@@ -3,6 +3,7 @@ import type { ImageEffects, Scene, SceneElement } from '../../domain'
 import { CompositeReferenceRenderer, type ReferenceAssetResolver } from '../reference/composite-reference-renderer'
 import { subScene } from '../reference/sub-scene'
 import { layersBelow } from './layer-in-context'
+import { imageBytes } from '../storage/image-file'
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
 
@@ -52,11 +53,11 @@ export interface ToneMeasurement {
 export async function measureToneMatch(scene: Scene, element: ImageElement, resolveAsset: ReferenceAssetResolver, strength: number): Promise<ToneMeasurement | null> {
   const path = await resolveAsset(element.assetId)
   if (path === null) return null
-  const source = sharp(path)
-  const metadata = await source.metadata()
+  const bytes = await imageBytes(path)
+  const metadata = await sharp(bytes).metadata()
   const width = metadata.width ?? 1
   const height = metadata.height ?? 1
-  const layer = await sharp(path)
+  const layer = await sharp(bytes)
     .extract({
       left: Math.min(width - 1, Math.round(element.crop.x * width)),
       top: Math.min(height - 1, Math.round(element.crop.y * height)),
