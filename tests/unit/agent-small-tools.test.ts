@@ -70,8 +70,8 @@ class Harness {
 describe('small agent tools', () => {
   it('keeps the whole catalogue small, uniquely named and valid for every protocol', () => {
     const definitions = llmToolDefinitions(AGENT_TOOLS as never)
-    expect(definitions).toHaveLength(25)
-    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(25)
+    expect(definitions).toHaveLength(26)
+    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(26)
     for (const definition of definitions) expect(definition.name).toMatch(/^[a-z_]{1,64}$/)
     expect(JSON.stringify(definitions).length).toBeLessThan(20_000)
   })
@@ -468,5 +468,98 @@ describe('fill and merge_layers', () => {
 
     await harness.call('add_subject', { subject: '一只猫', box: [20, 20, 40, 40] })
     expect((await harness.call('merge_layers', { targets: ['E1', 'E3'] })).result).toMatchObject({ ok: false, summary: 'E3「主体·一只猫」是 AI 标注，不能合并。' })
+  })
+})
+
+describe('mask_layer', () => {
+  const ASSET = '00000000-0000-4000-8000-000000000702'
+  const MASK = '00000000-0000-4000-8000-000000000703'
+  const BAKED = '00000000-0000-4000-8000-000000000704'
+  function withImage(harness: Harness): void {
+    const image = {
+      id: '00000000-0000-4000-8000-000000000701', version: 1, type: 'image', name: '人像', description: '',
+      transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, zIndex: 0, opacity: 1, blendMode: 'normal', visible: true, locked: false,
+      groupId: null, semanticRole: 'content', referencePolicy: 'include', assetId: ASSET,
+      crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general'
+    } as const
+    harness.scene = { ...harness.scene, elements: [image] }
+    harness.refs.sync(harness.scene)
+  }
+
+  it('masks a layer by its subject, a box or the person\'s selection, and reworks the mask it has', async () => {
+    const harness = new Harness()
+    withImage(harness)
+    const specs: unknown[] = []
+    harness.extra = { layerMask: async (spec) => { specs.push(spec); return { assetId: MASK } } }
+    expect(availableAgentTools(harness.context()).some((tool) => tool.name === 'mask_layer')).toBe(true)
+
+    const subject = await harness.call('mask_layer', { target: 'E1', source: 'subject', feather: 2 })
+    expect(subject.result.summary).toBe('已给 E1 加上蒙版：主体，边缘羽化 2 像素')
+    expect(specs.at(-1)).toEqual({ elementId: harness.scene.elements[0]!.id, shape: { kind: 'subject' }, combine: 'replace', invert: false, feather: 2 })
+    expect(harness.scene.elements[0]).toMatchObject({ mask: { assetId: MASK, enabled: true } })
+
+    await harness.call('mask_layer', { target: 'E1', source: 'ellipse', region: [10, 20, 30, 40], invert: true, combine: 'subtract' })
+    expect(specs.at(-1)).toMatchObject({ shape: { kind: 'ellipse', box: { x: 0.1, y: 0.2, width: 0.3, height: 0.4 } }, combine: 'subtract', invert: true })
+
+    expect((await harness.call('mask_layer', { target: 'E1', source: 'selection' })).result).toMatchObject({ ok: false, summary: '用户这一轮没有选区。' })
+    const outline = [{ x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.5, y: 0.5 }]
+    harness.extra = {
+      ...harness.extra,
+      marked: {
+        id: '00000000-0000-4000-8000-000000000705', mode: 'edit', points: outline, closed: true, width: 0.015, targetElementId: null,
+        regions: [
+          { id: '00000000-0000-4000-8000-000000000705', mode: 'edit', points: outline, closed: true, width: 0.015 },
+          { id: '00000000-0000-4000-8000-000000000706', mode: 'protect', points: [{ x: 0.6, y: 0.6 }, { x: 0.9, y: 0.6 }, { x: 0.9, y: 0.9 }], closed: true, width: 0.015 }
+        ]
+      }
+    }
+    expect((await harness.call('mask_layer', { target: 'E1', source: 'selection' })).result.summary).toBe('已给 E1 改了蒙版：用户的选区')
+    expect(specs.at(-1)).toMatchObject({ shape: { kind: 'polygons', polygons: [outline] } })
+
+    expect((await harness.call('mask_layer', { target: 'E1', source: 'current', invert: true })).result.summary).toBe('已把 E1 的蒙版反相')
+    expect(specs.at(-1)).toMatchObject({ shape: { kind: 'current' }, invert: true })
+
+    expect((await harness.call('mask_layer', { target: 'E1', source: 'box' })).result).toMatchObject({ ok: false, summary: 'source=box 要给 region。' })
+    expect((await harness.call('mask_layer', { target: 'E1' })).result).toMatchObject({ ok: false, summary: 'action=set 要给 source。' })
+    expect((await harness.call('mask_layer', { target: 'E1', source: 'current' })).result).toMatchObject({ ok: false, summary: 'source=current 要配合 invert 或 feather。' })
+
+    harness.extra = { layerMask: async () => '选择主体用的模型还没有下载。' }
+    expect((await harness.call('mask_layer', { target: 'E1', source: 'subject' })).result).toMatchObject({ ok: false, hint: expect.stringContaining('选择主体') })
+  })
+
+  it('disables, enables, deletes and applies a mask; applying rasterizes text and shapes', async () => {
+    const harness = new Harness()
+    withImage(harness)
+    const baked: string[] = []
+    harness.extra = {
+      layerMask: async () => ({ assetId: MASK }),
+      bakeImage: async (elementId) => { baked.push(elementId); return BAKED },
+      drawLayers: async () => ({ assetId: BAKED, transform: { x: 0.1, y: 0.1, width: 0.2, height: 0.2, rotation: 0 } })
+    }
+    expect((await harness.call('mask_layer', { target: 'E1', action: 'apply' })).result).toMatchObject({ ok: false, summary: 'E1 没有蒙版。' })
+    await harness.call('mask_layer', { target: 'E1', source: 'box', region: [0, 0, 50, 100] })
+
+    expect((await harness.call('mask_layer', { target: 'E1', action: 'disable' })).result.summary).toBe('已停用 E1 的蒙版')
+    expect(harness.scene.elements[0]).toMatchObject({ mask: { assetId: MASK, enabled: false } })
+    expect((await harness.call('mask_layer', { target: 'E1', action: 'apply' })).result).toMatchObject({ ok: false, summary: 'E1 的蒙版停用着。' })
+    await harness.call('mask_layer', { target: 'E1', action: 'enable' })
+    expect((await harness.call('mask_layer', { target: 'E1', action: 'delete', invert: true })).result.ok).toBe(false)
+
+    const applied = await harness.call('mask_layer', { target: 'E1', action: 'apply' })
+    expect(applied.result.summary).toBe('已把 E1 的蒙版应用进像素：遮住的部分删掉了')
+    expect(baked).toEqual([harness.scene.elements[0]!.id])
+    expect(harness.scene.elements[0]).toMatchObject({ assetId: BAKED, paint: [], mask: null })
+
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    expect((await harness.call('mask_layer', { target: 'E2', source: 'subject' })).result).toMatchObject({ ok: false, summary: 'E2 不是图片，没有主体可找。' })
+    await harness.call('mask_layer', { target: 'E2', source: 'box', region: [0, 0, 50, 100] })
+    expect(harness.scene.elements[1]).toMatchObject({ type: 'text', mask: { assetId: MASK } })
+    expect((await harness.call('mask_layer', { target: 'E2', action: 'apply' })).result.summary).toBe('已把 E2 的蒙版应用进像素：遮住的部分删掉了，图层已栅格化')
+    expect(harness.scene.elements[1]).toMatchObject({ type: 'image', assetId: BAKED })
+    expect(harness.scene.elements[1]).not.toHaveProperty('mask')
+
+    await harness.call('mask_layer', { target: 'E1', source: 'box', region: [0, 0, 50, 100] })
+    expect((await harness.call('mask_layer', { target: 'E1', action: 'delete' })).result.summary).toBe('已删掉 E1 的蒙版，整个图层重新露出')
+    expect(harness.scene.elements[0]).toMatchObject({ mask: null })
   })
 })

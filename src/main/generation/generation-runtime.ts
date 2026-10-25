@@ -75,13 +75,14 @@ import {
 } from '../agent'
 import type { AgentLoopToolContext } from '../agent'
 import { createMultiStepPlannerAdapter, environmentAgentEngine } from '../agent/multi-step/runtime-adapter'
+import type { SubjectSegmentation } from '../segmentation/subject-segmentation'
 import { AgentEngineSettingStore } from '../agent/multi-step/engine-setting-store'
 import type { AgentEngine, AgentEngineSetting } from '../../shared/agent-engine'
 import { projectWorkContextSchema, type ProjectWorkContext } from '../../shared/project-work-context'
 import { blendModeCommandViolation, compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../agent/atomic-scene-tools'
 import { compileDesignDirectionSelection } from '../agent/design-direction-selection'
 import { EditMaskCompiler } from '../edit'
-import { extractLayer, inContextLayerJob, layerRegion, layersBelow, regionMask, regionTransform, type LayerRegion } from '../edit/layer-in-context'
+import { extractLayer, inContextLayerJob, layerRegion, layersBelow, regionMask, regionTransform, selectionFillJob, type LayerRegion } from '../edit/layer-in-context'
 import { subScene } from '../reference/sub-scene'
 import { measureToneMatch, type ToneMeasurement } from '../edit/tone-match'
 import { unifiedPlacementCommands, unifiedRenderCover, unifiedRenderJob } from '../edit/unified-render'
@@ -174,6 +175,8 @@ export interface GenerationRuntimeOptions {
   readonly secretVault?: ProviderSecretVault
   /** Forces an agent engine over the owner's stored choice and AI_CANVAS_AGENT_ENGINE. */
   readonly agentEngine?: AgentEngine
+  /** Select Subject's local model, for the agent's masks; the app passes its one service. */
+  readonly subject?: () => Pick<SubjectSegmentation, 'status' | 'segment'>
 }
 
 type ImageProviderConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -326,6 +329,7 @@ export class GenerationRuntime {
   readonly #secrets: ProviderSecretVault
   /** Forced by the environment or a runtime option; otherwise the stored choice applies. */
   readonly #forcedAgentEngine: AgentEngine | null
+  #subject: GenerationRuntimeOptions['subject'] | undefined
   readonly #agentEngineSetting: AgentEngineSettingStore
   #activeAgentEngine: AgentEngine = 'plan-once'
   readonly #executionBindings: ImageExecutionBindings
@@ -439,6 +443,7 @@ export class GenerationRuntime {
       providerUsage,
       options.agentEngine ?? environmentAgentEngine()
     )
+    runtime.#subject = options.subject
     await runtime.#refreshConfiguredImageProvider()
     await runtime.#activate(project, openedRecent)
     return runtime
@@ -667,7 +672,8 @@ export class GenerationRuntime {
           authorization: this.#providerUsage,
           assets: project.workspace.assets,
           scene: () => sceneService.state().scene,
-          importImage: (bytes, sourceId) => this.#importDerivedImage(project, bytes, 'imported', sourceId)
+          importImage: (bytes, sourceId) => this.#importDerivedImage(project, bytes, 'imported', sourceId),
+          ...(this.#subject === undefined ? {} : { subject: this.#subjectModel(this.#subject) })
         })
       : null
     const agent = new AgentRuntime({
@@ -1146,6 +1152,13 @@ export class GenerationRuntime {
     const operation = this.#importAssetOwned(input, this.#project)
     this.#assetImports.add(operation)
     try { return await operation } finally { this.#assetImports.delete(operation) }
+  }
+
+  #subjectModel(service: NonNullable<GenerationRuntimeOptions['subject']>): { ready(): Promise<boolean>; segment: SubjectSegmentation['segment'] } {
+    return {
+      ready: async () => (await service().status()).state === 'ready',
+      segment: (input) => service().segment(input)
+    }
   }
 
   /** Encodes pixels the renderer drew as a PNG asset, off the renderer's thread; no pixels makes a transparent image. */
@@ -1818,13 +1831,15 @@ export class GenerationRuntime {
     if (input.scene.id !== authoritativeScene.id || input.scene.revision !== authoritativeScene.revision) {
       throw new ProviderError('REFERENCE_REVIEW_REQUIRED', '画布或蒙版已修改，请核对当前版本后重新提交。', 'validating')
     }
-    const transientMasks = annotation === null ? [] : buildTransientAnnotationMasks(authoritativeScene, input.targetElementId, annotation, randomUUID)
+    const transientMasks = annotation === null || input.targetElementId === null ? [] : buildTransientAnnotationMasks(authoritativeScene, input.targetElementId, annotation, randomUUID)
     input = { ...input, scene: transientMasks.length === 0 ? authoritativeScene
       : { ...authoritativeScene, elements: [...authoritativeScene.elements, ...transientMasks] } }
     const { profiles, providers } = await this.#profileEnvironment(config)
     const editPrompt = input.mode === 'in-context'
       ? `在标出的区域里画出：${input.prompt.slice(0, 7_900)}\n和周围画面保持一致的光线方向、色温、透视和质感，边缘自然融入背景。`
-      : input.prompt
+      : input.mode === 'selection'
+        ? `在选区里画出：${input.prompt.slice(0, 7_900)}\n和周围画面保持一致的光线方向、色温、透视和质感，边缘自然融入画面。`
+        : input.prompt
     const profileDraft = {
       prompt: editPrompt,
       negativePrompt: input.negativePrompt,
@@ -1835,7 +1850,7 @@ export class GenerationRuntime {
       sourceSceneRevision: input.scene.revision,
       referenceMode: 'hybrid' as const,
       variationInstruction: editPrompt,
-      preserveConstraints: input.mode === 'in-context' ? '标出区域以外的画面保持原样' : '蒙版外区域保持不变',
+      preserveConstraints: input.mode === 'in-context' ? '标出区域以外的画面保持原样' : input.mode === 'selection' ? '选区以外的画面保持原样' : '蒙版外区域保持不变',
       expandedSections: [] as ('parameters' | 'references' | 'advanced')[]
     }
     const preflight = profiles.compile({
@@ -1856,8 +1871,9 @@ export class GenerationRuntime {
     if (!provider.capabilities.maskEditing) {
       throw new Error(`${provider.label} 不支持蒙版局部编辑，请切换到支持该能力的供应商。`)
     }
-    const target = input.scene.elements.find((element) => element.id === input.targetElementId)
+    const target = input.targetElementId === null ? undefined : input.scene.elements.find((element) => element.id === input.targetElementId)
     const inContext = input.mode === 'in-context'
+    const selectionFill = input.mode === 'selection'
     let source: AssetMetadata
     let inContextMask: { readonly asset: AssetMetadata; readonly width: number; readonly height: number; readonly contributingMaskIds: readonly string[] } | null = null
     let region: LayerRegion | null = null
@@ -1880,6 +1896,24 @@ export class GenerationRuntime {
       const invocation = randomUUID()
       source = await this.#importDerivedImage(owner, await sharp(rendered.buffer).png().toBuffer(), 'reference', `layer-source:${invocation}`)
       const maskAsset = await this.#importDerivedImage(owner, await regionMask(region), 'reference', `mask:${invocation}`)
+      inContextMask = { asset: maskAsset, width: maskAsset.width, height: maskAsset.height, contributingMaskIds: [] }
+    } else if (selectionFill) {
+      // Generative Fill: the whole picture as it exports, background included, repainted inside the selection.
+      const resolve = async (assetId: string): Promise<string | null> => {
+        try {
+          return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+        } catch {
+          return null
+        }
+      }
+      const rendered = await new CompositeReferenceRenderer(resolve).render({ ...input.scene, canvas: { ...input.scene.canvas, transparent: false } }, 'final')
+      const invocation = randomUUID()
+      source = await this.#importDerivedImage(owner, await sharp(rendered.buffer).png().toBuffer(), 'reference', `fill-source:${invocation}`)
+      const selection = await resolve(input.selectionMaskAssetId!)
+      if (selection === null) throw new Error('选区没有存好，请重新选择后再试。')
+      // An image service takes a hard mask: whatever the selection touches may be repainted; the soft edge returns as the layer's mask.
+      const hard = await sharp(selection).extractChannel(0).resize(source.width, source.height, { fit: 'fill' }).threshold(1).png().toBuffer()
+      const maskAsset = await this.#importDerivedImage(owner, hard, 'reference', `fill-mask:${invocation}`)
       inContextMask = { asset: maskAsset, width: maskAsset.width, height: maskAsset.height, contributingMaskIds: [] }
     } else {
       if (target?.type !== 'image') throw new Error('局部修改需要先选择一个图片元素。')
@@ -1905,15 +1939,16 @@ export class GenerationRuntime {
         { assetId: mask.asset.id, intent: 'mask', strength: 1 }
       ],
       parameters: {
-        mode: inContext ? 'layer-in-context' : 'local-edit',
+        mode: inContext ? 'layer-in-context' : selectionFill ? 'selection-fill' : 'local-edit',
         originalRequirement: input.prompt,
-        targetElementId: target!.id,
+        targetElementId: target?.id ?? null,
         sourceAssetId: source.id,
         maskAssetId: mask.asset.id,
+        ...(selectionFill ? { selectionMaskAssetId: input.selectionMaskAssetId } : {}),
         contributingMaskIds: mask.contributingMaskIds,
         ...(region === null ? {} : { layerRegion: region }),
         referenceSourceSnapshot: { version: 1, source: referencePreview.source, signature: referencePreview.signature,
-          summary: inContext ? '目标下方的画面与要重画的区域' : '选中的图片与当前画布蒙版', sceneRevision: authoritativeScene.revision, assetIds: [source.id, mask.asset.id] },
+          summary: inContext ? '目标下方的画面与要重画的区域' : selectionFill ? '整个画面与要填充的选区' : '选中的图片与当前画布蒙版', sceneRevision: authoritativeScene.revision, assetIds: [source.id, mask.asset.id] },
         sourceDimensions: { width: source.width, height: source.height },
         maskDimensions: { width: mask.width, height: mask.height },
         invocationInputHash: inputHash,
@@ -2162,6 +2197,15 @@ export class GenerationRuntime {
     }
     let asset = await this.#project.workspace.assets.getAsset(match.result.assetId)
     let layerTransform: NormalizedTransform | null = null
+    // Generative Fill: the repainted picture over the whole canvas, masked by the selection it filled.
+    const fill = target === undefined ? selectionFillJob(match.job.request.parameters) : null
+    let fillMask: { readonly assetId: string; readonly enabled: boolean } | null = null
+    if (fill !== null) {
+      const selection = await owner.workspace.assets.resolveAsset(fill.selectionMaskAssetId)
+      const fitted = await sharp(selection.filePath).extractChannel(0).resize(asset.width, asset.height, { fit: 'fill' }).png().toBuffer()
+      fillMask = { assetId: (await this.#importDerivedImage(owner, fitted, 'reference', `fill-layer-mask:${match.result.id}`)).id, enabled: true }
+      layerTransform = { x: 0, y: 0, width: 1, height: 1, rotation: 0 }
+    }
     if (layer !== null) {
       const [result, source] = await Promise.all([
         owner.workspace.assets.resolveAsset(match.result.assetId),
@@ -2188,7 +2232,7 @@ export class GenerationRuntime {
       id: input.placementId,
       version: ELEMENT_SCHEMA_VERSION,
       type: 'image',
-      name: unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一渲染 ${match.result.variantIndex + 1}`,
+      name: fill !== null ? `生成式填充 ${match.result.variantIndex + 1}` : unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一渲染 ${match.result.variantIndex + 1}`,
       description: unified === null
         ? `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`
         : `由 ${match.job.providerId}/${match.job.model} 统一重绘；原来的图层保留在它下面，隐藏它就能看到。`,
@@ -2210,14 +2254,15 @@ export class GenerationRuntime {
       assetId: asset.id,
       crop: { x: 0, y: 0, width: 1, height: 1 },
       fit: unified !== null ? 'cover' : layerTransform === null ? 'contain' : 'fill',
-      referenceRole: 'general'
+      referenceRole: 'general',
+      ...(fillMask === null ? {} : { mask: fillMask })
     }
     const mutation = await this.#sceneService.execute({
       expectedSceneRevision: current.revision,
       batch: {
         id: input.placementId,
         origin: input.origin,
-        summary: unified !== null ? '放入统一渲染' : target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
+        summary: unified !== null ? '放入统一渲染' : fill !== null ? '放入生成式填充' : target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
         commands: unified !== null ? unifiedPlacementCommands(current, element, unified.coveredElementIds) : target === undefined ? [{ kind: 'element.add', element }] : [
           { kind: 'element.set-image', elementId: target.id, assetId: asset.id, provenance: element.provenance! },
           // The cut-out covers the element's box and the band it fades across.

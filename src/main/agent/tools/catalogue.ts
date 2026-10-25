@@ -17,6 +17,7 @@ import { groupTool } from './group'
 import { inspectTool } from './inspect'
 import { loadManualTool } from './load-manual'
 import { lookTool } from './look'
+import { maskLayerTool } from './mask-layer'
 import { mergeLayersTool } from './merge'
 import { placeResultTool } from './place-result'
 import { blendTool } from './blend'
@@ -32,7 +33,7 @@ import { viewResultTool } from './view-result'
 /** Every small tool, in the order the model sees them. */
 export const AGENT_TOOLS: readonly AgentToolSpec<never>[] = [
   lookTool, inspectTool, viewResultTool,
-  setCanvasTool, addTextTool, addShapeTool, updateTool, arrangeTool, reorderTool, groupTool, mergeLayersTool, fillTool, removeTool,
+  setCanvasTool, addTextTool, addShapeTool, updateTool, arrangeTool, reorderTool, groupTool, mergeLayersTool, fillTool, maskLayerTool, removeTool,
   addSubjectTool, addLightTool, addMaskTool, undoTool,
   generateTool, editImageTool, placeResultTool, blendTool, cancelGenerationTool,
   askUserTool, rememberTool, loadManualTool

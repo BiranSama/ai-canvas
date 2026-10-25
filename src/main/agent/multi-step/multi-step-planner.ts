@@ -51,6 +51,8 @@ export interface MultiStepPlannerOptions {
   readonly assetSize?: AgentToolContext['assetSize']
   readonly drawLayers?: AgentToolContext['drawLayers']
   readonly blankLayer?: AgentToolContext['blankLayer']
+  readonly layerMask?: AgentToolContext['layerMask']
+  readonly bakeImage?: AgentToolContext['bakeImage']
   readonly newId?: () => string
   /** Model calls one pass may make while it answers read-only tools itself. */
   readonly maxModelCallsPerPass?: number
@@ -169,7 +171,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       measureTone: this.#options.measureTone ?? null,
       assetSize: this.#options.assetSize ?? null,
       drawLayers: this.#options.drawLayers ?? null,
-      blankLayer: this.#options.blankLayer ?? null
+      blankLayer: this.#options.blankLayer ?? null,
+      marked: input.request.ephemeralAnnotation,
+      layerMask: this.#options.layerMask ?? null,
+      bakeImage: this.#options.bakeImage ?? null
     }
     const finish = (step: PlannerStep, emitted: ModelTrace['emitted'], modelTurns: number): PlannerStepResult => ({
       step: {

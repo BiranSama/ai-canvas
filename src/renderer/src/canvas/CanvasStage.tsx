@@ -45,6 +45,7 @@ import { groupBoundsForChildTransforms, isPaintTool, isSelectionTool, useWorkspa
 import { cancelSelectionGesture, polygonLassoActive, selectionKeyDown, selectionPointerDown, selectionPointerMove, selectionPointerUp } from '../selection/selection-gestures'
 import { SelectionOverlay } from '../selection/SelectionOverlay'
 import { warmMagicTouch } from '../selection/magic-touch'
+import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
 import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
@@ -2587,6 +2588,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         </Layer>
       </Stage>
       {!preview && <SelectionOverlay originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} />}
+      {!preview && (activeTool === 'select' || isSelectionTool(activeTool)) && <GenerativeFillBar originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} stageWidth={size.width} stageHeight={size.height} />}
       {/* The brush's real size on the canvas, light over dark so it reads on any picture. */}
       {!preview && (activeTool === 'brush' || activeTool === 'eraser') && !spacePressed && <div ref={brushRingRef} className="brush-ring" aria-hidden="true" hidden />}
       {!preview && inlineText !== undefined && (

@@ -13,7 +13,7 @@
     "protocol": "ark-responses",
     "transport": "buffered"
   },
-  "recordedAt": "2026-10-25T04:27:11.049Z",
+  "recordedAt": "2026-10-25T04:43:07.658Z",
   "note": "Hand-written Ark Responses reply (buffered JSON) that shrinks the title by 20%. Request shapes are stamped from the current engine with AI_CANVAS_EVAL_REFRESH_RECORDINGS=1.",
   "exchanges": [
     {

@@ -5,6 +5,7 @@ import sharp from 'sharp'
 import { afterEach, expect, it } from 'vitest'
 import { CommandBus, createScene, ELEMENT_SCHEMA_VERSION, type PaintOp, type Scene, type SceneElement } from '../../src/domain'
 import { blankLayerBytes, drawLayers } from '../../src/main/paint/draw-layers'
+import { buildLayerMask } from '../../src/main/paint/layer-mask-build'
 import { paintedImageBytes } from '../../src/main/paint/painted-image'
 import { CompositeReferenceRenderer } from '../../src/main/reference/composite-reference-renderer'
 import { applyMaskAlpha, applyPaintOps, maskCoverage } from '../../src/shared/paint-ops'
@@ -193,4 +194,70 @@ it('masks a shape layer over its box in the reference, and merging draws it mask
   // The mask's soft edge, stretched over the box, can reach one pixel into the hidden half.
   expect(drawn.transform.x).toBeCloseTo(0.5, 1)
   expect(drawn.transform.width).toBeCloseTo(0.25, 1)
+})
+
+it('builds the agent\'s layer masks in the layer\'s own pixels: shapes from the canvas, the subject from the picture', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'layer-mask-'))
+  roots.push(root)
+  const MASK_ASSET = ID(301)
+  // A 200×100 picture whose right quarter is transparent, placed over the canvas's middle 64×64 pixels.
+  const picture = Buffer.alloc(200 * 100 * 4)
+  for (let pixel = 0; pixel < 200 * 100; pixel += 1) picture.set([120, 80, 40, pixel % 200 < 150 ? 255 : 0], pixel * 4)
+  await sharp(picture, { raw: { width: 200, height: 100, channels: 4 } }).png().toFile(join(root, 'picture.png'))
+  await sharp(Buffer.alloc(200 * 100, 255), { raw: { width: 200, height: 100, channels: 1 } }).extract({ left: 0, top: 0, width: 200, height: 50 })
+    .extend({ bottom: 50, background: { r: 0, g: 0, b: 0 } }).png().toFile(join(root, 'mask.png'))
+  const paths: Record<string, string> = { [ASSET]: join(root, 'picture.png'), [MASK_ASSET]: join(root, 'mask.png') }
+  const deps = {
+    resolveAsset: async (assetId: string) => paths[assetId] ?? null,
+    assetSize: async (assetId: string) => assetId === ASSET || assetId === MASK_ASSET ? { width: 200, height: 100 } : null,
+    // A stand-in model: the left half of whatever it is shown, and a faint guess everywhere else.
+    subject: async (pixels: Uint8Array, width: number, height: number) => {
+      expect(pixels.length).toBe(width * height * 4)
+      return Uint8Array.from({ length: width * height }, (_, index) => index % width < width / 2 ? 255 : 10)
+    }
+  }
+  const layer = { ...paintedLayer([]), transform: { x: 0.25, y: 0.25, width: 0.5, height: 0.5, rotation: 0 } }
+  const at = (mask: { readonly width: number; readonly data: Uint8Array }, x: number, y: number): number => mask.data[y * mask.width + x]!
+  const build = async (element: SceneElement, spec: Omit<Parameters<typeof buildLayerMask>[1], 'elementId'>) => {
+    const built = await buildLayerMask(scene([element]), { elementId: element.id, ...spec }, deps)
+    if (typeof built === 'string') throw new Error(built)
+    return built
+  }
+
+  // The canvas's left half reaches the middle of the layer, which spans canvas x 32–96.
+  const half = await build(layer, { shape: { kind: 'box', box: { x: 0, y: 0, width: 0.5, height: 1 } }, combine: 'replace', invert: false, feather: 0 })
+  expect([half.width, half.height]).toEqual([200, 100])
+  expect([at(half, 10, 50), at(half, 95, 50), at(half, 105, 50), at(half, 190, 50)]).toEqual([255, 255, 0, 0])
+  // Subtracting from a layer with no mask hides only the shape.
+  const hidden = await build(layer, { shape: { kind: 'box', box: { x: 0, y: 0, width: 0.5, height: 1 } }, combine: 'subtract', invert: false, feather: 0 })
+  expect([at(hidden, 10, 50), at(hidden, 190, 50)]).toEqual([0, 255])
+  const triangle = await build(layer, { shape: { kind: 'polygons', polygons: [[{ x: 0.25, y: 0.25 }, { x: 0.75, y: 0.25 }, { x: 0.25, y: 0.75 }]] }, combine: 'replace', invert: false, feather: 0 })
+  expect([at(triangle, 20, 10), at(triangle, 180, 90)]).toEqual([255, 0])
+  // Feathered over 4 canvas pixels, about 12 of the layer's across the edge.
+  const soft = await build(layer, { shape: { kind: 'box', box: { x: 0, y: 0, width: 0.5, height: 1 } }, combine: 'replace', invert: false, feather: 4 })
+  expect(at(soft, 100, 50)).toBeGreaterThan(80)
+  expect(at(soft, 100, 50)).toBeLessThan(180)
+  expect(at(soft, 80, 50)).toBe(255)
+
+  // The subject is found in the layer's own pixels; faint guesses and transparent pixels are left out.
+  const subject = await build(layer, { shape: { kind: 'subject' }, combine: 'replace', invert: true, feather: 0 })
+  expect([at(subject, 10, 50), at(subject, 120, 50), at(subject, 180, 50)]).toEqual([0, 255, 255])
+  expect(await buildLayerMask(scene([layer]), { elementId: layer.id, shape: { kind: 'subject' }, combine: 'replace', invert: false, feather: 0 }, { ...deps, subject: null }))
+    .toBe('选择主体用的模型还没有下载。')
+
+  // The mask it has, inverted; a new shape added to it keeps what it showed.
+  const masked = { ...layer, mask: { assetId: MASK_ASSET, enabled: true } }
+  const inverted = await build(masked, { shape: { kind: 'current' }, combine: 'replace', invert: true, feather: 0 })
+  expect([at(inverted, 100, 10), at(inverted, 100, 90)]).toEqual([0, 255])
+  const added = await build(masked, { shape: { kind: 'box', box: { x: 0, y: 0, width: 0.5, height: 1 } }, combine: 'add', invert: false, feather: 0 })
+  expect([at(added, 190, 10), at(added, 10, 90), at(added, 190, 90)]).toEqual([255, 255, 0])
+
+  // A shape layer's mask stretches over its box, at its size in canvas pixels.
+  const block: SceneElement = {
+    ...BASE, id: ID(302), type: 'shape', name: '块', zIndex: 0, transform: { x: 0, y: 0, width: 0.5, height: 0.25, rotation: 0 },
+    shape: 'rectangle', fill: '#C02020', stroke: null, strokeWidth: 0, cornerRadius: 0, role: 'final'
+  }
+  const boxMask = await build(block, { shape: { kind: 'ellipse', box: { x: 0, y: 0, width: 0.5, height: 0.25 } }, combine: 'replace', invert: false, feather: 0 })
+  expect([boxMask.width, boxMask.height, at(boxMask, 32, 16), at(boxMask, 0, 0)]).toEqual([64, 32, 255, 0])
+  expect(await buildLayerMask(scene([block]), { elementId: block.id, shape: { kind: 'subject' }, combine: 'replace', invert: false, feather: 0 }, deps)).toBe('主体只能在图片图层上找。')
 })

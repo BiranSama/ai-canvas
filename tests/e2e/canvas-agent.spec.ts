@@ -22,7 +22,7 @@ test('AC-R1-07 keeps a scoped Agent edit on canvas with receipt, no generation a
     const shapeLayer = window.getByRole('option').filter({ has: window.locator('strong', { hasText: /^形状$/ }) })
     await titleLayer.click()
     await shapeLayer.click({ modifiers: ['Control'] })
-    await expect(window.getByRole('button', { name: /当前选区 · 2/ })).toBeVisible()
+    await expect(window.getByRole('button', { name: /所选图层 · 2/ })).toBeVisible()
 
     const before = await window.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop

@@ -40,6 +40,18 @@ const layerJobSchema = z.object({
   })
 })
 
+const selectionFillJobSchema = z.object({
+  mode: z.literal('selection-fill'),
+  sourceAssetId: z.string().min(1),
+  selectionMaskAssetId: z.string().min(1)
+})
+
+/** What a Generative Fill job recorded at submit time: the picture it repainted and the selection; null for every other job. */
+export function selectionFillJob(parameters: Readonly<Record<string, unknown>>): { readonly sourceAssetId: string; readonly selectionMaskAssetId: string } | null {
+  const parsed = selectionFillJobSchema.safeParse(parameters)
+  return parsed.success ? { sourceAssetId: parsed.data.sourceAssetId, selectionMaskAssetId: parsed.data.selectionMaskAssetId } : null
+}
+
 /** What an in-context job recorded at submit time; null for every other job. */
 export function inContextLayerJob(parameters: Readonly<Record<string, unknown>>): {
   readonly targetElementId: string

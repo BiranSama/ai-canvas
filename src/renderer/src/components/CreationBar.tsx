@@ -7,34 +7,14 @@ import { autoGenerationTurnCopy, useCreationSessionStore } from '../store/creati
 import { useGenerationDraftStore } from '../store/generation-draft-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { useProjectScope } from '../store/use-project-scope'
+import { preferredImageProvider } from '../generation/preferred-provider'
+import { selectionAnnotation } from '../selection/selection-annotation'
+import { useSelectionStore } from '../selection/selection-store'
 
 type CreationComposerState = 'idle' | 'editing' | 'acting' | 'confirm' | 'completed' | 'generating' | 'failed'
 
 const ACTIVE_AGENT_STATUSES = new Set<AgentRun['status']>(['queued', 'planning', 'awaiting_confirmation', 'awaiting_execution', 'executing'])
 const FAILED_AGENT_STATUSES = new Set<AgentRun['status']>(['failed', 'timed_out', 'interrupted'])
-
-async function preferredImageProvider(operation: 'generate' | 'reference' | 'edit'): Promise<{
-  readonly providerId: string
-  readonly model: string
-  readonly profileId: string
-  readonly confirmed: boolean
-}> {
-  const [settings, profiles] = await Promise.all([
-    window.desktop.getProviderSettings(),
-    window.desktop.listGenerationProfiles()
-  ])
-  const imageProvider = settings.providers.find((provider) => provider.id === settings.defaultImageProviderId)
-  const realProfile = profiles.profiles.find((entry) => entry.status === 'available'
-    && entry.profile.providerId === settings.defaultImageProviderId
-    && entry.profile.supportedOperations.includes(operation))?.profile
-  return settings.realCallsAuthorized
-    && imageProvider?.configured === true
-    && imageProvider.baseUrl.trim() !== ''
-    && imageProvider.defaultModel.trim() !== ''
-    && realProfile !== undefined
-    ? { providerId: imageProvider.id, model: imageProvider.defaultModel, profileId: realProfile.id, confirmed: true }
-    : { providerId: 'mock', model: 'mock-balanced', profileId: 'local-sketch', confirmed: false }
-}
 
 const CREATION_STATE_COPY: Record<CreationComposerState, string> = {
   idle: '待命',
@@ -55,7 +35,15 @@ export function CreationBar(): React.JSX.Element {
   const [editing, setEditing] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
   const [snapshot, setSnapshot] = useState<ConversationSnapshot | null>(null)
-  const [scope, setScope] = useState<'selection' | 'canvas'>('selection')
+  // 'pixels' is the selection on the canvas; 'selection' the selected layers.
+  const [scope, setScope] = useState<'pixels' | 'selection' | 'canvas'>('selection')
+  const pixelSelection = useSelectionStore((state) => state.mask !== null)
+  // A new selection on the canvas becomes what the next request is about, as Photoshop's generative tools take it.
+  const [hadPixelSelection, setHadPixelSelection] = useState(pixelSelection)
+  if (pixelSelection !== hadPixelSelection) {
+    setHadPixelSelection(pixelSelection)
+    if (pixelSelection) setScope('pixels')
+  }
   const value = useCreationSessionStore((state) => state.draft)
   const setValue = useCreationSessionStore((state) => state.setDraft)
   const agentMode = useCreationSessionStore((state) => state.agentMode)
@@ -85,7 +73,8 @@ export function CreationBar(): React.JSX.Element {
     ? (snapshot?.activities ?? []).flatMap((activity) => activity.decision?.status === 'waiting' ? [activity.decision] : [])
     : []
   const waitingDecision = [...waitingDecisions].reverse().find((decision) => decision.runId === activeRun?.id) ?? waitingDecisions.at(-1) ?? null
-  const effectiveScope = selectedIds.length === 0 ? 'canvas' : scope
+  const effectiveScope = scope === 'pixels' && pixelSelection ? 'pixels'
+    : selectedIds.length === 0 ? 'canvas' : scope === 'pixels' ? 'selection' : scope
   const autoGenerationCopy = autoGenerationTurnCopy(agentMode, providerAutoGeneration)
   const refresh = useCallback(async (): Promise<void> => {
     try {
@@ -139,7 +128,7 @@ export function CreationBar(): React.JSX.Element {
     setSubmitting(true)
     setProblem(null)
     try {
-      const request = await createAgentRequest(text, autoGenerate, effectiveScope)
+      const request = await createAgentRequest(text, autoGenerate, effectiveScope === 'canvas' ? 'canvas' : 'selection', effectiveScope === 'pixels' ? selectionAnnotation() : null)
       if (activeRun === null) await window.desktop.startAgentRun(request, agentMode)
       else await window.desktop.inputAgentRun(request, 'correct_current')
       completeAcceptedTurn()
@@ -255,10 +244,11 @@ export function CreationBar(): React.JSX.Element {
         />
         <button type="submit" className="send-button" aria-label="发送创作指令" disabled={value.trim().length === 0 || submitting}><ArrowUp size={17} /></button>
       </div>
-      {selectedIds.length > 0 && (
+      {(selectedIds.length > 0 || pixelSelection) && (
         <div className="canvas-selection-context" aria-label="画布指令范围">
           <span>作用范围</span>
-          <button type="button" className={effectiveScope === 'selection' ? 'is-active' : ''} onClick={() => setScope('selection')}>当前选区 · {selectedIds.length}</button>
+          {pixelSelection && <button type="button" className={effectiveScope === 'pixels' ? 'is-active' : ''} title="只改画布上选区里的部分" onClick={() => setScope('pixels')}>选区内</button>}
+          {selectedIds.length > 0 && <button type="button" className={effectiveScope === 'selection' ? 'is-active' : ''} onClick={() => setScope('selection')}>所选图层 · {selectedIds.length}</button>}
           <button type="button" className={effectiveScope === 'canvas' ? 'is-active' : ''} onClick={() => setScope('canvas')}>整个画布</button>
           {effectiveScope === 'selection' && selected !== undefined && <span className="selected-object">{selected.name}<X size={9} /></span>}
         </div>
