@@ -4,6 +4,7 @@ import { CompositeReferenceRenderer, type ReferenceAssetResolver } from '../refe
 import { subScene } from '../reference/sub-scene'
 import { layersBelow } from './layer-in-context'
 import { imageBytes } from '../storage/image-file'
+import { paintedImageBytes } from '../paint/painted-image'
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
 
@@ -53,7 +54,9 @@ export interface ToneMeasurement {
 export async function measureToneMatch(scene: Scene, element: ImageElement, resolveAsset: ReferenceAssetResolver, strength: number): Promise<ToneMeasurement | null> {
   const path = await resolveAsset(element.assetId)
   if (path === null) return null
-  const bytes = await imageBytes(path)
+  // Measured as it shows: with its paint, and only where its mask lets it through.
+  const masked = element.mask !== null && element.mask !== undefined && element.mask.enabled
+  const bytes = (element.paint?.length ?? 0) > 0 || masked ? await paintedImageBytes(path, element.paint, resolveAsset, element.mask ?? null) : await imageBytes(path)
   const metadata = await sharp(bytes).metadata()
   const width = metadata.width ?? 1
   const height = metadata.height ?? 1

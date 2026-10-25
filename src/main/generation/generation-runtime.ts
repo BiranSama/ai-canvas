@@ -9,7 +9,8 @@ import { lstat, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { AgentPlan, AgentRequest, AgentRun, AgentToolOutcome, AgentToolPlan, ConversationSnapshot, SceneSummary } from '../../shared/agent'
 import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../shared/agent'
-import { ELEMENT_SCHEMA_VERSION, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
+import { ELEMENT_SCHEMA_VERSION, imageElementSchema, type ImageEffects, type LayerMask, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
+import { fitSubject, type SubjectFinder, type SubjectFit } from '../edit/subject-fit'
 import type { AgentEvent, AgentHarnessSnapshot, AgentMode, AgentTaskDispatch, TaskRelation, TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
@@ -195,6 +196,11 @@ interface WorkflowMetadata {
   readonly retryExecution?: ImageExecutionBinding
 }
 
+/** A subject's place this share of the canvas is a background, and its picture is placed as it came. */
+const BACKGROUND_SHARE = 0.8
+/** How far a picture put in a subject's place moves towards the colours around it (0 none, 1 their average). */
+const SUBJECT_TONE = 0.35
+
 function workflowIdentity(request: Pick<ImageTaskRequest, 'parameters' | 'sourceMessageId' | 'prompt' | 'negativePrompt'
   | 'aspectWidth' | 'aspectHeight' | 'outputWidth' | 'outputHeight' | 'count' | 'references' | 'parentResultId'>,
   metadata: Pick<WorkflowMetadata, 'operation' | 'sourceSceneRevision' | 'idempotencyKey'>): string {
@@ -308,7 +314,7 @@ function summarizeScene(scene: Scene): SceneSummary {
         assetId: element.assetId,
         hasEditMask: scene.elements.some((mask) => mask.type === 'mask' && mask.targetElementId === element.id && mask.mode === 'edit' && mask.visible)
       } : {}),
-      ...(element.type === 'placeholder' ? { subject: element.subject, visualKind: element.visualKind ?? 'generic' } : {}),
+      ...(element.type === 'placeholder' ? { subject: element.subject, visualKind: element.visualKind ?? 'generic', cutout: element.transparentBackground } : {}),
       ...(element.type === 'shape' ? { shapeRole: element.role, fill: element.fill } : {}),
       ...(element.type === 'light' ? { lightIntensity: element.intensity } : {}),
       transform: { ...element.transform }
@@ -2218,6 +2224,8 @@ export class GenerationRuntime {
       asset = await this.#importDerivedImage(owner, cutOut, 'generated', `layer:${match.result.id}`)
       layerTransform = regionTransform(layer.region)
     }
+    // A picture going into a subject's place is cut out, or feathered, and toned towards what is around it.
+    const subjectFit = target === undefined || layer !== null ? null : await this.#fitIntoSubject(owner, current, target, asset, match.result.id)
     this.#assertGenerationProject(owner)
     const lineage = (await this.resultFamilies())
       .flatMap((family) => family.members)
@@ -2268,6 +2276,7 @@ export class GenerationRuntime {
         summary: unified !== null ? '放入统一渲染' : fill !== null ? '放入生成式填充' : target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
         commands: unified !== null ? unifiedPlacementCommands(current, element, unified.coveredElementIds) : target === undefined ? [{ kind: 'element.add', element }] : [
           { kind: 'element.set-image', elementId: target.id, assetId: asset.id, provenance: element.provenance! },
+          ...(subjectFit === null ? [] : [{ kind: 'element.update' as const, elementId: target.id, changes: { mask: subjectFit.mask, effects: subjectFit.effects } }]),
           // The cut-out covers the element's box and the band it fades across.
           ...(layerTransform === null ? [] : [{
             kind: 'element.update' as const, elementId: target.id,
@@ -2284,8 +2293,49 @@ export class GenerationRuntime {
       elementId: target?.id ?? element.id,
       batchId: mutation.receipt.affectedBatchId,
       sceneRevision: mutation.receipt.state.scene.revision,
-      reused: false
+      reused: false,
+      ...(subjectFit === null ? {} : { fit: subjectFit.kind })
     })
+  }
+
+  /**
+   * How a generated picture sits in the place of a subject: its subject cut
+   * out as a layer mask, or its edges feathered, and its tone pulled towards
+   * the picture around it. Null for a target that is not a subject's place,
+   * such as a background that fills the canvas.
+   */
+  async #fitIntoSubject(owner: OpenProjectResult, scene: Scene, target: SceneElement, asset: AssetMetadata, resultId: string): Promise<{
+    readonly kind: SubjectFit['kind']
+    readonly mask: LayerMask | null
+    readonly effects: ImageEffects
+  } | null> {
+    // A placeholder set to keep its background (a photo in a frame, a card) takes the picture as it came.
+    const subjectPlace = (target.type === 'placeholder' && target.transparentBackground) || (target.type === 'image' && target.mask !== null && target.mask !== undefined)
+    if (!subjectPlace || target.transform.width * target.transform.height >= BACKGROUND_SHARE) return null
+    let findSubject: SubjectFinder | null = null
+    if (this.#subject !== undefined && !(target.type === 'placeholder' && target.visualKind === 'landscape')) {
+      const model = this.#subjectModel(this.#subject)
+      if (await model.ready().catch(() => false)) findSubject = async (rgba, width, height) => (await model.segment({ width, height, rgba })).mask
+    }
+    const bytes = await imageBytes((await owner.workspace.assets.resolveAsset(asset.id)).filePath)
+    const fit = await fitSubject(bytes, findSubject)
+    const mask = fit.kind === 'cut-out'
+      ? { assetId: (await this.#importDerivedImage(owner, fit.mask, 'reference', `subject-mask:${resultId}`)).id, enabled: true }
+      : null
+    const feather = fit.kind === 'feather' ? fit.feather : 0
+    // The tone is measured with the picture in place, as much of it as shows.
+    const placed = imageElementSchema.parse({
+      ...target, type: 'image', assetId: asset.id, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'contain', referenceRole: 'subject',
+      paint: [], mask, effects: { colorMatch: null, feather, shadow: null }
+    })
+    const measured = await measureToneMatch({ ...scene, elements: scene.elements.map((element) => element.id === target.id ? placed : element) }, placed, async (assetId) => {
+      try {
+        return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+      } catch {
+        return null
+      }
+    }, SUBJECT_TONE).catch(() => null)
+    return { kind: fit.kind, mask, effects: { colorMatch: measured?.colorMatch ?? null, feather, shadow: null } }
   }
 
   async #enqueueWorkflow(
@@ -2610,7 +2660,8 @@ export class GenerationRuntime {
         batchId: receipt.reused ? null : receipt.batchId,
         jobId: receipt.jobId,
         affectedElementIds: receipt.reused ? [] : [receipt.elementId],
-        message: receipt.reused ? '该结果已经位于画布中，没有新的修改。' : tool.targetElementId === undefined ? '生成结果已作为可编辑图片层放入画布。' : '生成结果已替换目标图片，布局保持不变。',
+        message: receipt.reused ? '该结果已经位于画布中，没有新的修改。' : tool.targetElementId === undefined ? '生成结果已作为可编辑图片层放入画布。'
+          : `生成结果已替换目标图片，布局保持不变${receipt.fit === 'cut-out' ? '；主体已用图层蒙版抠出，色调已向周围靠拢' : receipt.fit === 'feather' ? '；边缘已羽化，色调已向周围靠拢' : ''}。`,
         sceneRevisionBefore: expectedSceneRevision ?? undefined,
         sceneRevisionAfter: receipt.sceneRevision
       }

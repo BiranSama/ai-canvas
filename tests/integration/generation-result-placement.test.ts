@@ -1,9 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
+import { SUBJECT_FEATHER } from '../../src/main/edit/subject-fit'
 import { GenerationRuntime } from '../../src/main/generation/generation-runtime'
 import type { GenerationJob, GenerationRequest } from '../../src/shared/generation'
+import { IDS, makeAllElementTypesScene } from '../fixtures/scene-fixtures'
 
 const roots: string[] = []
 
@@ -96,4 +99,51 @@ describe('AH1 S7 generation result actions', () => {
     expect(runtime.getWorkspaceBootstrap().scene.elements).toEqual([])
     await runtime.close()
   })
+
+  it('cuts the subject out of a picture put in a subject placeholder, or feathers it without the model, and tones it to its surroundings', async () => {
+    const fixture = makeAllElementTypesScene().elements
+    const backdrop = { ...fixture.find((element) => element.id === IDS.shape)!, zIndex: 0 }
+    const slot = fixture.find((element) => element.id === IDS.placeholder)!
+    if (slot.type !== 'placeholder') throw new Error('The fixture has no placeholder.')
+    const placeholder = { ...slot, groupId: null, zIndex: 1 }
+    for (const withModel of [true, false]) {
+      const root = await mkdtemp(join(tmpdir(), 'ai-canvas-subject-fit-'))
+      roots.push(root)
+      // A stand-in model that finds the left half of the picture.
+      const subject = () => ({
+        status: async () => ({ state: 'ready' as const, receivedBytes: 1, totalBytes: 1, error: null }),
+        segment: async (input: { width: number; height: number }) => ({
+          width: input.width, height: input.height, milliseconds: 1,
+          mask: Uint8Array.from({ length: input.width * input.height }, (_, index) => index % input.width < input.width / 2 ? 255 : 0)
+        })
+      })
+      const runtime = await GenerationRuntime.create(root, withModel ? { subject } : {})
+      const laid = await runtime.executeSceneCommands({ expectedSceneRevision: runtime.getWorkspaceBootstrap().scene.revision, batch: {
+        id: randomUUID(), origin: 'user', summary: '布局', commands: [{ kind: 'element.add', element: backdrop }, { kind: 'element.add', element: placeholder }]
+      } })
+      expect(laid.ok).toBe(true)
+      const completed = await waitForCompleted(runtime, (await runtime.enqueue(request())).id)
+      const placed = await runtime.placeGenerationResult({ resultId: completed.results[0]!.id, placementId: randomUUID(), origin: 'agent' }, undefined, undefined, IDS.placeholder)
+      expect(placed.fit).toBe(withModel ? 'cut-out' : 'feather')
+      const element = runtime.getWorkspaceBootstrap().scene.elements.find((candidate) => candidate.id === IDS.placeholder)!
+      if (element.type !== 'image') throw new Error('The placeholder was not replaced.')
+      expect(element.transform).toEqual(placeholder.transform)
+      expect(element.effects?.feather).toBe(withModel ? 0 : SUBJECT_FEATHER)
+      // The dark backdrop pulls the picture's tone down.
+      expect(element.effects?.colorMatch?.offset.every((value) => value < 0)).toBe(true)
+      if (withModel) expect(element.mask).toMatchObject({ enabled: true })
+      else expect(element.mask ?? null).toBeNull()
+
+      // A placeholder kept with its background takes the picture as it came.
+      const framed = await runtime.executeSceneCommands({ expectedSceneRevision: runtime.getWorkspaceBootstrap().scene.revision, batch: {
+        id: randomUUID(), origin: 'user', summary: '相框', commands: [{ kind: 'element.add', element: { ...placeholder, id: IDS.group, transparentBackground: false, zIndex: 2 } }]
+      } })
+      expect(framed.ok).toBe(true)
+      const second = await waitForCompleted(runtime, (await runtime.enqueue(request())).id)
+      const kept = await runtime.placeGenerationResult({ resultId: second.results[0]!.id, placementId: randomUUID(), origin: 'agent' }, undefined, undefined, IDS.group)
+      expect(kept.fit).toBeUndefined()
+      expect(runtime.getWorkspaceBootstrap().scene.elements.find((candidate) => candidate.id === IDS.group)).not.toHaveProperty('mask')
+      await runtime.close()
+    }
+  }, 30_000)
 })

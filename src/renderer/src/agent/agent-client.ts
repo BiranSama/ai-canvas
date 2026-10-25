@@ -46,7 +46,7 @@ export function summarizeScene(scene: Scene): SceneSummary {
         assetId: element.assetId,
         hasEditMask: scene.elements.some((mask) => mask.type === 'mask' && mask.targetElementId === element.id && mask.mode === 'edit' && mask.visible)
       } : {}),
-      ...(element.type === 'placeholder' ? { subject: element.subject, visualKind: element.visualKind ?? 'generic' } : {}),
+      ...(element.type === 'placeholder' ? { subject: element.subject, visualKind: element.visualKind ?? 'generic', cutout: element.transparentBackground } : {}),
       ...(element.type === 'shape' ? { shapeRole: element.role, fill: element.fill } : {}),
       ...(element.type === 'light' ? { lightIntensity: element.intensity } : {}),
       transform: { ...element.transform }

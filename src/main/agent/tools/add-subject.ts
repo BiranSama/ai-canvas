@@ -14,7 +14,8 @@ export const addSubjectTool = defineTool({
     kind: z.enum(['product', 'portrait', 'architecture', 'botanical', 'abstract', 'album', 'coffee', 'landscape', 'generic']).optional(),
     pose: z.string().max(300).optional().describe('姿态或摆放'),
     facing: z.string().max(120).optional().describe('朝向'),
-    notes: z.string().max(1_000).optional().describe('给生图的补充说明')
+    notes: z.string().max(1_000).optional().describe('给生图的补充说明'),
+    cutout: z.boolean().optional().describe('默认 true：生成后抠出主体，融进下面的画面；要保留整张带背景的图（相框里的照片、卡片）时填 false')
   }).strict(),
   registryName: 'scene.create_elements',
   describe: (args) => `添加主体「${args.subject.slice(0, 20)}」`,
@@ -26,7 +27,7 @@ export const addSubjectTool = defineTool({
       pose: args.pose ?? '',
       facing: args.facing ?? '',
       allowOverflow: false,
-      transparentBackground: false,
+      transparentBackground: args.cutout ?? true,
       frameShape: 'rectangle',
       visualKind: args.kind ?? 'generic',
       generationNotes: args.notes ?? ''

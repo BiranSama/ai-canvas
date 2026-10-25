@@ -278,6 +278,30 @@ function lockGenerationProvider(
   })
 }
 
+/** What the image model is asked for when its picture is to be cut out and placed in a subject's place. */
+export const SUBJECT_ISOLATION = '画面要求：只画这一个主体，完整入画、不被裁切，四周留一些空白；背景是干净的纯色，不要场景、地面和其他物体。成图会抠出主体放进设计里。'
+
+/**
+ * A picture generated to replace a subject placeholder is cut out of its
+ * background when it is placed, so the image model is asked for the subject
+ * alone on a plain background; a placeholder set to keep its background is
+ * left as the model wrote it.
+ */
+function isolateSubjectGenerations(tools: readonly AgentPlan['tools'][number][], request: AgentRequest, targets: ReadonlyMap<string, { readonly type: string }>): AgentPlan['tools'][number][] {
+  const cutouts = new Map(request.sceneSummary.elements.map((element) => [element.id, element.type === 'placeholder' && element.cutout !== false]))
+  for (const tool of tools) {
+    if (tool.kind === 'scene.create_elements') for (const element of tool.elements) if (element.type === 'placeholder') cutouts.set(element.id, element.transparentBackground)
+    if (tool.kind === 'scene_batch') for (const command of tool.commands) if (command.kind === 'element.add' && command.element.type === 'placeholder') cutouts.set(command.element.id, command.element.transparentBackground)
+  }
+  const isolatedSources = new Set(tools.flatMap((tool) => (tool.kind === 'place_generation_result' || tool.kind === 'result.place_on_canvas')
+    && tool.resultId.startsWith('generated:') && tool.targetElementId !== undefined
+    && targets.get(tool.targetElementId)?.type === 'placeholder' && cutouts.get(tool.targetElementId) === true
+    ? [Number(tool.resultId.slice('generated:'.length))] : []))
+  return tools.map((tool, index) => tool.kind === 'generation' && isolatedSources.has(index) && !tool.request.prompt.includes(SUBJECT_ISOLATION)
+    ? { ...tool, request: { ...tool.request, prompt: `${tool.request.prompt}\n\n${SUBJECT_ISOLATION}` } }
+    : tool)
+}
+
 /** Check dependencies and operation prerequisites before any confirmation or external work. */
 export function validateChatPlan(plan: AgentPlan, request: AgentRequest): AgentPlan {
   const reject = (index: number, message: string): never => {
@@ -330,8 +354,9 @@ export function validateChatPlan(plan: AgentPlan, request: AgentRequest): AgentP
     }
     return tool
   })
+  const isolated = isolateSubjectGenerations(tools, request, targets)
   const publicText = (text: string) => text.replace(/(?:resultId|assetId|elementId|jobId)\s*[:：]\s*[0-9a-f]{8}-[0-9a-f-]{27,36}/giu, '当前对象')
-  return agentPlanSchema.parse({ ...plan, tools, response: publicText(plan.response), summary: publicText(plan.summary), nextAction: plan.nextAction === null ? null : publicText(plan.nextAction) })
+  return agentPlanSchema.parse({ ...plan, tools: isolated, response: publicText(plan.response), summary: publicText(plan.summary), nextAction: plan.nextAction === null ? null : publicText(plan.nextAction) })
 }
 
 /** Uses Ark Responses Function Calling to turn natural language into one validated AgentPlan. */
