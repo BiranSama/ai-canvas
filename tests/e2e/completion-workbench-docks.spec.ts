@@ -67,7 +67,7 @@ for (const viewport of [{ width: 1440, height: 900, zoom: 1 }, { width: 1024, he
           await expect.poll(() => page.locator('.glass-island').evaluateAll(nodes => nodes.every(node => node.getAnimations().every((animation: { playState: string }) => animation.playState !== 'running')))).toBe(true)
           records.push({ instrument, edge, box: await island.boundingBox(), native: await captureWorkbench(app, test.info().outputPath(`${instrument.id}-${edge.name}.png`)) })
           if (instrument.id === 'inspector') {
-            await writeFile(test.info().outputPath(`status-${edge.name}-geometry.json`), JSON.stringify(await page.locator('.canvas-workspace').evaluate(node => [...node.querySelectorAll('.canvas-status, .glass-island, .canvas-size-float, .runtime-pill')].map(item => ({ className: item.className, rect: item.getBoundingClientRect().toJSON() }))), null, 2))
+            await writeFile(test.info().outputPath(`status-${edge.name}-geometry.json`), JSON.stringify(await page.locator('.canvas-workspace').evaluate(node => [...node.querySelectorAll('.canvas-status, .glass-island, .canvas-size-float')].map(item => ({ className: item.className, rect: item.getBoundingClientRect().toJSON() }))), null, 2))
             await hit(page.getByRole('button', { name: '适合窗口', exact: true }))
             await hit(page.getByRole('button', { name: '进入专注', exact: true }))
             await hit(page.getByRole('button', { name: '退出专注', exact: true }))

@@ -96,6 +96,7 @@ async function harness(options: {
   ) => Promise<AgentToolOutcome>
   readonly budget?: typeof DEFAULT_AUTO_BUDGET
   readonly withContext?: boolean
+  readonly now?: () => string
 }) {
   const root = await mkdtemp(join(tmpdir(), 'ai-canvas-ah1-s4-'))
   roots.push(root)
@@ -103,7 +104,7 @@ async function harness(options: {
   const opened = await ProjectWorkspace.create(join(root, 'loop.aicanvas'), 'Loop project', { idFactory: ids })
   const repository = new AgentHarnessRepository(join(opened.workspace.directory, 'project.db'), {
     idFactory: ids,
-    now: () => '2026-08-22T12:00:00.000+08:00'
+    now: options.now ?? (() => '2026-08-22T12:00:00.000+08:00')
   })
   const contextRepository = options.withContext
     ? new AgentContextRepository(join(opened.workspace.directory, 'project.db'), {
@@ -118,7 +119,7 @@ async function harness(options: {
     ...(contextRepository === null ? {} : { contextRepository }),
     planner: options.planner,
     ...(options.budget === undefined ? {} : { budget: options.budget }),
-    now: () => '2026-08-22T12:00:01.000+08:00',
+    now: options.now ?? (() => '2026-08-22T12:00:01.000+08:00'),
     loadRequest: async (runId) => {
       const value = requests.get(runId)
       if (value === undefined) throw new Error(`Missing request ${runId}`)
@@ -711,6 +712,30 @@ describe('AH1 S4 persistent agent loop', () => {
       status: 'completed_with_notes', toolCallsUsed: 0
     })
     expect(calls).toBe(0)
+  })
+
+  it('stops the turn clock while the person decides', async () => {
+    let nowMs = Date.parse('2026-08-22T12:00:00.000+08:00')
+    const tool = generationTool()
+    const value = await harness({
+      now: () => new Date(nowMs).toISOString(),
+      planner: new ScriptedPlannerAdapter([{ kind: 'tool', call: tool, toolIndex: 0, plan: {
+        summary: '等待确认', response: '先问一下再生成。', nextAction: null, tools: [tool]
+      } }])
+    })
+    const turn = await value.start('run-slow-decision', request('先讨论这个方案'), 'collaboration')
+    await value.loop.waitForIdle()
+    let snapshot = await value.loop.snapshot()
+    const waiting = snapshot.turns.find((candidate) => candidate.id === turn.id)
+    expect(waiting).toMatchObject({ status: 'waiting_decision' })
+    const decision = snapshot.items.find((item) => item.turnId === turn.id && item.type === 'decision' && item.status === 'waiting')
+
+    // The person takes longer than the whole turn budget to answer.
+    nowMs += (waiting?.timeLimitMs ?? 300_000) + 60_000
+    await value.loop.resolveDecision(turn.id, decision?.id ?? '', 'keep_canvas')
+    await value.loop.waitForIdle()
+    snapshot = await value.loop.snapshot()
+    expect(snapshot.turns.find((candidate) => candidate.id === turn.id)).toMatchObject({ status: 'completed_with_notes' })
   })
 
   it('treats an explicit Collaboration confirmation as a bounded one-plan Mock generation grant', async () => {

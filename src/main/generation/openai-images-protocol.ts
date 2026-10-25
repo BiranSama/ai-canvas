@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { EditRequest, GenerationRequest, ProviderCapabilities } from '../../shared/generation'
+import { fitFreeImageSize, formatImageSize, nearestPresetSize, type FreeSizeRule, type ImageSize } from './image-size-rules'
 
 const modelSchema = z.string().trim().min(1).max(200)
 const base64Schema = z.string().min(1).max(70 * 1024 * 1024)
@@ -69,6 +70,43 @@ function compiledPrompt(request: GenerationRequest | EditRequest): string {
     : `${ratio}\n${request.prompt}\n\n避免出现：${negative}`
 }
 
+const GPT_IMAGE_1_PRESETS: readonly ImageSize[] = [
+  { width: 1024, height: 1024 },
+  { width: 1536, height: 1024 },
+  { width: 1024, height: 1536 }
+]
+
+// gpt-image-2 and later accept any size on a 16 px grid within these bounds.
+const GPT_IMAGE_FREE_SIZE: FreeSizeRule = {
+  multipleOf: 16,
+  minPixels: 655_360,
+  maxPixels: 8_294_400,
+  maxEdge: 3_840,
+  maxAspect: 3
+}
+
+/** OpenAI's own image models: they always return Base64 and reject `response_format`. */
+function isGptImageModel(model: string): boolean {
+  return /^(?:gpt-image-|chatgpt-image)/i.test(model)
+}
+
+function hasPresetSizesOnly(model: string): boolean {
+  return /^gpt-image-1(?:$|[.-])/i.test(model) || /^chatgpt-image/i.test(model)
+}
+
+function outputSize(request: GenerationRequest | EditRequest): string {
+  const requested = { width: request.outputWidth, height: request.outputHeight }
+  const aspect = { width: request.aspectWidth, height: request.aspectHeight }
+  if (hasPresetSizesOnly(request.model)) return formatImageSize(nearestPresetSize(aspect, GPT_IMAGE_1_PRESETS))
+  if (isGptImageModel(request.model)) return formatImageSize(fitFreeImageSize(requested, aspect, GPT_IMAGE_FREE_SIZE))
+  // Other OpenAI-compatible image services document their own sizes; send the request as asked.
+  return formatImageSize(requested)
+}
+
+function responseFormatField(model: string): Readonly<Record<string, string>> {
+  return isGptImageModel(model) ? {} : { response_format: 'b64_json' }
+}
+
 function transparentFields(request: GenerationRequest | EditRequest): Readonly<Record<string, string>> {
   return request.parameters.transparentOutput === true
     ? { background: 'transparent', output_format: 'png' }
@@ -99,8 +137,8 @@ export class OpenAiImagesProtocol {
         model: request.model,
         prompt: compiledPrompt(request),
         n: request.count,
-        size: `${request.outputWidth}x${request.outputHeight}`,
-        response_format: 'b64_json',
+        size: outputSize(request),
+        ...responseFormatField(request.model),
         ...transparentFields(request)
       }
     }
@@ -122,8 +160,8 @@ export class OpenAiImagesProtocol {
         model: input.request.model,
         prompt: compiledPrompt(input.request),
         n: String(input.request.count),
-        size: `${input.request.outputWidth}x${input.request.outputHeight}`,
-        response_format: 'b64_json',
+        size: outputSize(input.request),
+        ...responseFormatField(input.request.model),
         ...transparentFields(input.request)
       },
       files

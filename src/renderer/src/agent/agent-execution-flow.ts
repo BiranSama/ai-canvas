@@ -1,6 +1,7 @@
 import type { AgentEvent, AgentHarnessSnapshot, AgentItem, AgentItemStatus, AgentTurn, AgentTurnStatus } from '../../../shared/agent-harness'
 import type { AgentActivity, AgentActivityState } from '../../../shared/agent'
 import { completionFactsSchema } from '../../../shared/design-capability'
+import { activeTurnElapsedMs } from '../../../shared/execution-timing'
 import {
   parseAgentObservableEvent,
   type AgentPlanLifecycleEventV1,
@@ -655,7 +656,9 @@ export function projectAgentExecutionFlow(
   }
   const budget = snapshot.activeGoal?.id === turn.goalId ? snapshot.activeGoal.budget : null
   const timeLimitMs = turn.timeLimitMs === undefined ? budget?.maxWallTimeMs ?? null : turn.timeLimitMs
-  const remainingWallTimeMs = timeLimitMs === null ? null : Math.max(0, timeLimitMs - elapsedMs)
+  // The turn's clock stops while it waits for the person, so the countdown does too.
+  const workedMs = Number.isFinite(turnEnd) ? activeTurnElapsedMs(turn, items, turnEnd) : elapsedMs
+  const remainingWallTimeMs = timeLimitMs === null ? null : Math.max(0, timeLimitMs - workedMs)
   return {
     turnId: turn.id,
     state: flowState(turn),

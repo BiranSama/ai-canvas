@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ContextBuilder, ContextCompactor, OutboundPolicyGuard, compilePlannerContext, sanitizeContextValue } from '../../src/main/agent/context-builder'
+import { ContextBuilder, ContextCompactor, OutboundPolicyGuard, compilePlannerContext, plannerProjectContext, sanitizeContextValue } from '../../src/main/agent/context-builder'
 import { agentRequestSchema } from '../../src/shared/agent'
 import { agentEventSchema, agentGoalContractSchema, agentItemSchema, agentTurnSchema } from '../../src/shared/agent-harness'
 import {
@@ -216,6 +216,44 @@ describe('AH1 S5 ContextBuilder', () => {
     expect(sanitizeContextValue({ authorization: 'Bearer abcdefghi', safe: '保留' })).toEqual({
       authorization: '[REDACTED]', safe: '保留'
     })
+  })
+
+  it('projects rules, goal, memory and recent conversation for the planner without repeating the current request', () => {
+    const input = fixture({ requestText: '沿用刚才的构图，标题用衬线体', directiveText: '标题一律使用衬线体', memoryContent: '作者偏好低饱和的清晨色调' })
+    const currentMessage = agentItemSchema.parse({
+      id: '00000000-0000-4000-8000-000000000010', threadId: ID.thread, turnId: ID.turn, type: 'user_message', status: 'completed', ordinal: 1,
+      payloadVersion: 1, payload: { request: { text: '沿用刚才的构图，标题用衬线体' } }, createdAt: now, updatedAt: now
+    })
+    const result = new ContextBuilder().build({
+      projectId: ID.project, threadId: ID.thread, ...input, items: [...input.items, currentMessage],
+      outboundPolicy: 'minimal', allowedTools: ['read_scene']
+    })
+    const persisted = contextManifestSchema.parse({
+      id: '00000000-0000-4000-8000-000000000020',
+      ...result.manifest,
+      createdAt: now,
+      entries: result.manifest.entries.map((entry, index) => ({
+        id: `00000000-0000-4000-8000-${String(21 + index).padStart(12, '0')}`,
+        manifestId: '00000000-0000-4000-8000-000000000020',
+        ordinal: index,
+        ...entry,
+        createdAt: now
+      }))
+    })
+    const projected = plannerProjectContext(persisted, '沿用刚才的构图，标题用衬线体')
+    expect(projected).toEqual({
+      rules: [{ text: '标题一律使用衬线体', category: 'workflow', conflictsWithCurrentRequest: false }],
+      goal: { objective: '创建海报', completionDefinition: ['画布完整'] },
+      memories: [{ kind: 'constraint', content: '作者偏好低饱和的清晨色调' }],
+      recentConversation: [{ role: 'assistant', text: '上一次建议先建立布局。' }],
+      earlierSummary: null
+    })
+
+    const excludedMemory = contextManifestSchema.parse({
+      ...persisted,
+      entries: persisted.entries.map((entry) => entry.sourceType === 'memory' ? { ...entry, disposition: 'excluded' } : entry)
+    })
+    expect(plannerProjectContext(excludedMemory, '沿用刚才的构图，标题用衬线体')?.memories).toEqual([])
   })
 
   it('does not let a confirmed memory expand provider permissions', () => {

@@ -396,6 +396,9 @@ export class AgentHarnessRepository {
     const now = this.#now()
     const transaction = this.#connection.sqlite.transaction(() => {
       const turn = this.#requireTurnRow(turnId)
+      // A finished turn stays finished. A loop step that read the turn before a
+      // Stop landed must not move it back into planning or execution.
+      if (isTerminalAgentTurnStatus(mapTurn(turn).status)) return
       const thread = this.#requireThreadRow(turn.thread_id)
       const terminal = isTerminalAgentTurnStatus(status)
       const errorCode = Object.prototype.hasOwnProperty.call(options, 'errorCode') ? options.errorCode ?? null : turn.error_code

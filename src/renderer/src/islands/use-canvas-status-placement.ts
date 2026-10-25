@@ -23,7 +23,7 @@ export function useCanvasStatusPlacement(workspaceRef: RefObject<HTMLElement | n
       if (bounds.width <= 0 || bounds.height <= 0 || own.width <= 0 || own.height <= 0) return
       // Fixed view entries take free space first; collapsed orbs yield to these
       // reservations. Expanded instruments keep the user's exact geometry.
-      const obstacles = [...workspace.querySelectorAll<HTMLElement>('.glass-island:not(.glass-island-orb), .runtime-pill')]
+      const obstacles = [...workspace.querySelectorAll<HTMLElement>('.glass-island:not(.glass-island-orb)')]
         .filter(node => node.getClientRects().length > 0 && getComputedStyle(node).visibility === 'visible')
         .map(node => { const rect = node.getBoundingClientRect(); return { x: rect.x - bounds.x, y: rect.y - bounds.y, width: rect.width, height: rect.height } })
       const place = (preferred: Rect): Rect => {

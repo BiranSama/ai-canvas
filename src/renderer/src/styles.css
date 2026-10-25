@@ -595,13 +595,11 @@ select:focus-visible {
 .canvas-workspace.inspector-collapsed { display: block; }
 .canvas-workspace .glass-island,
 .canvas-workspace .canvas-size-float,
-.canvas-workspace .runtime-pill,
 .canvas-workspace .reset-islands-button {
   transition: opacity 180ms ease, visibility 180ms ease;
 }
 .canvas-workspace.is-focus-mode .glass-island,
 .canvas-workspace.is-focus-mode .canvas-size-float,
-.canvas-workspace.is-focus-mode .runtime-pill,
 .canvas-workspace.is-focus-mode .reset-islands-button {
   display: none;
   visibility: hidden;
@@ -878,16 +876,14 @@ select:focus-visible {
 .canvas-empty-guide {
   position: absolute;
   z-index: 2;
-  top: 50%;
-  left: 50%;
   display: grid;
-  width: min(260px, 46%);
   justify-items: center;
   color: var(--artboard-ink);
   text-align: center;
   pointer-events: none;
   transform: translate(-50%, -50%);
 }
+.canvas-empty-guide > div { display: grid; justify-items: center; }
 .canvas-empty-guide .empty-frame { display: grid; width: 54px; height: 54px; margin-bottom: 14px; place-items: center; border: 1px solid rgba(92,111,135,.2); border-radius: 17px; color: #7186a0; background: rgba(255,255,255,.34); box-shadow: inset 0 1px rgba(255,255,255,.72); }
 .canvas-empty-guide strong { color: #292d33; font-size: 13px; font-weight: 600; }
 .canvas-empty-guide p { max-width: 240px; margin: 7px 0 0; font-size: 11px; line-height: 1.65; }
@@ -971,23 +967,9 @@ select:focus-visible {
 .size-apply { height: 36px; border: 1px solid rgba(55,107,255,.26); border-radius: 10px; color: #315e9c; background: var(--quiet-blue-soft); font-size: 11px; font-weight: 600; cursor: pointer; }
 .size-apply:disabled { opacity: .42; cursor: default; }
 
-.runtime-pill {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  display: flex;
-  height: 26px;
-  align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  color: var(--faint-slate);
-  background: rgba(249, 249, 247, 0.58);
-  font-size: 10px;
-}
-
-.runtime-pill.is-ready svg { color: #3f8b66; }
+.runtime-indicator { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.runtime-indicator i { width: 6px; height: 6px; border-radius: 50%; background: #c08a3e; box-shadow: 0 0 0 2px rgba(192,138,62,.14); }
+.runtime-indicator.is-ready i { background: #3f8b66; box-shadow: 0 0 0 2px rgba(63,139,102,.14); }
 
 .creation-bar {
   position: static;
@@ -1737,8 +1719,8 @@ select:focus-visible {
 .turn-input-modes button { position: relative; min-width: 0; height: 25px; padding: 0 5px; overflow: hidden; border: 1px solid transparent; border-radius: 8px; color: var(--faint-slate); background: transparent; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .turn-input-modes button.is-active { color: #456a95; border-color: rgba(55,107,255,.13); background: rgba(222,235,249,.34); box-shadow: inset 0 1px rgba(255,255,255,.56); }
 .turn-input-modes button small { position: absolute; top: 2px; right: 3px; color: #6381a3; font-size: 6px; letter-spacing: .02em; }
-.task-relation-modes { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 4px; padding: 4px 39px 2px; }
-.task-relation-modes button { min-width: 0; min-height: 28px; padding: 3px 7px; overflow: hidden; border: 1px solid transparent; border-radius: 9px; color: var(--faint-slate); background: transparent; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.task-relation-modes { display: flex; flex-wrap: wrap; gap: 4px; padding: 4px 0 2px; }
+.task-relation-modes button { flex: 1 1 auto; min-width: 0; min-height: 28px; padding: 3px 7px; overflow: hidden; border: 1px solid transparent; border-radius: 9px; color: var(--faint-slate); background: transparent; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .task-relation-modes button.is-active { color: #456a95; border-color: rgba(55,107,255,.14); background: rgba(222,235,249,.38); box-shadow: inset 0 1px rgba(255,255,255,.62); }
 .task-queue-summary { display: flex; gap: 5px; padding: 2px 39px; overflow-x: auto; color: #72849a; font-size: 8px; scrollbar-width: none; }
 .task-queue-summary::-webkit-scrollbar { display: none; }
@@ -2536,7 +2518,6 @@ button.knowledge-copy { cursor: pointer; }
   :root:not([data-appearance-theme]) .canvas-center { border-color: rgba(238,241,244,.11); background: radial-gradient(circle at 50% 38%, rgba(91,103,120,.12), transparent 38%), rgba(25,28,32,.82); box-shadow: inset 0 1px rgba(255,255,255,.045), inset 0 0 0 1px rgba(0,0,0,.24); }
   :root:not([data-appearance-theme]) .inspector { background: rgba(34,37,42,.82); }
   :root:not([data-appearance-theme]) .layer-kind { background: rgba(255,255,255,.04); }
-  :root:not([data-appearance-theme]) .runtime-pill { background: rgba(30,33,38,.62); }
   :root:not([data-appearance-theme]) :is(.export-control > button, .export-control select) { color: #91b5e7; }
   :root:not([data-appearance-theme]) .provider-settings-sheet { border-color: rgba(238,241,244,.12); box-shadow: 0 32px 90px rgba(0,0,0,.42), inset 0 1px rgba(255,255,255,.07); }
   :root:not([data-appearance-theme]) .result-actions { border-color: rgba(238,241,244,.1); background: rgba(34,37,42,.82); }

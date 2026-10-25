@@ -1,7 +1,5 @@
 import {
-  agentPlanSchema,
   agentRequestSchema,
-  completeAgentRunSchema,
   type AgentPlan,
   type AgentRequest,
   type AgentRun,
@@ -10,12 +8,9 @@ import {
   type OperationReceipt,
   type OperationReceiptItem
 } from '../../shared/agent'
-import type { OperationBatch, Scene } from '../../domain'
-import type { AgentSceneToolCommitReceipt, AgentSceneToolPrepareResult } from '../../shared/agent-tools'
 import {
   adaptLegacyTurnInputMode,
   agentTaskInputSchema,
-  type AgentDecisionProposal,
   type AgentEvent,
   type AgentHarnessSnapshot,
   type AgentMode,
@@ -33,13 +28,13 @@ import type {
   UpdateProjectDirectiveInput,
   UpdateProjectMemoryInput
 } from '../../shared/agent-context'
-import type { SceneMutationResult } from '../../shared/scene-authority'
 import type { GenerationJob } from '../../shared/generation'
 import type { ConversationRepository } from './conversation-repository'
 import { GenerationPolicy } from './generation-policy'
 import type { AgentPlanner } from './planner'
 import { DeterministicCreativePlannerAdapter, type PlannerAdapter } from './planner-adapter'
 import {
+  decisionFor,
   PersistentAgentLoop,
   type AgentLoopProjection,
   type AgentLoopToolContext
@@ -51,38 +46,20 @@ import { RedactedLogger, redactSensitive, type DiagnosticLogger } from '../secur
 import type { AgentToolExecutorShadow } from './agent-tool-executor-shadow'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
 
-type AbortKind = 'cancelled' | 'timed_out' | 'interrupted'
-
-class AgentAbortError extends Error {
-  readonly kind: AbortKind
-
-  constructor(kind: AbortKind) {
-    const message = kind === 'cancelled'
-      ? 'Assistant action cancelled by the user.'
-      : kind === 'timed_out'
-        ? 'Assistant planning exceeded the configured timeout.'
-        : 'The app stopped before the assistant action finished.'
-    super(message)
-    this.name = 'AgentAbortError'
-    this.kind = kind
-  }
-}
-
 export interface AgentRuntimeOptions {
   readonly projectId: string
   readonly repository: ConversationRepository
   readonly planner: AgentPlanner
   readonly generationPolicy?: GenerationPolicy
   readonly maxSteps?: number
-  readonly timeoutMs?: number
   readonly now?: () => string
   readonly logger?: DiagnosticLogger
   readonly activityLedger?: ActivityLedgerRepository
   readonly toolExecutor?: AgentToolExecutorShadow
-  readonly harnessRepository?: AgentHarnessRepository
+  readonly harnessRepository: AgentHarnessRepository
   readonly contextRepository?: AgentContextRepository
   readonly plannerAdapter?: PlannerAdapter
-  readonly executePersistentTool?: (tool: AgentPlan['tools'][number], context: AgentLoopToolContext) => Promise<AgentToolOutcome>
+  readonly executePersistentTool: (tool: AgentPlan['tools'][number], context: AgentLoopToolContext) => Promise<AgentToolOutcome>
   readonly refreshPersistentRequest?: (request: AgentRequest) => Promise<AgentRequest>
   readonly generationWorkflowRepository?: GenerationWorkflowRepository
   readonly loadGenerationJob?: (jobId: string) => Promise<GenerationJob>
@@ -139,52 +116,43 @@ export function receiptItem(plan: AgentPlan['tools'][number], outcome: AgentTool
 export class AgentRuntime {
   readonly #projectId: string
   readonly #repository: ConversationRepository
-  readonly #planner: AgentPlanner
   readonly #generationPolicy: GenerationPolicy
   readonly #maxSteps: number
-  readonly #timeoutMs: number
   readonly #now: () => string
   readonly #logger: DiagnosticLogger
   readonly #activityLedger: ActivityLedgerRepository | null
   readonly #toolExecutor: AgentToolExecutorShadow | null
-  readonly #persistentLoop: PersistentAgentLoop | null
+  readonly #persistentLoop: PersistentAgentLoop
   readonly #contextRepository: AgentContextRepository | null
-  readonly #controllers = new Map<string, AbortController>()
-  readonly #planningTasks = new Map<string, Promise<void>>()
-  readonly #claimedPlans = new Set<string>()
   #closed = false
 
   constructor(options: AgentRuntimeOptions) {
     this.#projectId = options.projectId
     this.#repository = options.repository
-    this.#planner = options.planner
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
     this.#maxSteps = Math.max(1, Math.floor(options.maxSteps ?? 8))
-    this.#timeoutMs = Math.max(1, Math.floor(options.timeoutMs ?? 30_000))
     this.#now = options.now ?? (() => new Date().toISOString())
     this.#logger = options.logger ?? new RedactedLogger()
     this.#activityLedger = options.activityLedger ?? null
     this.#toolExecutor = options.toolExecutor ?? null
     this.#contextRepository = options.contextRepository ?? null
-    this.#persistentLoop = options.harnessRepository === undefined || options.executePersistentTool === undefined
-      ? null
-      : new PersistentAgentLoop({
-          projectId: this.#projectId,
-          repository: options.harnessRepository,
-          ...(options.contextRepository === undefined ? {} : { contextRepository: options.contextRepository }),
-          planner: options.plannerAdapter ?? new DeterministicCreativePlannerAdapter(options.planner),
-          executeTool: options.executePersistentTool,
-          loadRequest: (runId) => this.#repository.getRequest(runId),
-          ...(options.refreshPersistentRequest === undefined ? {} : { refreshRequest: options.refreshPersistentRequest }),
-          ...(options.generationWorkflowRepository === undefined ? {} : {
-            generationWorkflowRepository: options.generationWorkflowRepository
-          }),
-          ...(options.loadGenerationJob === undefined ? {} : { loadGenerationJob: options.loadGenerationJob }),
-          ...(options.activateGenerationJob === undefined ? {} : { activateGenerationJob: options.activateGenerationJob }),
-          generationPolicy: this.#generationPolicy,
-          now: this.#now,
-          projection: this.#persistentProjection()
-        })
+    this.#persistentLoop = new PersistentAgentLoop({
+      projectId: this.#projectId,
+      repository: options.harnessRepository,
+      ...(options.contextRepository === undefined ? {} : { contextRepository: options.contextRepository }),
+      planner: options.plannerAdapter ?? new DeterministicCreativePlannerAdapter(options.planner),
+      executeTool: options.executePersistentTool,
+      loadRequest: (runId) => this.#repository.getRequest(runId),
+      ...(options.refreshPersistentRequest === undefined ? {} : { refreshRequest: options.refreshPersistentRequest }),
+      ...(options.generationWorkflowRepository === undefined ? {} : {
+        generationWorkflowRepository: options.generationWorkflowRepository
+      }),
+      ...(options.loadGenerationJob === undefined ? {} : { loadGenerationJob: options.loadGenerationJob }),
+      ...(options.activateGenerationJob === undefined ? {} : { activateGenerationJob: options.activateGenerationJob }),
+      generationPolicy: this.#generationPolicy,
+      now: this.#now,
+      projection: this.#persistentProjection()
+    })
   }
 
   async initialize(): Promise<number> {
@@ -194,7 +162,7 @@ export class AgentRuntime {
     const runs = await this.#repository.recoverInterrupted(this.#projectId)
     await this.#activityLedger?.recoverInterrupted(this.#projectId)
     await this.#toolExecutor?.initialize(this.#projectId)
-    await this.#persistentLoop?.initialize()
+    await this.#persistentLoop.initialize()
     return runs
   }
 
@@ -218,24 +186,13 @@ export class AgentRuntime {
       affectedIds: request.selectedIds
     })
     this.#logger.write('info', 'agent.started', { projectId: this.#projectId }, created.run.id)
-    if (this.#persistentLoop !== null) {
-      await this.#persistentLoop.start({
-        legacyRunId: created.run.id,
-        sourceMessageId: created.userMessage.id,
-        request,
-        mode,
-        ...(taskRelation === undefined ? {} : { taskRelation })
-      })
-      return created.run
-    }
-    const controller = new AbortController()
-    this.#controllers.set(created.run.id, controller)
-    const planning = this.#plan(created.run.id, created.userMessage.id, request, controller)
-      .finally(() => {
-        this.#controllers.delete(created.run.id)
-        this.#planningTasks.delete(created.run.id)
-      })
-    this.#planningTasks.set(created.run.id, planning)
+    await this.#persistentLoop.start({
+      legacyRunId: created.run.id,
+      sourceMessageId: created.userMessage.id,
+      request,
+      mode,
+      ...(taskRelation === undefined ? {} : { taskRelation })
+    })
     return created.run
   }
 
@@ -248,7 +205,6 @@ export class AgentRuntime {
   }
 
   async harnessSnapshot(): Promise<AgentHarnessSnapshot> {
-    if (this.#persistentLoop === null) throw new Error('Persistent agent harness is unavailable.')
     return this.#persistentLoop.snapshot()
   }
 
@@ -347,23 +303,19 @@ export class AgentRuntime {
   }
 
   async replayHarnessEvents(afterSequence: number, limit = 1_000): Promise<readonly AgentEvent[]> {
-    if (this.#persistentLoop === null) return []
     return this.#persistentLoop.replay(afterSequence, limit)
   }
 
   subscribeHarness(listener: (event: AgentEvent) => void): () => void {
-    if (this.#persistentLoop === null) return () => undefined
     return this.#persistentLoop.subscribe(listener)
   }
 
   observeGenerationJob(job: GenerationJob): Promise<void> {
-    if (this.#persistentLoop === null) return Promise.resolve()
     return this.#persistentLoop.observeGenerationJob(job)
   }
 
   async input(requestInput: AgentRequest, semantics: TurnInputMode | AgentTaskDispatch): Promise<AgentRun> {
     this.#assertOpen()
-    if (this.#persistentLoop === null) throw new Error('Persistent agent input is unavailable.')
     const request = agentRequestSchema.parse(requestInput)
     const taskInput = agentTaskInputSchema.parse({
       ...(typeof semantics === 'string' ? adaptLegacyTurnInputMode(semantics) : semantics),
@@ -408,269 +360,42 @@ export class AgentRuntime {
   }
 
   async resumeQueue(): Promise<number> {
-    if (this.#persistentLoop === null) return 0
     return this.#persistentLoop.resumeQueue()
   }
 
-  resolveTemporaryTry(turnId: string, resolution: 'accept' | 'reject'): Promise<AgentHarnessSnapshot> {
-    if (this.#persistentLoop === null) throw new Error('Persistent agent input is unavailable.')
-    return this.#persistentLoop.resolveTemporaryTry(turnId, resolution).then(() => this.#persistentLoop!.snapshot())
-  }
-
-  async claimPlan(runId: string): Promise<AgentPlan | null> {
-    this.#assertOpen()
-    const run = await this.#repository.getRun(runId)
-    if (run.status !== 'awaiting_execution' || this.#claimedPlans.has(runId)) return null
-    const plan = await this.#repository.getPlan(runId)
-    if (plan === null) return null
-    this.#claimedPlans.add(runId)
-    await this.#repository.transition(runId, { status: 'executing' })
-    return plan
+  async resolveTemporaryTry(turnId: string, resolution: 'accept' | 'reject'): Promise<AgentHarnessSnapshot> {
+    await this.#persistentLoop.resolveTemporaryTry(turnId, resolution)
+    return this.#persistentLoop.snapshot()
   }
 
   async confirm(runId: string, optionId?: string): Promise<AgentRun> {
     this.#assertOpen()
     const run = await this.#repository.getRun(runId)
     if (run.status !== 'awaiting_confirmation') throw new Error('This assistant action is not waiting for confirmation.')
-    if (this.#persistentLoop !== null) {
-      const snapshot = await this.#persistentLoop.snapshot()
-      const turn = snapshot.turns.find((candidate) => candidate.inputMessageId === runId && candidate.status === 'waiting_decision')
-      const decision = turn === undefined ? undefined : snapshot.items.find(
-        (item) => item.turnId === turn.id && item.type === 'decision' && item.status === 'waiting'
-      )
-      if (turn === undefined || decision === undefined) throw new Error('The persistent agent decision is unavailable.')
-      const proposal = decision.payload as { readonly proposal?: { readonly defaultOptionId?: string } }
-      await this.#persistentLoop.resolveDecision(turn.id, decision.id, optionId ?? proposal.proposal?.defaultOptionId ?? 'continue')
-      return this.#repository.getRun(runId)
-    }
-    const decision = await this.#activityLedger?.getDecision(runId) ?? null
-    const selectedOptionId = optionId ?? decision?.defaultOptionId ?? 'continue'
-    if (decision?.kind === 'aspect_ratio') {
-      const match = selectedOptionId.match(/^(\d{1,3}):(\d{1,3})$/)
-      if (match === null) throw new Error('The selected aspect ratio is invalid.')
-      await this.#repository.setPlanAspectRatio(runId, Number(match[1]), Number(match[2]))
-    }
-    if (selectedOptionId === 'keep_canvas') {
-      await this.#activityLedger?.resolveDecision(runId, selectedOptionId, true)
-      return this.cancel(runId)
-    }
-    await this.#activityLedger?.resolveDecision(runId, selectedOptionId)
-    return this.#repository.transition(runId, { status: 'awaiting_execution', confirmationRequired: false })
-  }
-
-  async reportToolStarted(runId: string, toolIndex: number): Promise<void> {
-    this.#assertOpen()
-    const run = await this.#repository.getRun(runId)
-    if (run.status !== 'executing') throw new Error('Agent run is not executing.')
-    await this.#activityLedger?.transitionTool(runId, toolIndex, 'tool.running', 'running')
-  }
-
-  async prepareSceneTool(
-    runId: string,
-    toolIndex: number,
-    rendererSessionId: string,
-    scene: Scene
-  ): Promise<AgentSceneToolPrepareResult> {
-    this.#assertOpen()
-    if (this.#toolExecutor === null) throw new Error('The Main tool executor is unavailable.')
-    const [run, plan, request] = await Promise.all([
-      this.#repository.getRun(runId),
-      this.#repository.getPlan(runId),
-      this.#repository.getRequest(runId)
-    ])
-    if (run.status !== 'executing' || plan === null) throw new Error('Agent run is not executing a claimed plan.')
-    const tool = plan.tools[toolIndex]
-    if (tool?.kind !== 'scene_batch') throw new Error('The requested tool is not a scene batch.')
-    const priorSceneWrites = plan.tools.slice(0, toolIndex).filter((candidate) => candidate.kind === 'scene_batch').length
-    await this.reportToolStarted(runId, toolIndex)
-    return this.#toolExecutor.prepareSceneBatch({
-      projectId: this.#projectId,
-      legacyRunId: runId,
-      ordinal: toolIndex,
-      mode: 'collaboration',
-      explicitTurnAuthorization: true,
-      rendererSessionId,
-      scene,
-      tool: {
-        idempotencyKey: `run:${runId}:tool:${toolIndex}:scene.apply_batch:v1`,
-        expectedSceneRevision: request.sceneSummary.revision + priorSceneWrites,
-        scope: {
-          canvas: request.selectedIds.length === 0,
-          elementIds: request.selectedIds
-        },
-        summary: tool.summary,
-        commands: tool.commands
-      }
-    })
-  }
-
-  async executeMainSceneTool(
-    runId: string,
-    toolIndex: number,
-    scene: Scene,
-    executeBatch: Parameters<AgentToolExecutorShadow['executeSceneBatchMain']>[0]['executeBatch']
-  ): Promise<AgentSceneToolCommitReceipt> {
-    this.#assertOpen()
-    if (this.#toolExecutor === null) throw new Error('The Main tool executor is unavailable.')
-    const [run, plan, request] = await Promise.all([
-      this.#repository.getRun(runId),
-      this.#repository.getPlan(runId),
-      this.#repository.getRequest(runId)
-    ])
-    if (run.status !== 'executing' || plan === null) throw new Error('Agent run is not executing a claimed plan.')
-    const tool = plan.tools[toolIndex]
-    if (tool?.kind !== 'scene_batch') throw new Error('The requested tool is not a scene batch.')
-    const priorSceneWrites = plan.tools.slice(0, toolIndex).filter((candidate) => candidate.kind === 'scene_batch').length
-    await this.reportToolStarted(runId, toolIndex)
-    return this.#toolExecutor.executeSceneBatchMain({
-      projectId: this.#projectId,
-      legacyRunId: runId,
-      ordinal: toolIndex,
-      mode: 'collaboration',
-      explicitTurnAuthorization: true,
-      scene,
-      tool: {
-        idempotencyKey: `run:${runId}:tool:${toolIndex}:scene.apply_batch:v1`,
-        expectedSceneRevision: request.sceneSummary.revision + priorSceneWrites,
-        scope: {
-          canvas: request.selectedIds.length === 0,
-          elementIds: request.selectedIds
-        },
-        summary: tool.summary,
-        commands: tool.commands
-      },
-      executeBatch: executeBatch as (
-        batch: Parameters<typeof executeBatch>[0],
-        expectedSceneRevision: number
-      ) => Promise<SceneMutationResult>
-    })
-  }
-
-  commitSceneTool(input: {
-    readonly executionToken: string
-    readonly rendererSessionId: string
-    readonly authoritativeScene: Scene
-    readonly submittedScene: Scene
-    readonly batch: OperationBatch
-    readonly commitScene: (scene: Scene, batch: OperationBatch) => Promise<void>
-  }): Promise<AgentSceneToolCommitReceipt> {
-    this.#assertOpen()
-    if (this.#toolExecutor === null) throw new Error('The Main tool executor is unavailable.')
-    return this.#toolExecutor.commitSceneBatch(input)
-  }
-
-  abortSceneTool(executionToken: string, rendererSessionId: string, code: string, message: string): Promise<void> {
-    this.#assertOpen()
-    if (this.#toolExecutor === null) return Promise.resolve()
-    return this.#toolExecutor.abortPreparedSceneBatch(executionToken, rendererSessionId, code, message)
-  }
-
-  async complete(input: { readonly runId: string; readonly outcomes: readonly AgentToolOutcome[] }): Promise<AgentRun> {
-    this.#assertOpen()
-    if (this.#persistentLoop !== null) throw new Error('本轮由主进程管理；完成事实只能来自已持久化的真实执行。')
-    const parsed = completeAgentRunSchema.parse(input)
-    const run = await this.#repository.getRun(parsed.runId)
-    const plan = await this.#repository.getPlan(parsed.runId)
-    if (run.status !== 'executing' || plan === null) throw new Error('Agent run is not ready to complete.')
-    if (parsed.outcomes.length !== plan.tools.length || parsed.outcomes.some((outcome, index) => outcome.toolIndex !== index)) {
-      throw new Error('Agent tool outcomes do not match the claimed plan.')
-    }
-    for (const outcome of parsed.outcomes) {
-      await this.#repository.recordToolOutcome(parsed.runId, outcome.toolIndex, {
-        ok: outcome.ok,
-        result: outcome,
-        errorMessage: outcome.ok ? null : outcome.message
-      })
-      await this.#activityLedger?.transitionTool(
-        parsed.runId,
-        outcome.toolIndex,
-        outcome.ok ? 'tool.completed' : 'tool.failed',
-        outcome.ok ? 'completed' : 'failed',
-        outcome
-      )
-    }
-    const failed = parsed.outcomes.find((outcome) => !outcome.ok)
-    const receipt: OperationReceipt = {
-      summary: plan.summary,
-      items: plan.tools.map((tool, index) => receiptItem(tool, parsed.outcomes[index]!)),
-      batchId: parsed.outcomes.find((outcome) => outcome.batchId !== null)?.batchId ?? null,
-      jobId: parsed.outcomes.find((outcome) => outcome.jobId !== null)?.jobId ?? null,
-      nextAction: plan.nextAction,
-      undoable: parsed.outcomes.some((outcome) => outcome.batchId !== null && outcome.ok)
-    }
-    if (failed !== undefined) {
-      await this.#repository.appendAssistantMessage(parsed.runId, 'error', '部分操作未能完成，已保留你的原始要求。', receipt)
-      this.#claimedPlans.delete(parsed.runId)
-      this.#logger.write('error', 'agent.tool-failed', { message: failed.message }, parsed.runId)
-      return this.#repository.transition(parsed.runId, {
-        status: 'failed',
-        errorCode: 'TOOL_EXECUTION_FAILED',
-        errorMessage: 'A planned tool did not complete. No later tool was executed.',
-        completedAt: this.#now()
-      })
-    }
-    await this.#repository.appendAssistantMessage(parsed.runId, 'receipt', plan.response, receipt)
-    await this.#activityLedger?.create({
-      projectId: this.#projectId,
-      runId: parsed.runId,
-      kind: 'receipt',
-      eventType: 'receipt.completed',
-      label: '操作回执',
-      state: 'completed',
-      progress: 1,
-      objectLabel: receipt.items.length === 1 ? receipt.items[0]?.object ?? '当前作品' : `${receipt.items.length} 项操作`,
-      actionLabel: receipt.summary,
-      impactLabel: receipt.items.map((item) => item.impact).join('；').slice(0, 500) || '操作已完成',
-      affectedIds: parsed.outcomes.flatMap((outcome) => outcome.affectedElementIds),
-      operationBatchId: receipt.batchId,
-      jobId: receipt.jobId
-    })
-    this.#logger.write('info', 'agent.completed', { toolCount: parsed.outcomes.length, undoable: receipt.undoable }, parsed.runId)
-    this.#claimedPlans.delete(parsed.runId)
-    return this.#repository.transition(parsed.runId, {
-      status: 'completed',
-      errorCode: null,
-      errorMessage: null,
-      completedAt: this.#now()
-    })
+    const snapshot = await this.#persistentLoop.snapshot()
+    const turn = snapshot.turns.find((candidate) => candidate.inputMessageId === runId && candidate.status === 'waiting_decision')
+    const decision = turn === undefined ? undefined : snapshot.items.find(
+      (item) => item.turnId === turn.id && item.type === 'decision' && item.status === 'waiting'
+    )
+    if (turn === undefined || decision === undefined) throw new Error('The persistent agent decision is unavailable.')
+    const proposal = decision.payload as { readonly proposal?: { readonly defaultOptionId?: string } }
+    await this.#persistentLoop.resolveDecision(turn.id, decision.id, optionId ?? proposal.proposal?.defaultOptionId ?? 'continue')
+    return this.#repository.getRun(runId)
   }
 
   async cancel(runId: string): Promise<AgentRun> {
     this.#assertOpen()
     const current = await this.#repository.getRun(runId)
     if (TERMINAL.has(current.status)) return current
-    if (this.#persistentLoop !== null) {
-      const request = await this.#repository.getRequest(runId)
-      await this.input({ ...request, text: '停止当前操作' }, 'interrupt_now')
-      return this.#repository.getRun(runId)
-    }
-    const controller = this.#controllers.get(runId)
-    if (controller !== undefined) {
-      controller.abort(new AgentAbortError('cancelled'))
-      await this.#planningTasks.get(runId)?.catch(() => undefined)
-      return this.#repository.getRun(runId)
-    }
-    this.#claimedPlans.delete(runId)
-    this.#logger.write('info', 'agent.cancelled', {}, runId)
-    const decision = await this.#activityLedger?.getDecision(runId) ?? null
-    if (decision?.status === 'waiting') await this.#activityLedger?.resolveDecision(runId, decision.defaultOptionId, true)
-    await this.#activityLedger?.cancelRun(runId)
-    await this.#repository.appendAssistantMessage(runId, 'error', '操作已取消。你的要求仍保留在对话中。', null)
-    return this.#repository.transition(runId, {
-      status: 'cancelled',
-      errorCode: 'USER_CANCELLED',
-      errorMessage: 'Assistant action cancelled by the user.',
-      completedAt: this.#now()
-    })
+    const request = await this.#repository.getRequest(runId)
+    await this.input({ ...request, text: '停止当前操作' }, 'interrupt_now')
+    return this.#repository.getRun(runId)
   }
 
   async close(): Promise<void> {
     if (this.#closed) return
     this.#closed = true
-    for (const controller of this.#controllers.values()) controller.abort(new AgentAbortError('interrupted'))
-    await Promise.allSettled(this.#planningTasks.values())
-    await this.#persistentLoop?.close()
-    if (this.#persistentLoop === null) await this.#contextRepository?.close()
+    await this.#persistentLoop.close()
     await this.#repository.close()
     await this.#activityLedger?.close()
     await this.#toolExecutor?.close()
@@ -686,7 +411,7 @@ export class AgentRuntime {
         })
       },
       onPlanReady: async ({ legacyRunId, request, plan }) => {
-        const requiresDecision = this.#persistentPlanDecision(request, plan) !== null
+        const requiresDecision = decisionFor(request, plan, this.#generationPolicy) !== null
         await this.#repository.savePlan(legacyRunId, plan, requiresDecision)
         await this.#activityLedger?.transitionRunActivity(legacyRunId, 'plan', 'plan.completed', 'completed', {
           progress: 1,
@@ -861,183 +586,7 @@ export class AgentRuntime {
     }
   }
 
-  #persistentPlanDecision(request: AgentRequest, plan: AgentPlan): AgentDecisionProposal | null {
-    const hasExplicitAspect = /\d{1,3}\s*[:：]\s*\d{1,3}/.test(request.text)
-    const plannedAspect = plan.tools.flatMap((tool) => tool.kind === 'scene_batch'
-      ? tool.commands.filter((command) => command.kind === 'scene.set-canvas')
-      : [])[0]
-    if (plannedAspect !== undefined && !hasExplicitAspect) {
-      const defaultRatio = `${plannedAspect.canvas.aspectWidth}:${plannedAspect.canvas.aspectHeight}`
-      return {
-        kind: 'aspect_ratio',
-        title: '这张作品使用什么比例？',
-        consequence: '比例会决定画布尺寸和所有语义元素的构图基准；确认前不会改动作品。',
-        options: [
-          { id: defaultRatio, label: `${defaultRatio} · 推荐`, consequence: '采用规划器建议比例' },
-          { id: '1:1', label: '1:1 · 方形', consequence: '采用方形构图' }
-        ].filter((option, index, candidates) => candidates.findIndex((candidate) => candidate.id === option.id) === index),
-        defaultOptionId: defaultRatio
-      }
-    }
-    if (this.#generationPolicy.requiresConfirmation(request, plan)) {
-      return {
-        kind: 'generation_confirmation',
-        title: '要现在生成图片吗？',
-        consequence: '确认后创建受当前 Provider 与费用策略约束的图片任务。',
-        options: [
-          { id: 'generate', label: '开始生成', consequence: '创建图片生成任务' },
-          { id: 'keep_canvas', label: '先保留画布', consequence: '不创建生成任务' }
-        ],
-        defaultOptionId: 'generate'
-      }
-    }
-    return null
-  }
-
   #assertOpen(): void {
     if (this.#closed) throw new Error('Agent runtime is closed.')
-  }
-
-  async #plan(
-    runId: string,
-    sourceMessageId: string,
-    request: AgentRequest,
-    controller: AbortController
-  ): Promise<void> {
-    let timeout: ReturnType<typeof setTimeout> | null = null
-    try {
-      await this.#repository.transition(runId, { status: 'planning', startedAt: this.#now() })
-      await this.#activityLedger?.transitionRunActivity(runId, 'plan', 'plan.running', 'running', {
-        progress: null,
-        impactLabel: '正在校验场景范围与可用工具'
-      })
-      timeout = setTimeout(() => controller.abort(new AgentAbortError('timed_out')), this.#timeoutMs)
-      const rawPlan = await this.#planner.plan(request, controller.signal)
-      const plan = agentPlanSchema.parse({
-        ...rawPlan,
-        response: redactSensitive(rawPlan.response),
-        tools: rawPlan.tools.map((plannedTool) => plannedTool.kind === 'generation'
-          ? { ...plannedTool, request: { ...plannedTool.request, sourceMessageId } }
-          : plannedTool.kind === 'canvas_generation'
-            ? { ...plannedTool, sourceMessageId }
-            : plannedTool.kind === 'canvas_edit'
-              ? { ...plannedTool, sourceMessageId }
-          : plannedTool)
-      })
-      const generationConfirmationRequired = this.#generationPolicy.requiresConfirmation(request, plan)
-      const hasExplicitAspect = /\d{1,3}\s*[:：]\s*\d{1,3}/.test(request.text)
-      const plannedAspect = plan.tools.flatMap((tool) => tool.kind === 'scene_batch'
-        ? tool.commands.filter((command) => command.kind === 'scene.set-canvas')
-        : [])[0]
-      const requiresAspectDecision = plannedAspect !== undefined && !hasExplicitAspect
-      const requiresDecision = generationConfirmationRequired || requiresAspectDecision
-      await this.#repository.savePlan(runId, plan, requiresDecision)
-      await this.#activityLedger?.transitionRunActivity(runId, 'plan', 'plan.completed', 'completed', {
-        progress: 1,
-        impactLabel: `已形成 ${plan.tools.length} 项可执行工具计划`
-      })
-      await this.#activityLedger?.createToolActivities(this.#projectId, runId, plan)
-      if (requiresDecision && this.#activityLedger !== null) {
-        const decisionActivityId = await this.#activityLedger.create({
-          projectId: this.#projectId,
-          runId,
-          kind: 'decision',
-          eventType: 'decision.waiting',
-          label: requiresAspectDecision ? '选择画面比例' : '确认开始生成',
-          state: 'waiting',
-          progress: null,
-          objectLabel: requiresAspectDecision ? '画布比例' : '生成任务',
-          actionLabel: requiresAspectDecision ? '确认构图方向' : '确认创建图片生成任务',
-          impactLabel: '等待决定期间不会修改画布或创建生成任务',
-          scopeLabel: requiresAspectDecision ? '新建构图' : '当前作品',
-          budgetImpact: generationConfirmationRequired ? { requests: 1, images: 1, maxCny: 0 } : null,
-          recoverable: true
-        })
-        if (requiresAspectDecision) {
-          const defaultRatio = `${plannedAspect.canvas.aspectWidth}:${plannedAspect.canvas.aspectHeight}`
-          const options = [
-            { id: defaultRatio, label: `${defaultRatio} · 推荐`, consequence: '采用规划器为当前内容选择的纵横方向' },
-            { id: '1:1', label: '1:1 · 方形', consequence: '更适合封面与头像式构图' },
-            { id: '3:2', label: '3:2 · 横向', consequence: '获得更宽的叙事与环境空间' }
-          ].filter((option, index, candidates) => candidates.findIndex((candidate) => candidate.id === option.id) === index)
-          await this.#activityLedger.createDecision({
-            projectId: this.#projectId,
-            runId,
-            activityId: decisionActivityId,
-            kind: 'aspect_ratio',
-            title: '这张作品使用什么比例？',
-            consequence: '比例会决定画布尺寸和所有语义元素的构图基准；确认前不会改动作品。',
-            options,
-            defaultOptionId: defaultRatio
-          })
-        } else {
-          await this.#activityLedger.createDecision({
-            projectId: this.#projectId,
-            runId,
-            activityId: decisionActivityId,
-            kind: 'generation_confirmation',
-            title: '要现在生成图片吗？',
-            consequence: '确认后创建受当前 Provider 策略约束的图片任务；保留画布则不会进入队列。',
-            options: [
-              { id: 'generate', label: '开始生成', consequence: '创建 1 次受当前 Provider 与费用策略约束的图片任务' },
-              { id: 'keep_canvas', label: '先保留画布', consequence: '停止本轮，画布与项目不会发生新变化' }
-            ],
-            defaultOptionId: 'generate'
-          })
-        }
-      }
-    } catch (error) {
-      const current = await this.#repository.getRun(runId)
-      if (TERMINAL.has(current.status)) return
-      const abort = error instanceof AgentAbortError ? error : controller.signal.reason
-      if (abort instanceof AgentAbortError) {
-        await this.#activityLedger?.transitionRunActivity(
-          runId,
-          'plan',
-          `plan.${abort.kind}`,
-          abort.kind === 'cancelled' ? 'cancelled' : abort.kind === 'interrupted' ? 'interrupted' : 'failed',
-          {
-            progress: null,
-            impactLabel: abort.kind === 'timed_out' ? '规划等待过久，画布未发生修改' : '规划已停止，画布未发生修改',
-            recoverable: true
-          }
-        )
-        await this.#repository.appendAssistantMessage(runId, 'error', abort.kind === 'cancelled'
-          ? '操作已取消。你的要求仍保留在对话中。'
-          : abort.kind === 'timed_out'
-            ? '这次规划等待过久，已安全停止。你可以直接重试。'
-            : '应用在操作完成前关闭；你的要求已经保留。', null)
-        await this.#repository.transition(runId, {
-          status: abort.kind,
-          errorCode: abort.kind === 'cancelled' ? 'USER_CANCELLED' : abort.kind === 'timed_out' ? 'AGENT_TIMEOUT' : 'APP_INTERRUPTED',
-          errorMessage: abort.message,
-          completedAt: this.#now()
-        })
-        return
-      }
-      const message = error instanceof Error ? error.message : 'Unknown agent planning error.'
-      const errorCode = typeof error === 'object'
-        && error !== null
-        && 'code' in error
-        && typeof error.code === 'string'
-        && /^[A-Z][A-Z0-9_]{2,119}$/.test(error.code)
-          ? error.code
-          : 'AGENT_PLANNING_FAILED'
-      const safeMessage = redactSensitive(message).slice(0, 500)
-      await this.#activityLedger?.transitionRunActivity(runId, 'plan', 'plan.failed', 'failed', {
-        progress: null,
-        impactLabel: '计划校验失败，画布没有被部分修改',
-        recoverable: true
-      })
-      await this.#repository.appendAssistantMessage(runId, 'error', `${safeMessage} 画布没有被部分修改。`, null)
-      await this.#repository.transition(runId, {
-        status: 'failed',
-        errorCode,
-        errorMessage: safeMessage,
-        completedAt: this.#now()
-      })
-    } finally {
-      if (timeout !== null) clearTimeout(timeout)
-    }
   }
 }
