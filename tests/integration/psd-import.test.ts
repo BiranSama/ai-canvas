@@ -26,13 +26,20 @@ describe('reading a PSD for import', () => {
     expect([...shadow.data.subarray(0, 4)]).toEqual([0, 0, 255, 255])
   })
 
-  it('folds the layer mask into transparency and says what it simplified, bringing the flattened image along', async () => {
+  it('keeps the layer mask as a mask over the layer, and says what it simplified, bringing the flattened image along', async () => {
     const document = await readPsdForImport(samplePsd())
-    const masked = await pixels(document.layers[3]!.png)
-    expect(masked.data[3]).toBe(255)
-    expect(masked.data[(5 * 40 + 30) * 4 + 3]).toBe(0)
+    const layer = document.layers[3]!
+    // The pixels stay whole; the mask, in the layer's own pixels, hides the part it hid in Photoshop.
+    const unmasked = await pixels(layer.png)
+    expect(unmasked.data[(5 * 40 + 30) * 4 + 3]).toBe(255)
+    expect(layer.mask).toMatchObject({ enabled: true })
+    const mask = await sharp(layer.mask!.png).extractChannel(0).raw().toBuffer({ resolveWithObject: true })
+    expect([mask.info.width, mask.info.height]).toEqual([unmasked.width, unmasked.height])
+    expect(mask.data[0]).toBe(255)
+    expect(mask.data[5 * 40 + 30]).toBe(0)
+    expect(document.layers.filter((candidate) => candidate.mask !== null)).toHaveLength(1)
     expect(document.approximations).toEqual(['1 个图层的混合模式暂不支持，按正常处理'])
-    expect(document.keptAsPictures).toEqual(['1 个图层蒙版合进了图层的透明度'])
+    expect(document.keptAsPictures).toEqual([])
     expect(document.composite).not.toBeNull()
     const composite = await pixels(document.composite!)
     expect([composite.width, composite.height]).toEqual([200, 100])

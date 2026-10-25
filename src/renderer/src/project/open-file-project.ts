@@ -106,8 +106,8 @@ export interface OpenedProject {
 /**
  * Opens a PSD as a project: the canvas is the document's size and every
  * pixel layer becomes an image layer at its place, bottom to top, with its
- * name, opacity, visibility and blend mode, inside a group when it was in
- * one. When something could not be carried over as it was, Photoshop's own
+ * name, opacity, visibility, blend mode and layer mask, inside a group when
+ * it was in one. When something could not be carried over as it was, Photoshop's own
  * flattened image is added on top, hidden, to compare against. Returns null
  * when creating the project was cancelled.
  */
@@ -137,6 +137,7 @@ export async function createProjectFromPsd(file: File): Promise<OpenedProject | 
     const base = createElementForTool('image', bootstrap.scene, asset.id)
     if (base?.type !== 'image') continue
     const background = index === 0 && document.opaqueBackground
+    const mask = layer.mask === null ? null : await window.desktop.importAsset({ projectId, name: `${layer.name} 蒙版.png`, mimeType: 'image/png', bytes: layer.mask.png })
     const element: SceneElement = {
       ...base,
       name: layer.name,
@@ -145,7 +146,8 @@ export async function createProjectFromPsd(file: File): Promise<OpenedProject | 
       opacity: layer.opacity,
       visible: layer.visible,
       blendMode: layer.blendMode,
-      ...(background ? { semanticRole: 'background' as const, referenceRole: 'composition' as const } : {})
+      ...(background ? { semanticRole: 'background' as const, referenceRole: 'composition' as const } : {}),
+      ...(mask === null || layer.mask === null ? {} : { mask: { assetId: mask.id, enabled: layer.mask.enabled } })
     }
     commands.push({ kind: 'element.add', element })
     if (layer.groupIndex !== null) groupMembers[layer.groupIndex]?.push(element.id)
