@@ -157,7 +157,7 @@ describe('Photoshop shortcuts on the canvas', () => {
   it('opens the shortcut sheet with Ctrl+Alt+Shift+K and the file commands with Ctrl+N, Ctrl+O and Ctrl+Shift+S', async () => {
     await renderWorkspace()
     press({ key: 'K', code: 'KeyK', ctrlKey: true, altKey: true, shiftKey: true })
-    const sheet = screen.getByRole('dialog', { name: '快捷键' })
+    const sheet = await screen.findByRole('dialog', { name: '快捷键' })
     expect(within(sheet).getByText('吸管：单击取前景色，Alt+单击取背景色')).toBeInTheDocument()
     fireEvent.keyDown(document.activeElement ?? window, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '快捷键' })).not.toBeInTheDocument())

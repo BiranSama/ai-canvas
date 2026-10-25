@@ -96,7 +96,8 @@ test('Tab navigates controls and island keyboard movement never nudges the selec
   const select = page.getByRole('button', { name: '选择 V', exact: true })
   await select.focus()
   await page.keyboard.press('Tab')
-  await expect(page.getByRole('button', { name: '抓手 H', exact: true })).toBeFocused()
+  // The selection tools follow the move tool, as in Photoshop's toolbar.
+  await expect(page.getByRole('button', { name: '矩形选框', exact: true })).toBeFocused()
   await expect(page.locator('.canvas-workspace')).not.toHaveClass(/is-focus-mode/)
   await page.keyboard.press('Shift+Tab')
   await expect(select).toBeFocused()
