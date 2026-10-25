@@ -75,6 +75,17 @@ export function pixelLayerVersion(elementId: string): number {
   return versions.get(elementId) ?? 0
 }
 
+/**
+ * Revisions are drawn from one counter, so pixels rebuilt from scratch never
+ * reuse a number an earlier build had, and a cached composite keyed on it
+ * cannot be mistaken for theirs.
+ */
+let lastRevision = 0
+function nextRevision(): number {
+  lastRevision += 1
+  return lastRevision
+}
+
 function rebuild(elementId: string, image: HTMLImageElement): PaintedLayer | null {
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, image.naturalWidth)
@@ -82,7 +93,7 @@ function rebuild(elementId: string, image: HTMLImageElement): PaintedLayer | nul
   const context = canvas.getContext('2d', { willReadFrequently: true })
   if (context === null) return null
   context.drawImage(image, 0, 0)
-  const layer: PaintedLayer = { source: image, canvas, context, pixels: context.getImageData(0, 0, canvas.width, canvas.height), shown: null, applied: [], revision: 0, composed: '', display: NO_DISPLAY }
+  const layer: PaintedLayer = { source: image, canvas, context, pixels: context.getImageData(0, 0, canvas.width, canvas.height), shown: null, applied: [], revision: nextRevision(), composed: '', display: NO_DISPLAY }
   layers.set(elementId, layer)
   return layer
 }
@@ -103,7 +114,7 @@ function ensure(elementId: string, image: HTMLImageElement, ops: readonly PaintO
       applyPaintOp(layer.pixels.data, layer.canvas.width, layer.canvas.height, op, clips)
       layer.applied.push(op.id)
     }
-    layer.revision += 1
+    layer.revision = nextRevision()
   }
   return layer
 }
@@ -115,7 +126,7 @@ function rebuildMask(elementId: string, mask: LayerMask, gray: ClipPixels, width
     const value = coverage[index]!
     rgba[index * 4] = value; rgba[index * 4 + 1] = value; rgba[index * 4 + 2] = value; rgba[index * 4 + 3] = 255
   }
-  const pixels: MaskPixels = { assetId: mask.assetId, width, height, rgba, coverage, applied: [], revision: 0, alpha: null }
+  const pixels: MaskPixels = { assetId: mask.assetId, width, height, rgba, coverage, applied: [], revision: nextRevision(), alpha: null }
   masks.set(elementId, pixels)
   // The mask's thumbnail waits for these pixels; it hears of them once the canvas has finished drawing.
   queueMicrotask(() => notify(elementId))
@@ -135,7 +146,7 @@ function ensureMask(elementId: string, mask: LayerMask, gray: ClipPixels, width:
       pixels.applied.push(op.id)
     }
     readCoverage(pixels, null)
-    pixels.revision += 1
+    pixels.revision = nextRevision()
     queueMicrotask(() => notify(elementId))
   }
   return pixels
@@ -246,10 +257,14 @@ export function maskedBoxSource(elementId: string, mask: LayerMask, gray: { read
   return { alpha: pixels.alpha.canvas, mask: pixels }
 }
 
-/** A layer mask's pixels as drawn now, with the asset and the operations they hold, for baking its paint. */
+/**
+ * A layer mask's pixels as drawn now, with the asset and the operations they
+ * hold, for baking its paint; null while a stroke is going on, whose pixels
+ * are in the mask but not yet among its operations.
+ */
 export function layerMaskSnapshot(elementId: string): { readonly assetId: string; readonly width: number; readonly height: number; readonly coverage: Uint8Array<ArrayBuffer>; readonly applied: readonly string[] } | null {
   const mask = masks.get(elementId)
-  return mask === undefined ? null : { assetId: mask.assetId, width: mask.width, height: mask.height, coverage: new Uint8Array(mask.coverage), applied: [...mask.applied] }
+  return mask === undefined || live.has(elementId) ? null : { assetId: mask.assetId, width: mask.width, height: mask.height, coverage: new Uint8Array(mask.coverage), applied: [...mask.applied] }
 }
 
 /** A layer mask's current coverage and size, for the thumbnail, loading it as a selection and applying it. */
@@ -352,7 +367,7 @@ export function applyLiveMaskOp(elementId: string, op: PaintOp, clip: ClipPixels
 /** The mask's pixels changed in rect: what shows through it follows at once. */
 function maskChanged(elementId: string, mask: MaskPixels, rect: PixelRect | null): void {
   readCoverage(mask, rect)
-  mask.revision += 1
+  mask.revision = nextRevision()
   const layer = layers.get(elementId)
   if (layer !== undefined && layer.display.mask === mask) {
     compose(layer, rect)

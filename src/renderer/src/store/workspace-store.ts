@@ -62,9 +62,11 @@ function rememberTool(memory: ToolMemory, tool: CanvasTool): ToolMemory {
 /*
  * What Ctrl+Z steps back through, in order: scene batches, which Main keeps,
  * and selection changes, which stay in the Renderer, as Photoshop's history
- * holds both. A step is noted when it happens; undo takes the newest.
+ * holds both. A step is noted when it is asked for; undo takes the newest.
  */
-type HistoryStep = 'scene' | 'selection'
+interface HistoryStep {
+  readonly kind: 'scene' | 'selection'
+}
 const undoSteps: HistoryStep[] = []
 const redoSteps: HistoryStep[] = []
 /** Batches this window sent, so their change events are not counted twice. */
@@ -78,16 +80,25 @@ export function registerSelectionHistory(history: { undo(): boolean; redo(): boo
 
 /** Whether the next undo or redo is a selection step, which Main's history cannot know of, for the buttons. */
 function showHistorySteps(): void {
-  const selectionUndo = undoSteps.at(-1) === 'selection'
-  const selectionRedo = redoSteps.at(-1) === 'selection'
+  const selectionUndo = undoSteps.at(-1)?.kind === 'selection'
+  const selectionRedo = redoSteps.at(-1)?.kind === 'selection'
   const state = useWorkspaceStore.getState()
   if (state.selectionUndo !== selectionUndo || state.selectionRedo !== selectionRedo) useWorkspaceStore.setState({ selectionUndo, selectionRedo })
 }
 
-function noteStep(step: HistoryStep): void {
+function noteStep(kind: HistoryStep['kind']): HistoryStep {
+  const step = { kind }
   undoSteps.push(step)
   if (undoSteps.length > MAX_HISTORY_STEPS) undoSteps.splice(0, undoSteps.length - MAX_HISTORY_STEPS)
   redoSteps.length = 0
+  showHistorySteps()
+  return step
+}
+
+/** Takes out a step noted for a batch that did not land. */
+function dropStep(step: HistoryStep): void {
+  const index = undoSteps.lastIndexOf(step)
+  if (index >= 0) undoSteps.splice(index, 1)
   showHistorySteps()
 }
 
@@ -99,7 +110,7 @@ export function noteSelectionStep(): void {
 /** The selection's history was dropped, with the canvas it was made on. */
 export function forgetSelectionSteps(): void {
   for (const steps of [undoSteps, redoSteps]) {
-    const kept = steps.filter((step) => step !== 'selection')
+    const kept = steps.filter((step) => step.kind !== 'selection')
     steps.splice(0, steps.length, ...kept)
   }
   showHistorySteps()
@@ -426,36 +437,45 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     setTransformRatioLocked: (transformRatioLocked) => set({ transformRatioLocked }),
     setGeometryUnit: (geometryUnit) => set({ geometryUnit }),
     fitViewport: () => set({ zoom: 1, pan: { x: 0, y: 0 } }),
-    execute: (summary, commands) => enqueueMutation(async (isCurrent) => {
-      const client = desktopClient()
-      if (client === null) {
-        set({ sceneProblem: 'Main SceneService 不可用，画布未修改。' })
-        return false
-      }
-      const current = get().scene
-      const list = typeof commands === 'function' ? commands(current) : commands
-      if (list === null) return false
-      set({ mutationPending: true })
-      try {
-        const batch: CommandBatchInput = {
-          id: createId(),
-          origin: 'user',
-          summary,
-          commands: [...list]
+    execute: (summary, commands) => {
+      // The batch holds its place in the history from the moment it is asked for, so a selection
+      // change made while it is on its way to Main comes after it; the place goes if it does not land.
+      const step = noteStep('scene')
+      return enqueueMutation(async (isCurrent) => {
+        let applied = false
+        try {
+          const client = desktopClient()
+          if (client === null) {
+            set({ sceneProblem: 'Main SceneService 不可用，画布未修改。' })
+            return false
+          }
+          const current = get().scene
+          const list = typeof commands === 'function' ? commands(current) : commands
+          if (list === null) return false
+          set({ mutationPending: true })
+          try {
+            const batch: CommandBatchInput = {
+              id: createId(),
+              origin: 'user',
+              summary,
+              commands: [...list]
+            }
+            ownBatchIds.add(batch.id)
+            if (ownBatchIds.size > MAX_HISTORY_STEPS) ownBatchIds.delete(ownBatchIds.values().next().value!)
+            const result = await client.execute({ projectId: current.projectId, expectedSceneRevision: current.revision, batch })
+            applied = isCurrent() && applyMutationResult(result)
+            return applied
+          } catch (error) {
+            if (isCurrent()) set({ sceneProblem: error instanceof Error ? error.message : '画布修改没有完成。' })
+            return false
+          } finally {
+            if (isCurrent()) set({ mutationPending: false })
+          }
+        } finally {
+          if (!applied) dropStep(step)
         }
-        ownBatchIds.add(batch.id)
-        if (ownBatchIds.size > MAX_HISTORY_STEPS) ownBatchIds.delete(ownBatchIds.values().next().value!)
-        const result = await client.execute({ projectId: current.projectId, expectedSceneRevision: current.revision, batch })
-        const applied = isCurrent() && applyMutationResult(result)
-        if (applied) noteStep('scene')
-        return applied
-      } catch (error) {
-        if (isCurrent()) set({ sceneProblem: error instanceof Error ? error.message : '画布修改没有完成。' })
-        return false
-      } finally {
-        if (isCurrent()) set({ mutationPending: false })
-      }
-    }),
+      })
+    },
     updateElement: (id, changes, summary = '调整元素') => {
       const scene = get().scene
       const element = scene.elements.find((candidate) => candidate.id === id)
@@ -671,9 +691,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       return success
     },
     undo: async () => { await enqueueMutation(async (isCurrent) => {
-      if (undoSteps.at(-1) === 'selection') {
+      if (undoSteps.at(-1)?.kind === 'selection') {
         undoSteps.pop()
-        if (selectionHistory?.undo() === true) redoSteps.push('selection')
+        if (selectionHistory?.undo() === true) redoSteps.push({ kind: 'selection' })
         showHistorySteps()
         return
       }
@@ -684,8 +704,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         const result = await client.undo({ projectId: get().scene.projectId, expectedSceneRevision: get().scene.revision, batchId: null })
         const applied = isCurrent() && applyMutationResult(result)
         if (applied && result.ok) {
-          if (undoSteps.at(-1) === 'scene') undoSteps.pop()
-          redoSteps.push('scene')
+          if (undoSteps.at(-1)?.kind === 'scene') undoSteps.pop()
+          redoSteps.push({ kind: 'scene' })
           showHistorySteps()
         }
         if (applied && result.ok && result.receipt.affectedBatchId !== null) {
@@ -709,9 +729,9 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       }
     }),
     redo: async () => { await enqueueMutation(async (isCurrent) => {
-      if (redoSteps.at(-1) === 'selection') {
+      if (redoSteps.at(-1)?.kind === 'selection') {
         redoSteps.pop()
-        if (selectionHistory?.redo() === true) undoSteps.push('selection')
+        if (selectionHistory?.redo() === true) undoSteps.push({ kind: 'selection' })
         showHistorySteps()
         return
       }
@@ -721,8 +741,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       try {
         const result = await client.redo({ projectId: get().scene.projectId, expectedSceneRevision: get().scene.revision, batchId: null })
         if (isCurrent() && applyMutationResult(result) && result.ok) {
-          if (redoSteps.at(-1) === 'scene') redoSteps.pop()
-          undoSteps.push('scene')
+          if (redoSteps.at(-1)?.kind === 'scene') redoSteps.pop()
+          undoSteps.push({ kind: 'scene' })
           showHistorySteps()
         }
       } finally {
