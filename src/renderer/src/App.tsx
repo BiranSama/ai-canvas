@@ -34,6 +34,7 @@ import { clearEphemeralAnnotation } from './agent/ephemeral-annotation-store'
 import { CanvasStage, type CanvasStageHandle } from './canvas/CanvasStage'
 import { ActionTrace } from './canvas/ActionTrace'
 import { createElementForTool } from './canvas/element-factory'
+import { withMaskViewSetAside } from './canvas/mask-state'
 import { CanvasToolbar } from './components/CanvasToolbar'
 import { PaintOptionsBar } from './components/PaintOptionsBar'
 import { SelectionOptionsBar } from './components/SelectionOptionsBar'
@@ -153,8 +154,8 @@ function WorkspaceHeader({
   const activeView = useWorkspaceStore((state) => state.activeView)
   const projectName = useWorkspaceStore((state) => state.projectName)
   const setActiveView = useWorkspaceStore((state) => state.setActiveView)
-  const canUndo = useWorkspaceStore((state) => state.canUndo)
-  const canRedo = useWorkspaceStore((state) => state.canRedo)
+  const canUndo = useWorkspaceStore((state) => state.canUndo || state.selectionUndo)
+  const canRedo = useWorkspaceStore((state) => state.canRedo || state.selectionRedo)
   const undo = useWorkspaceStore((state) => state.undo)
   const redo = useWorkspaceStore((state) => state.redo)
   const inspectorOpen = useWorkspaceStore((state) => state.inspectorOpen)
@@ -613,8 +614,10 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
   }, [chooseTool, copySelection, cutSelection, deleteSelection, duplicateSelection, editingGroupId, enterGroupEditing, exitGroupEditing, groupSelection, importFile, pasteSelection, redo, reorderElement, scene.elements, selectedIds, setActiveTool, setSelection, undo, ungroupSelection])
 
   const exportCanvas = (format: 'png' | 'jpeg' | 'webp', jpegBackground: string): void => {
-    const dataUrl = stageRef.current?.exportDataUrl(format, jpegBackground)
-    if (dataUrl !== null && dataUrl !== undefined) downloadDataUrl(dataUrl, exportFilename(projectName, format))
+    void withMaskViewSetAside(() => {
+      const dataUrl = stageRef.current?.exportDataUrl(format, jpegBackground)
+      if (dataUrl !== null && dataUrl !== undefined) downloadDataUrl(dataUrl, exportFilename(projectName, format))
+    })
   }
 
   const editingGroup = editingGroupId === null

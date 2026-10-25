@@ -76,10 +76,19 @@ export function registerSelectionHistory(history: { undo(): boolean; redo(): boo
   selectionHistory = history
 }
 
+/** Whether the next undo or redo is a selection step, which Main's history cannot know of, for the buttons. */
+function showHistorySteps(): void {
+  const selectionUndo = undoSteps.at(-1) === 'selection'
+  const selectionRedo = redoSteps.at(-1) === 'selection'
+  const state = useWorkspaceStore.getState()
+  if (state.selectionUndo !== selectionUndo || state.selectionRedo !== selectionRedo) useWorkspaceStore.setState({ selectionUndo, selectionRedo })
+}
+
 function noteStep(step: HistoryStep): void {
   undoSteps.push(step)
   if (undoSteps.length > MAX_HISTORY_STEPS) undoSteps.splice(0, undoSteps.length - MAX_HISTORY_STEPS)
   redoSteps.length = 0
+  showHistorySteps()
 }
 
 /** A selection change went into the selection's own history; Ctrl+Z reaches it in turn. */
@@ -87,9 +96,19 @@ export function noteSelectionStep(): void {
   noteStep('selection')
 }
 
+/** The selection's history was dropped, with the canvas it was made on. */
+export function forgetSelectionSteps(): void {
+  for (const steps of [undoSteps, redoSteps]) {
+    const kept = steps.filter((step) => step !== 'selection')
+    steps.splice(0, steps.length, ...kept)
+  }
+  showHistorySteps()
+}
+
 function clearHistorySteps(): void {
   undoSteps.length = 0
   redoSteps.length = 0
+  showHistorySteps()
 }
 
 /** Each painting tool keeps its own options, as in Photoshop. Sizes are in canvas pixels. */
@@ -140,6 +159,9 @@ interface WorkspaceState {
   geometryUnit: 'px' | 'percent'
   canUndo: boolean
   canRedo: boolean
+  /** The next undo or redo is a selection change, so the button is on whatever Main's history holds. */
+  selectionUndo: boolean
+  selectionRedo: boolean
   mutationPending: boolean
   sceneProblem: string | null
   workContextProblem: string | null
@@ -341,6 +363,8 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     geometryUnit: 'px',
     canUndo: false,
     canRedo: false,
+    selectionUndo: false,
+    selectionRedo: false,
     mutationPending: false,
     sceneProblem: null,
     workContextProblem: null,
@@ -643,6 +667,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       if (undoSteps.at(-1) === 'selection') {
         undoSteps.pop()
         if (selectionHistory?.undo() === true) redoSteps.push('selection')
+        showHistorySteps()
         return
       }
       const client = desktopClient()
@@ -654,6 +679,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (applied && result.ok) {
           if (undoSteps.at(-1) === 'scene') undoSteps.pop()
           redoSteps.push('scene')
+          showHistorySteps()
         }
         if (applied && result.ok && result.receipt.affectedBatchId !== null) {
           await client.markBatchUndone(result.receipt.affectedBatchId).catch(() => undefined)
@@ -679,6 +705,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       if (redoSteps.at(-1) === 'selection') {
         redoSteps.pop()
         if (selectionHistory?.redo() === true) undoSteps.push('selection')
+        showHistorySteps()
         return
       }
       const client = desktopClient()
@@ -689,6 +716,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (isCurrent() && applyMutationResult(result) && result.ok) {
           if (redoSteps.at(-1) === 'scene') redoSteps.pop()
           undoSteps.push('scene')
+          showHistorySteps()
         }
       } finally {
         if (isCurrent()) set({ mutationPending: false })

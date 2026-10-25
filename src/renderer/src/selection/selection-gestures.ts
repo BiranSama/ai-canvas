@@ -14,7 +14,7 @@ import {
 import { showAppNotice } from '../components/app-notice'
 import type { SelectionTool } from '../store/workspace-store'
 import { samplePixels } from './selection-sampling'
-import { currentSelection, setSelectionDraft, setSelectionMask, useSelectionStore } from './selection-store'
+import { currentSelection, selectionCanvasStamp, setSelectionDraft, setSelectionMask, useSelectionStore } from './selection-store'
 
 /*
  * The selection tools on the canvas, as in Photoshop. Points are canvas
@@ -110,9 +110,10 @@ function insideSelection(point: CanvasPoint): boolean {
 
 async function magicWand(point: CanvasPoint, mode: MaskCombine): Promise<void> {
   const ticket = ++generation
+  const stamp = selectionCanvasStamp()
   const settings = useSelectionStore.getState().settings
   const pixels = await samplePixels(settings.sampleAllLayers)
-  if (ticket !== generation) return
+  if (ticket !== generation || stamp !== selectionCanvasStamp()) return
   if (pixels === null) {
     showAppNotice('画面还没画好，稍后再点一次。')
     return
@@ -127,8 +128,9 @@ async function objectSelect(run: () => Promise<GrayMask | null>, mode: MaskCombi
     showAppNotice('对象选择还没准备好，稍后再试。')
     return
   }
+  const stamp = selectionCanvasStamp()
   const shape = await run()
-  if (ticket !== generation || shape === null) return
+  if (ticket !== generation || stamp !== selectionCanvasStamp() || shape === null) return
   finishShape(shape, mode, false)
 }
 

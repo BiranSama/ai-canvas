@@ -13,6 +13,7 @@ import { layerMaskCoverage, paintedImageBytes, type PaintAssetResolver } from '.
  */
 
 type PictureLayer = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
+type Outline = readonly { readonly x: number; readonly y: number }[]
 
 export type LayerMaskShape =
   | { readonly kind: 'subject' }
@@ -20,8 +21,8 @@ export type LayerMaskShape =
   | { readonly kind: 'current' }
   /** Fractions of the canvas. */
   | { readonly kind: 'box' | 'ellipse'; readonly box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } }
-  /** Closed outlines in fractions of the canvas, such as the person's selection. */
-  | { readonly kind: 'polygons'; readonly polygons: readonly (readonly { readonly x: number; readonly y: number }[])[] }
+  /** Closed outlines in fractions of the canvas, such as the person's selection, less the holes in it. */
+  | { readonly kind: 'polygons'; readonly polygons: readonly Outline[]; readonly holes?: readonly Outline[] }
 
 export interface LayerMaskSpec {
   readonly elementId: string
@@ -77,11 +78,10 @@ function shapeOnCanvas(shape: Extract<LayerMaskShape, { kind: 'box' | 'ellipse' 
     const rect = { x: shape.box.x * canvas.width, y: shape.box.y * canvas.height, width: shape.box.width * canvas.width, height: shape.box.height * canvas.height }
     return shape.kind === 'box' ? rectMask(canvas.width, canvas.height, rect) : ellipseMask(canvas.width, canvas.height, rect)
   }
+  const filled = (outline: Outline): GrayMask => polygonMask(canvas.width, canvas.height, outline.flatMap((point) => [point.x * canvas.width, point.y * canvas.height]))
   let mask = createMask(canvas.width, canvas.height)
-  for (const outline of shape.polygons) {
-    const points = outline.flatMap((point) => [point.x * canvas.width, point.y * canvas.height])
-    mask = combineMasks(mask, polygonMask(canvas.width, canvas.height, points), 'add')
-  }
+  for (const outline of shape.polygons) mask = combineMasks(mask, filled(outline), 'add')
+  for (const outline of shape.holes ?? []) mask = combineMasks(mask, filled(outline), 'subtract')
   return mask
 }
 

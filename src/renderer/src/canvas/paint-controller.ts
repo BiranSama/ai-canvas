@@ -13,6 +13,7 @@ import {
   beginLiveMaskStroke,
   beginLiveStroke,
   discardPixelLayer,
+  layerMaskSnapshot,
   layerSourceImage,
   maskSize,
   refreshPixelLayer,
@@ -148,8 +149,35 @@ async function record(target: PaintTarget, op: PaintOp, clip: SelectionClip, sum
     saved = await useWorkspaceStore.getState().updateElement(target.element.id, { paint: [...paint, recorded] }, summary)
   }
   if (!saved) discardPixelLayer(target.element.id)
-  else if (!target.onMask) void bakeIfLong(target.element.id)
+  else void (target.onMask ? bakeMaskIfLong(target.element.id) : bakeIfLong(target.element.id))
   return saved
+}
+
+/**
+ * Bakes a mask's paint into a new gray asset once it has many operations,
+ * from the pixels the canvas already holds; the mask stays editable and
+ * keeps any operations added meanwhile.
+ */
+async function bakeMaskIfLong(elementId: string): Promise<void> {
+  const mask = currentElement(elementId)?.mask
+  if (mask === null || mask === undefined || (mask.paint?.length ?? 0) < BAKE_AFTER || baking.has(elementId)) return
+  const snapshot = layerMaskSnapshot(elementId)
+  const recorded = (mask.paint ?? []).map((op) => op.id)
+  // Only pixels that hold exactly the recorded operations, none mid-stroke, are baked.
+  if (snapshot === null || snapshot.assetId !== mask.assetId || snapshot.applied.length !== recorded.length || snapshot.applied.some((id, index) => id !== recorded[index])) return
+  baking.add(elementId)
+  try {
+    const { scene } = useWorkspaceStore.getState()
+    const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: '蒙版.png', width: snapshot.width, height: snapshot.height, gray: snapshot.coverage })
+    const current = currentElement(elementId)?.mask
+    if (current === null || current === undefined || current.assetId !== mask.assetId) return
+    const covered = new Set(snapshot.applied)
+    await useWorkspaceStore.getState().updateElement(elementId, { mask: { ...current, assetId: asset.id, paint: (current.paint ?? []).filter((op) => !covered.has(op.id)) } }, '合并蒙版绘制记录')
+  } catch {
+    // The operations stay recorded; the next stroke tries again.
+  } finally {
+    baking.delete(elementId)
+  }
 }
 
 function newId(): string {

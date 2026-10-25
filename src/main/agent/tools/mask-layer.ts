@@ -10,11 +10,15 @@ type PictureLayer = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
 const SOURCES = { subject: '主体', box: '方框', ellipse: '椭圆', selection: '用户的选区', current: '现有蒙版' } as const
 const COMBINE = { replace: '', add: '加进', subtract: '从中减去', intersect: '只留与之重叠的' } as const
 
-/** The person's marked outlines for this turn, without the parts they marked to keep as they are. */
-function markedOutlines(context: AgentToolContext): readonly (readonly { readonly x: number; readonly y: number }[])[] {
+/** The person's marked outlines for this turn, and the parts within them they marked to keep as they are, such as a selection's holes. */
+function markedOutlines(context: AgentToolContext): Extract<LayerMaskShape, { kind: 'polygons' }> {
   const marked = context.marked
-  if (marked === null || marked === undefined) return []
-  return (marked.regions ?? [marked]).filter((region) => region.mode !== 'protect' && region.closed).map((region) => region.points)
+  const regions = marked === null || marked === undefined ? [] : (marked.regions ?? [marked]).filter((region) => region.closed)
+  return {
+    kind: 'polygons',
+    polygons: regions.filter((region) => region.mode !== 'protect').map((region) => region.points),
+    holes: regions.filter((region) => region.mode === 'protect').map((region) => region.points)
+  }
 }
 
 export const maskLayerTool = defineTool({
@@ -95,9 +99,9 @@ export const maskLayerTool = defineTool({
       const [x, y, width, height] = args.region!
       shape = { kind: args.source, box: { x: x / 100, y: y / 100, width: width / 100, height: height / 100 } }
     } else if (args.source === 'selection') {
-      const polygons = markedOutlines(context)
-      if (polygons.length === 0) return rejected('用户这一轮没有选区。', '用 box 或 ellipse 给出区域，或请用户先在画布上选出来。')
-      shape = { kind: 'polygons', polygons }
+      const outlines = markedOutlines(context)
+      if (outlines.polygons.length === 0) return rejected('用户这一轮没有选区。', '用 box 或 ellipse 给出区域，或请用户先在画布上选出来。')
+      shape = outlines
     } else {
       shape = { kind: args.source }
     }

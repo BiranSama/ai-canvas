@@ -83,23 +83,10 @@ async function exported(page: Page): Promise<{ data: Buffer, width: number, heig
   return { data, width: info.width, height: info.height }
 }
 
-/** A grayscale asset's red channel, read in the page from the asset Main serves. */
+/** A grayscale asset's first channel, as Main serves it to the page. Decoded here: a million numbers back from the page take seconds. */
 async function grayAsset(page: Page, assetId: string): Promise<Uint8Array> {
-  const values = await page.evaluate(`(async () => {
-    const url = await window.desktop.readGenerationAsset(${JSON.stringify(assetId)}, false)
-    const picture = new Image()
-    await new Promise((done, fail) => { picture.onload = done; picture.onerror = fail; picture.src = url })
-    const canvas = document.createElement('canvas')
-    canvas.width = picture.naturalWidth
-    canvas.height = picture.naturalHeight
-    const context = canvas.getContext('2d')
-    context.drawImage(picture, 0, 0)
-    const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data
-    const gray = []
-    for (let index = 0; index < rgba.length; index += 4) gray.push(rgba[index])
-    return gray
-  })()`) as number[]
-  return Uint8Array.from(values)
+  const url = await page.evaluate(`window.desktop.readGenerationAsset(${JSON.stringify(assetId)}, false)`) as string
+  return new Uint8Array(await sharp(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')).extractChannel(0).raw().toBuffer())
 }
 
 async function clipsOf(page: Page, ops: readonly PaintOp[]): Promise<Map<string, Uint8Array>> {

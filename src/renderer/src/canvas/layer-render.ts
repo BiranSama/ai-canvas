@@ -1,3 +1,5 @@
+import { withMaskViewSetAside } from './mask-state'
+
 /*
  * Layers drawn exactly as the stage shows them, at the canvas's output
  * size and without the artboard behind them, for merging and rasterizing:
@@ -23,15 +25,20 @@ export function setLayerRenderer(next: LayerRenderer | null): void {
 
 const PENDING_WAIT_MS = 8000
 
-/** Draws the layers once every picture among them has loaded, so a stand-in never ends up in the pixels. */
-export async function renderLayersAsDrawn(ids: readonly string[], options: LayerRenderOptions = {}): Promise<HTMLCanvasElement | null> {
-  const deadline = performance.now() + PENDING_WAIT_MS
-  for (;;) {
-    const drawn = renderer?.(ids, options) ?? null
-    if (drawn !== 'pending') return drawn
-    if (performance.now() > deadline) return null
-    await new Promise((resolve) => setTimeout(resolve, 50))
-  }
+/**
+ * Draws the layers once every picture among them has loaded, so a stand-in
+ * never ends up in the pixels, and without a mask being viewed alone or in red.
+ */
+export function renderLayersAsDrawn(ids: readonly string[], options: LayerRenderOptions = {}): Promise<HTMLCanvasElement | null> {
+  return withMaskViewSetAside(async () => {
+    const deadline = performance.now() + PENDING_WAIT_MS
+    for (;;) {
+      const drawn = renderer?.(ids, options) ?? null
+      if (drawn !== 'pending') return drawn
+      if (performance.now() > deadline) return null
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+  })
 }
 
 /** The smallest rectangle holding every pixel that is not fully transparent, or null for an empty picture. */

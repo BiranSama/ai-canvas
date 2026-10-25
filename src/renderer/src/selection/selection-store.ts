@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { decodeMask, encodeMask, isMaskEmpty, type GrayMask, type MaskCombine } from '../../../shared/mask-raster'
-import { noteSelectionStep, registerSelectionHistory, useWorkspaceStore } from '../store/workspace-store'
+import { forgetSelectionSteps, noteSelectionStep, registerSelectionHistory, useWorkspaceStore } from '../store/workspace-store'
 
 /*
  * The pixel selection, as in Photoshop: a grayscale mask the size of the
@@ -129,6 +129,7 @@ registerSelectionHistory({
 function forget(): void {
   undoStack.length = 0
   redoStack.length = 0
+  forgetSelectionSteps()
   lastDropped = null
   if (useSelectionStore.getState().mask !== null) apply(null)
 }
@@ -137,12 +138,23 @@ let watched = (() => {
   const { scene } = useWorkspaceStore.getState()
   return { projectId: scene.projectId, width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }
 })()
+let canvasStamp = 0
 useWorkspaceStore.subscribe((state) => {
   const next = { projectId: state.scene.projectId, width: state.scene.canvas.outputWidth, height: state.scene.canvas.outputHeight }
   if (next.projectId === watched.projectId && next.width === watched.width && next.height === watched.height) return
   watched = next
+  canvasStamp += 1
   forget()
 })
+
+/**
+ * Changes when another project opens or the canvas changes size, so a
+ * selection worked out slowly, such as by a model, is dropped rather than
+ * laid over a canvas it was not found on.
+ */
+export function selectionCanvasStamp(): number {
+  return canvasStamp
+}
 
 /*
  * What a selection tool is drawing right now, for the marching ants to

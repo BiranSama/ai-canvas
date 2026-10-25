@@ -24,6 +24,22 @@ export const useMaskState = create<MaskState>()((set) => ({
   setView: (elementId, mode) => set({ view: mode === 'normal' ? null : { elementId, mode } })
 }))
 
+/**
+ * Runs work on the picture as it really is: a mask shown alone or in red
+ * is set aside while the canvas redraws for it, then brought back.
+ */
+export async function withMaskViewSetAside<T>(work: () => T | Promise<T>): Promise<T> {
+  const view = useMaskState.getState().view
+  if (view === null) return work()
+  useMaskState.setState({ view: null })
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+  try {
+    return await work()
+  } finally {
+    if (useMaskState.getState().view === null) useMaskState.setState({ view })
+  }
+}
+
 export function maskViewOf(elementId: string): MaskView {
   const view = useMaskState.getState().view
   return view?.elementId === elementId ? view.mode : 'normal'

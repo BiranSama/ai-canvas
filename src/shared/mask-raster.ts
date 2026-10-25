@@ -33,6 +33,8 @@ export function rectMask(width: number, height: number, rect: MaskRect): GrayMas
   const x1 = Math.min(width, Math.round(Math.max(rect.x, rect.x + rect.width)))
   const y0 = Math.max(0, Math.round(Math.min(rect.y, rect.y + rect.height)))
   const y1 = Math.min(height, Math.round(Math.max(rect.y, rect.y + rect.height)))
+  // A rectangle wholly off one side of the canvas selects nothing (fill would read a negative end from the array's end).
+  if (x1 <= x0 || y1 <= y0) return mask
   for (let y = y0; y < y1; y += 1) mask.data.fill(255, y * width + x0, y * width + x1)
   return mask
 }

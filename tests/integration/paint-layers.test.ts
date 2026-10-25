@@ -233,6 +233,10 @@ it('builds the agent\'s layer masks in the layer\'s own pixels: shapes from the 
   expect([at(hidden, 10, 50), at(hidden, 190, 50)]).toEqual([0, 255])
   const triangle = await build(layer, { shape: { kind: 'polygons', polygons: [[{ x: 0.25, y: 0.25 }, { x: 0.75, y: 0.25 }, { x: 0.25, y: 0.75 }]] }, combine: 'replace', invert: false, feather: 0 })
   expect([at(triangle, 20, 10), at(triangle, 180, 90)]).toEqual([255, 0])
+  // A selection with a hole in it shows all but the hole.
+  const square = (left: number, top: number, size: number) => [{ x: left, y: top }, { x: left + size, y: top }, { x: left + size, y: top + size }, { x: left, y: top + size }]
+  const ring = await build(layer, { shape: { kind: 'polygons', polygons: [square(0, 0, 1)], holes: [square(0.4, 0.4, 0.2)] }, combine: 'replace', invert: false, feather: 0 })
+  expect([at(ring, 20, 10), at(ring, 100, 50), at(ring, 190, 90)]).toEqual([255, 0, 255])
   // Feathered over 4 canvas pixels, about 12 of the layer's across the edge.
   const soft = await build(layer, { shape: { kind: 'box', box: { x: 0, y: 0, width: 0.5, height: 1 } }, combine: 'replace', invert: false, feather: 4 })
   expect(at(soft, 100, 50)).toBeGreaterThan(80)

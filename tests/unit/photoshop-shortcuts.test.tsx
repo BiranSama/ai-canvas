@@ -7,7 +7,7 @@ import { createLocalWorkspaceSceneClient } from '../helpers/local-workspace-scen
 import { useMaskState } from '../../src/renderer/src/canvas/mask-state'
 import { useEditDialog } from '../../src/renderer/src/components/edit-dialog-store'
 import { rectMask } from '../../src/shared/mask-raster'
-import { setSelectionMask, useSelectionStore } from '../../src/renderer/src/selection/selection-store'
+import { selectionCanvasStamp, setSelectionMask, useSelectionStore } from '../../src/renderer/src/selection/selection-store'
 
 vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
   const React = await import('react')
@@ -281,6 +281,28 @@ describe('Photoshop shortcuts on the canvas', () => {
     await waitFor(() => expect(selection()).toBeNull())
     press({ key: 'd', code: 'KeyD', ctrlKey: true })
     expect(useWorkspaceStore.getState().selectedIds).toEqual([])
+  })
+
+  it('turns the undo and redo buttons on for selection steps, and drops them with the canvas they were made on', async () => {
+    await renderWorkspace()
+    const undo = screen.getByRole('button', { name: '撤销' })
+    const redo = screen.getByRole('button', { name: '重做' })
+    expect([undo, redo].map((button) => (button as HTMLButtonElement).disabled)).toEqual([true, true])
+    act(() => setSelectionMask(rectMask(1024, 1280, { x: 100, y: 100, width: 200, height: 200 })))
+    expect([undo, redo].map((button) => (button as HTMLButtonElement).disabled)).toEqual([false, true])
+    fireEvent.click(undo)
+    await waitFor(() => expect(useSelectionStore.getState().mask).toBeNull())
+    expect([undo, redo].map((button) => (button as HTMLButtonElement).disabled)).toEqual([true, false])
+    fireEvent.click(redo)
+    await waitFor(() => expect(useSelectionStore.getState().mask).not.toBeNull())
+    expect([undo, redo].map((button) => (button as HTMLButtonElement).disabled)).toEqual([false, true])
+
+    // A canvas of another size: the selection and its steps go, and a slow result found before is known to be stale.
+    const stamp = selectionCanvasStamp()
+    act(() => useWorkspaceStore.setState((state) => ({ scene: { ...state.scene, canvas: { ...state.scene.canvas, outputWidth: 512 } } })))
+    expect(selectionCanvasStamp()).not.toBe(stamp)
+    expect(useSelectionStore.getState().mask).toBeNull()
+    expect([undo, redo].map((button) => (button as HTMLButtonElement).disabled)).toEqual([true, true])
   })
 
   it('picks the selection tools with M, L and W, Shift moving to the other tool in the slot', async () => {

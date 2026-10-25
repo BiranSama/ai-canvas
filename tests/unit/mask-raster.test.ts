@@ -207,3 +207,12 @@ describe('outline thinning', () => {
     expect(simplifyOutline(triangle, 5)).toBe(triangle)
   })
 })
+
+describe('rectangles off the canvas', () => {
+  it('select nothing when wholly outside, and only the part inside otherwise', () => {
+    expect(isMaskEmpty(rectMask(10, 10, { x: -5, y: 0, width: 2, height: 3 }))).toBe(true)
+    expect(isMaskEmpty(rectMask(10, 10, { x: 12, y: 2, width: 3, height: 3 }))).toBe(true)
+    expect(isMaskEmpty(rectMask(10, 10, { x: 2, y: -8, width: 3, height: 4 }))).toBe(true)
+    expect(coverage(rectMask(10, 10, { x: -5, y: 0, width: 7, height: 3 }))).toBe(6)
+  })
+})

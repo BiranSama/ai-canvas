@@ -212,7 +212,9 @@ export function paintedSource(elementId: string, image: HTMLImageElement, ops: r
   const masked = maskSource !== null && (maskSource.mask.enabled || maskSource.view !== 'normal')
   if ((ops === undefined || ops.length === 0) && !live.has(elementId) && !masked) {
     layers.delete(elementId)
+    // A mask that is off does not change the picture, but its thumbnail, Ctrl+click and painting still read it.
     if (maskSource === null) masks.delete(elementId)
+    else ensureMask(elementId, maskSource.mask, maskSource.gray, Math.max(1, image.naturalWidth), Math.max(1, image.naturalHeight), maskSource.clips)
     return image
   }
   const layer = ensure(elementId, image, ops ?? [], clips)
@@ -242,6 +244,12 @@ export function maskedBoxSource(elementId: string, mask: LayerMask, gray: { read
     pixels.alpha = { canvas, image, revision: pixels.revision }
   }
   return { alpha: pixels.alpha.canvas, mask: pixels }
+}
+
+/** A layer mask's pixels as drawn now, with the asset and the operations they hold, for baking its paint. */
+export function layerMaskSnapshot(elementId: string): { readonly assetId: string; readonly width: number; readonly height: number; readonly coverage: Uint8Array<ArrayBuffer>; readonly applied: readonly string[] } | null {
+  const mask = masks.get(elementId)
+  return mask === undefined ? null : { assetId: mask.assetId, width: mask.width, height: mask.height, coverage: new Uint8Array(mask.coverage), applied: [...mask.applied] }
 }
 
 /** A layer mask's current coverage and size, for the thumbnail, loading it as a selection and applying it. */

@@ -514,7 +514,7 @@ describe('mask_layer', () => {
       }
     }
     expect((await harness.call('mask_layer', { target: 'E1', source: 'selection' })).result.summary).toBe('已给 E1 改了蒙版：用户的选区')
-    expect(specs.at(-1)).toMatchObject({ shape: { kind: 'polygons', polygons: [outline] } })
+    expect(specs.at(-1)).toMatchObject({ shape: { kind: 'polygons', polygons: [outline], holes: [[{ x: 0.6, y: 0.6 }, { x: 0.9, y: 0.6 }, { x: 0.9, y: 0.9 }]] } })
 
     expect((await harness.call('mask_layer', { target: 'E1', source: 'current', invert: true })).result.summary).toBe('已把 E1 的蒙版反相')
     expect(specs.at(-1)).toMatchObject({ shape: { kind: 'current' }, invert: true })

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createScene, type SceneElement } from '../../src/domain'
-import { rectMask } from '../../src/shared/mask-raster'
+import { invertMask, rectMask } from '../../src/shared/mask-raster'
 import { selectionAnnotation } from '../../src/renderer/src/selection/selection-annotation'
 import { setSelectionMask } from '../../src/renderer/src/selection/selection-store'
 import { resetWorkspace, useWorkspaceStore } from '../../src/renderer/src/store/workspace-store'
@@ -41,5 +41,17 @@ describe('the selection told to the Agent', () => {
     // With the photo moved away, nothing is under the selection.
     useWorkspaceStore.setState((state) => ({ scene: { ...state.scene, elements: [photo({ x: 0.9, y: 0.9, width: 0.1, height: 0.1, rotation: 0 })] } }))
     expect(selectionAnnotation()!.targetElementId).toBeNull()
+  })
+
+  it('sends a hole in the selection as a part to keep as it is', () => {
+    const base = createScene({ id: '20000000-0000-4000-8000-000000000001', projectId: '20000000-0000-4000-8000-000000000002', now: '2026-10-25T00:00:00.000Z' })
+    resetWorkspace({ ...base, canvas: { ...base.canvas, outputWidth: 200, outputHeight: 100 }, elements: [] })
+    // An inverted rectangle: everything but the middle.
+    setSelectionMask(invertMask(rectMask(200, 100, { x: 60, y: 30, width: 80, height: 40 })))
+    const regions = selectionAnnotation()!.regions!
+    expect(regions.map((region) => region.mode)).toEqual(['edit', 'protect'])
+    const xs = regions[1]!.points.map((point) => point.x * 200)
+    expect(Math.abs(Math.min(...xs) - 60)).toBeLessThanOrEqual(1)
+    expect(Math.abs(Math.max(...xs) - 140)).toBeLessThanOrEqual(1)
   })
 })

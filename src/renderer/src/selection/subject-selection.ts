@@ -3,7 +3,7 @@ import { showAppNotice } from '../components/app-notice'
 import { ensureSubjectModel } from '../components/subject-model-store'
 import { setObjectSelector } from './selection-gestures'
 import { samplePixels, sampledLayer, type SampledPixels } from './selection-sampling'
-import { currentSelection, setSelectionMask, useSelectionStore } from './selection-store'
+import { currentSelection, selectionCanvasStamp, setSelectionMask, useSelectionStore } from './selection-store'
 import { magicTouchAt } from './magic-touch'
 
 /*
@@ -94,6 +94,7 @@ export async function selectSubject(): Promise<boolean> {
   if (running) return false
   if (!await ensureSubjectModel()) return false
   running = true
+  const stamp = selectionCanvasStamp()
   try {
     const layer = sampledLayer()
     const pixels = await samplePixels(layer === null)
@@ -107,6 +108,8 @@ export async function selectSubject(): Promise<boolean> {
       return false
     }
     const found = await subjectIn(pixels, area)
+    // Another project opened, or the canvas changed size, while the model ran.
+    if (stamp !== selectionCanvasStamp()) return false
     if (found === null) {
       showAppNotice('没有找到主体。')
       return false
