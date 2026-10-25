@@ -1151,9 +1151,11 @@ export class GenerationRuntime {
   /** Encodes pixels the renderer drew as a PNG asset, off the renderer's thread; no pixels makes a transparent image. */
   async importPixels(input: PixelImportInput): Promise<ImportedAsset> {
     this.#assertRequestedProject(input.projectId)
-    const image = input.rgba === undefined
-      ? sharp({ create: { width: input.width, height: input.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
-      : sharp(input.rgba, { raw: { width: input.width, height: input.height, channels: 4 } })
+    const image = input.gray !== undefined
+      ? sharp(input.gray, { raw: { width: input.width, height: input.height, channels: 1 } })
+      : input.rgba === undefined
+        ? sharp({ create: { width: input.width, height: input.height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+        : sharp(input.rgba, { raw: { width: input.width, height: input.height, channels: 4 } })
     const bytes = await image.png().toBuffer()
     return this.importAsset({ projectId: input.projectId, name: input.name, mimeType: 'image/png', bytes: new Uint8Array(bytes) })
   }
@@ -1196,7 +1198,13 @@ export class GenerationRuntime {
     const element = this.#sceneService.state().scene.elements.find((candidate) => candidate.id === input.elementId)
     if (element?.type !== 'image' || element.paint === undefined || element.paint.length === 0) return null
     const path = (await owner.workspace.assets.resolveAsset(element.assetId)).filePath
-    const bytes = await paintedImageBytes(path, element.paint)
+    const bytes = await paintedImageBytes(path, element.paint, async (assetId) => {
+      try {
+        return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+      } catch {
+        return null
+      }
+    })
     const asset = await this.#importDerivedImage(owner, bytes, 'imported', element.id)
     return { assetId: asset.id, paintIds: element.paint.map((op) => op.id) }
   }

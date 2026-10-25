@@ -1,5 +1,6 @@
 import type { SceneElement } from '../../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../../shared/layer-effects'
+import { imageDrawRect } from '../../../shared/layer-space'
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
 
@@ -11,25 +12,7 @@ export interface EffectedImage {
 }
 
 /** Where the cropped image lands in a box of this size, by its fit; cover overflows the box and is clipped. */
-export function drawRect(image: { readonly width: number; readonly height: number }, element: ImageElement, width: number, height: number) {
-  const crop = {
-    x: image.width * element.crop.x,
-    y: image.height * element.crop.y,
-    width: image.width * element.crop.width,
-    height: image.height * element.crop.height
-  }
-  const sourceRatio = crop.width / crop.height
-  const targetRatio = width / height
-  let draw = { x: 0, y: 0, width, height }
-  if (element.fit !== 'fill') {
-    const contain = element.fit === 'contain'
-    const useWidth = contain ? sourceRatio > targetRatio : sourceRatio < targetRatio
-    draw = useWidth
-      ? { x: 0, y: (height - width / sourceRatio) / 2, width, height: width / sourceRatio }
-      : { x: (width - height * sourceRatio) / 2, y: 0, width: height * sourceRatio, height }
-  }
-  return { crop, draw }
-}
+export const drawRect = (image: { readonly width: number; readonly height: number }, element: ImageElement, width: number, height: number) => imageDrawRect(image, element, width, height)
 
 function canvas(width: number, height: number): { readonly canvas: HTMLCanvasElement; readonly context: CanvasRenderingContext2D } | null {
   const element = document.createElement('canvas')

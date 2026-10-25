@@ -1,18 +1,35 @@
-import type { PaintOp, SceneElement } from '../../../domain'
+import type { LayerMask, PaintOp, SceneElement } from '../../../domain'
+import { boxLayerSpace, canvasToLayer, imageLayerSpace, type LayerSpace } from '../../../shared/layer-space'
+import { maskGray, paintClipIds } from '../../../shared/paint-ops'
 import { showAppNotice } from '../components/app-notice'
+import { selectionClip, type SelectionClip } from '../selection/selection-clip'
+import { useSelectionStore } from '../selection/selection-store'
 import { useWorkspaceStore, type PaintTool } from '../store/workspace-store'
-import { drawRect } from './image-effects'
-import { applyLiveOp, beginLiveStroke, discardPixelLayer, layerSourceImage, refreshPixelLayer, type LiveStroke } from './pixel-layers'
+import { clipLookup } from './asset-pixels'
+import { useMaskState } from './mask-state'
+import {
+  applyLiveMaskOp,
+  applyLiveOp,
+  beginLiveMaskStroke,
+  beginLiveStroke,
+  discardPixelLayer,
+  layerSourceImage,
+  maskSize,
+  refreshPixelLayer,
+  type LiveStroke
+} from './pixel-layers'
 
 /*
  * Painting with the brush, eraser, paint bucket and gradient on the
- * selected image layer, as in Photoshop. Pointer positions become the
- * layer's own pixel coordinates (through its place, rotation, crop and
- * fit); each stroke, fill or gradient is drawn into the layer's canvas at
- * once and then recorded on the layer as one undoable operation.
+ * selected image layer, or on the selected layer's mask, as in Photoshop.
+ * Pointer positions become the target's own pixel coordinates (through the
+ * layer's place, rotation, crop and fit); each stroke, fill or gradient is
+ * drawn at once and then recorded on the layer as one undoable operation.
+ * With a selection, every operation stays inside it.
  */
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
+type MaskableElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
 
 /** After this many operations the layer's paint is baked into a new asset. */
 const BAKE_AFTER = 100
@@ -30,37 +47,55 @@ export interface PaintGeometry {
 export interface LayerPoint {
   readonly x: number
   readonly y: number
-  /** Layer pixels per canvas pixel, for brush sizes set in canvas pixels. */
+  /** Target pixels per canvas pixel, for brush sizes set in canvas pixels. */
   readonly scale: number
 }
 
-/** The layer pixel under a point on the stage, through the layer's place, rotation, crop and fit. */
-export function stageToLayer(element: ImageElement, image: { readonly width: number; readonly height: number }, geometry: PaintGeometry, stageX: number, stageY: number): LayerPoint {
-  const ox = (stageX - geometry.origin.x) / geometry.zoom
-  const oy = (stageY - geometry.origin.y) / geometry.zoom
-  const boxWidth = element.transform.width * geometry.canvasWidth
-  const boxHeight = element.transform.height * geometry.canvasHeight
-  const dx = ox - element.transform.x * geometry.canvasWidth
-  const dy = oy - element.transform.y * geometry.canvasHeight
-  const angle = element.transform.rotation * Math.PI / 180
-  const lx = dx * Math.cos(angle) + dy * Math.sin(angle)
-  const ly = -dx * Math.sin(angle) + dy * Math.cos(angle)
-  const { crop, draw } = drawRect(image, element, boxWidth, boxHeight)
-  const scale = crop.width / draw.width
-  return { x: crop.x + (lx - draw.x) * scale, y: crop.y + (ly - draw.y) * (crop.height / draw.height), scale }
+/** What a painting tool works on: an image layer's pixels, or a layer's mask. */
+export interface PaintTarget {
+  readonly element: MaskableElement
+  readonly onMask: boolean
+  readonly space: LayerSpace
 }
 
-/** The single selected image layer that can take paint, or why there is none, said once. */
-export function paintTarget(): ImageElement | null {
+function canvasSize(): { readonly width: number; readonly height: number } {
+  const { outputWidth, outputHeight } = useWorkspaceStore.getState().scene.canvas
+  return { width: outputWidth, height: outputHeight }
+}
+
+function spaceFor(element: MaskableElement, onMask: boolean): LayerSpace | null {
+  if (element.type === 'image') {
+    const image = layerSourceImage(element.id)
+    return image === null ? null : imageLayerSpace(element, { width: image.naturalWidth, height: image.naturalHeight }, canvasSize())
+  }
+  const size = onMask ? maskSize(element.id) : null
+  return size === null ? null : boxLayerSpace(element, size, canvasSize())
+}
+
+/** The target pixel under a point on the stage. */
+export function stageToTarget(target: PaintTarget, geometry: PaintGeometry, stageX: number, stageY: number): LayerPoint {
+  const back = canvasToLayer(target.space)
+  const [x, y] = back.at((stageX - geometry.origin.x) / geometry.zoom, (stageY - geometry.origin.y) / geometry.zoom)
+  return { x, y, scale: back.scale }
+}
+
+/** The single selected layer that can take paint (or whose mask is being edited), or why there is none, said once. */
+export function paintTarget(): PaintTarget | null {
   const { scene, selectedIds } = useWorkspaceStore.getState()
   const element = selectedIds.length === 1 ? scene.elements.find((candidate) => candidate.id === selectedIds[0]) : undefined
   const refuse = (message: string): null => { showAppNotice(message); return null }
   if (element === undefined) return refuse('先在图层里选中一个图片图层，或按 Ctrl+Shift+N 新建空白图层，再开始画。')
-  if (element.type === 'text' || element.type === 'shape') return refuse(`「${element.name}」是${element.type === 'text' ? '文字' : '形状'}图层，要先栅格化（图层右键菜单）才能画。`)
-  if (element.type !== 'image') return refuse('只能在图片图层上画。选中一个图片图层，或按 Ctrl+Shift+N 新建空白图层。')
-  if (element.locked) return refuse(`「${element.name}」已锁定，解锁后才能画。`)
-  if (!element.visible) return refuse(`「${element.name}」是隐藏的，显示后才能画。`)
-  return element
+  const editingMask = useMaskState.getState().editing === element.id && (element.type === 'image' || element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
+  if (!editingMask) {
+    if (element.type === 'text' || element.type === 'shape') return refuse(`「${element.name}」是${element.type === 'text' ? '文字' : '形状'}图层，要先栅格化（图层右键菜单）才能画；也可以给它加蒙版，在蒙版上画。`)
+    if (element.type !== 'image') return refuse('只能在图片图层上画。选中一个图片图层，或按 Ctrl+Shift+N 新建空白图层。')
+  }
+  const target = element as MaskableElement
+  if (target.locked) return refuse(`「${target.name}」已锁定，解锁后才能画。`)
+  if (!target.visible) return refuse(`「${target.name}」是隐藏的，显示后才能画。`)
+  const space = spaceFor(target, editingMask)
+  if (space === null) return refuse(`「${target.name}」还没画好，稍后再试。`)
+  return { element: target, onMask: editingMask, space }
 }
 
 const baking = new Set<string>()
@@ -84,18 +119,87 @@ async function bakeIfLong(elementId: string): Promise<void> {
   }
 }
 
-async function record(element: ImageElement, op: PaintOp, summary: string): Promise<boolean> {
-  const current = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === element.id)
-  const paint = current?.type === 'image' ? current.paint ?? [] : element.paint ?? []
-  const saved = await useWorkspaceStore.getState().updateElement(element.id, { paint: [...paint, op] }, summary)
-  if (!saved) discardPixelLayer(element.id)
-  else void bakeIfLong(element.id)
+function currentElement(id: string): MaskableElement | null {
+  const element = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === id)
+  return element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape') ? element : null
+}
+
+/** Records the operation once its clip, if any, has been imported; a clip that fails to import drops the operation. */
+async function record(target: PaintTarget, op: PaintOp, clip: SelectionClip, summary: string): Promise<boolean> {
+  let recorded = op
+  if (clip.kind === 'clip') {
+    const clipId = await clip.assetId
+    if (clipId === null) {
+      discardPixelLayer(target.element.id)
+      showAppNotice('选区没有存好，这一笔没有记下。', 'problem')
+      return false
+    }
+    recorded = { ...op, clip: clipId }
+  }
+  const current = currentElement(target.element.id) ?? target.element
+  let saved: boolean
+  if (target.onMask) {
+    const mask = current.mask ?? target.element.mask
+    if (mask === null || mask === undefined) { discardPixelLayer(target.element.id); return false }
+    const next: LayerMask = { ...mask, paint: [...mask.paint ?? [], recorded] }
+    saved = await useWorkspaceStore.getState().updateElement(target.element.id, { mask: next }, `${summary}（蒙版）`)
+  } else {
+    const paint = current.type === 'image' ? current.paint ?? [] : []
+    saved = await useWorkspaceStore.getState().updateElement(target.element.id, { paint: [...paint, recorded] }, summary)
+  }
+  if (!saved) discardPixelLayer(target.element.id)
+  else if (!target.onMask) void bakeIfLong(target.element.id)
   return saved
 }
 
 function newId(): string {
   return globalThis.crypto.randomUUID()
 }
+
+/** The selection for this target, or null (said once) when it misses the layer. */
+function clipFor(target: PaintTarget): SelectionClip | null {
+  const clip = selectionClip(target.element, target.space, target.onMask ? 'mask' : 'layer')
+  if (clip.kind === 'outside') {
+    showAppNotice(`选区不在「${target.element.name}」上，画不到。`)
+    return null
+  }
+  return clip
+}
+
+function clipPixels(clip: SelectionClip): Uint8Array | null {
+  return clip.kind === 'clip' ? clip.pixels : null
+}
+
+/** The colours a tool paints with: on a mask, the gray of each colour's luminosity. */
+function paintColor(target: PaintTarget, color: string): string {
+  return target.onMask ? maskGray(color) : color.toUpperCase()
+}
+
+/**
+ * A one-shot operation on the target, shown at once when the layer has been
+ * drawn, then recorded. Without a selection it is recorded either way and
+ * the layer replays it when it draws.
+ */
+function applyOnce(target: PaintTarget, op: PaintOp, clip: SelectionClip, summary: string, redraw: () => void): Promise<boolean> {
+  const pixels = clipPixels(clip)
+  // The live operation finds its clip under a stand-in id until the asset's own id is known.
+  const live: PaintOp = pixels === null ? op : { ...op, clip: op.id }
+  let applied: boolean
+  if (target.onMask) {
+    applied = applyLiveMaskOp(target.element.id, live, pixels)
+  } else {
+    const element = target.element as ImageElement
+    const image = layerSourceImage(element.id)
+    const clips = clipLookup(paintClipIds(element.paint), { width: target.space.width, height: target.space.height })
+    applied = image !== null && clips !== null && applyLiveOp(element.id, image, element.paint ?? [], clips, live, pixels)
+  }
+  if (!applied && clip.kind !== 'none') return Promise.resolve(false)
+  if (applied) redraw()
+  return record(target, op, clip, summary)
+}
+
+/** Stands in for a layer not drawn yet, when nothing is selected and no pixels need mapping. */
+const UNPLACED: LayerSpace = { width: 1, height: 1, toCanvas: (x, y) => [x, y] }
 
 export interface PaintSession {
   move(stageX: number, stageY: number, pressure: number): void
@@ -104,13 +208,13 @@ export interface PaintSession {
 }
 
 /**
- * Starts a brush or eraser stroke at a stage point. lastPoint, in layer
+ * Starts a brush or eraser stroke at a stage point. lastPoint, in target
  * pixels, is where the previous stroke on this layer ended: with Shift the
  * stroke runs straight from there, as in Photoshop.
  */
 export function startStroke(
   tool: 'brush' | 'eraser',
-  element: ImageElement,
+  target: PaintTarget,
   geometry: PaintGeometry,
   stageX: number,
   stageY: number,
@@ -119,33 +223,42 @@ export function startStroke(
   redraw: () => void,
   onEnd: (point: { readonly x: number; readonly y: number }) => void
 ): PaintSession | null {
-  const image = layerSourceImage(element.id)
-  if (image === null) return null
+  const clip = clipFor(target)
+  if (clip === null) return null
   const { paintSettings, foregroundColor, backgroundColor } = useWorkspaceStore.getState()
   const settings = paintSettings[tool]
-  const start = stageToLayer(element, { width: image.naturalWidth, height: image.naturalHeight }, geometry, stageX, stageY)
+  const start = stageToTarget(target, geometry, stageX, stageY)
+  const element = target.element
   const brush = {
     kind: 'stroke' as const,
     tool,
-    // An eraser on a transparency-locked layer paints the background colour, as in Photoshop.
-    color: (tool === 'brush' ? foregroundColor : backgroundColor).toUpperCase(),
+    // An eraser on a transparency-locked layer, or on a mask, paints the background colour, as in Photoshop.
+    color: paintColor(target, tool === 'brush' ? foregroundColor : backgroundColor),
     size: Math.max(0.5, Math.min(5000, round(settings.size * start.scale))),
     hardness: settings.hardness,
     opacity: settings.opacity,
     flow: settings.flow,
     pressure: pressure !== null,
-    lockAlpha: element.transparencyLocked === true
+    lockAlpha: target.onMask || (element.type === 'image' && element.transparencyLocked === true)
   }
-  const live = beginLiveStroke(element.id, image, element.paint ?? [], brush)
-  if (live === null) return null
-  const stroke: LiveStroke = live.stroke
+  let stroke: LiveStroke | null
+  if (target.onMask) {
+    stroke = beginLiveMaskStroke(element.id, brush, clipPixels(clip))
+  } else {
+    const image = layerSourceImage(element.id)
+    const ops = element.type === 'image' ? element.paint ?? [] : []
+    const clips = clipLookup(paintClipIds(ops), { width: target.space.width, height: target.space.height })
+    stroke = image === null || clips === null ? null : beginLiveStroke(element.id, image, ops, clips, brush, clipPixels(clip))
+  }
+  if (stroke === null) return null
+  const live = stroke
   const points: number[] = []
-  const hasEffects = element.effects !== undefined
+  const redrawsCopy = (element.type === 'image' && element.effects !== undefined) || element.type !== 'image'
   let frame: number | null = null
   const show = (): void => {
     redraw()
-    // A layer with effects is shown from a copy, which is redrawn at most once a frame.
-    if (hasEffects && frame === null) frame = requestAnimationFrame(() => { frame = null; refreshPixelLayer(element.id) })
+    // A layer shown from a copy (effects, or a masked text or shape) is redrawn at most once a frame.
+    if (redrawsCopy && frame === null) frame = requestAnimationFrame(() => { frame = null; refreshPixelLayer(element.id) })
   }
   const add = (x: number, y: number, p: number): void => {
     if (points.length >= 60_000) return
@@ -153,7 +266,7 @@ export function startStroke(
     const py = round(y)
     const pp = round(Math.max(0, Math.min(1, p)))
     points.push(px, py, pp)
-    if (stroke.addPoint(px, py, pp)) show()
+    if (live.addPoint(px, py, pp)) show()
   }
   if (lastPoint !== null) add(lastPoint.x, lastPoint.y, pressure ?? 1)
   add(start.x, start.y, pressure ?? 1)
@@ -161,7 +274,7 @@ export function startStroke(
   return {
     move: (x, y, p) => {
       if (ended) return
-      const point = stageToLayer(element, { width: image.naturalWidth, height: image.naturalHeight }, geometry, x, y)
+      const point = stageToTarget(target, geometry, x, y)
       add(point.x, point.y, pressure === null ? 1 : p)
     },
     end: () => {
@@ -169,57 +282,86 @@ export function startStroke(
       ended = true
       if (frame !== null) cancelAnimationFrame(frame)
       const op: PaintOp = { ...brush, id: newId(), points }
-      stroke.commit(op)
+      live.commit(op)
       onEnd({ x: points[points.length - 3]!, y: points[points.length - 2]! })
-      void record(element, op, tool === 'brush' ? '画笔' : '橡皮擦')
+      void record(target, op, clip, tool === 'brush' ? '画笔' : '橡皮擦')
     },
     cancel: () => {
       if (ended) return
       ended = true
-      stroke.cancel()
+      live.cancel()
     }
   }
 }
 
 /** The paint bucket at a stage point. */
-export function fillAt(element: ImageElement, geometry: PaintGeometry, stageX: number, stageY: number, redraw: () => void): void {
-  const image = layerSourceImage(element.id)
-  if (image === null) return
+export function fillAt(target: PaintTarget, geometry: PaintGeometry, stageX: number, stageY: number, redraw: () => void): void {
+  const clip = clipFor(target)
+  if (clip === null) return
   const { paintSettings, foregroundColor } = useWorkspaceStore.getState()
-  const point = stageToLayer(element, { width: image.naturalWidth, height: image.naturalHeight }, geometry, stageX, stageY)
+  const point = stageToTarget(target, geometry, stageX, stageY)
   const op: PaintOp = {
-    id: newId(), kind: 'fill', x: round(point.x), y: round(point.y), color: foregroundColor.toUpperCase(),
+    id: newId(), kind: 'fill', x: round(point.x), y: round(point.y), color: paintColor(target, foregroundColor),
     tolerance: paintSettings.bucket.tolerance, contiguous: paintSettings.bucket.contiguous, opacity: paintSettings.bucket.opacity,
-    lockAlpha: element.transparencyLocked === true
+    lockAlpha: target.onMask || (target.element.type === 'image' && target.element.transparencyLocked === true)
   }
-  if (applyLiveOp(element.id, image, element.paint ?? [], op) === null) return
-  redraw()
-  void record(element, op, '油漆桶')
+  void applyOnce(target, op, clip, '油漆桶', redraw)
 }
 
 /** A gradient from one stage point to another, foreground to background. */
-export function gradientBetween(element: ImageElement, geometry: PaintGeometry, from: { readonly x: number; readonly y: number }, to: { readonly x: number; readonly y: number }, redraw: () => void): void {
-  const image = layerSourceImage(element.id)
-  if (image === null) return
+export function gradientBetween(target: PaintTarget, geometry: PaintGeometry, from: { readonly x: number; readonly y: number }, to: { readonly x: number; readonly y: number }, redraw: () => void): void {
+  const clip = clipFor(target)
+  if (clip === null) return
   const { paintSettings, foregroundColor, backgroundColor } = useWorkspaceStore.getState()
-  const size = { width: image.naturalWidth, height: image.naturalHeight }
-  const start = stageToLayer(element, size, geometry, from.x, from.y)
-  const end = stageToLayer(element, size, geometry, to.x, to.y)
+  const start = stageToTarget(target, geometry, from.x, from.y)
+  const end = stageToTarget(target, geometry, to.x, to.y)
   const op: PaintOp = {
     id: newId(), kind: 'gradient', shape: paintSettings.gradient.shape,
     from: [round(start.x), round(start.y)], to: [round(end.x), round(end.y)],
-    colors: [foregroundColor.toUpperCase(), backgroundColor.toUpperCase()], opacity: paintSettings.gradient.opacity,
-    lockAlpha: element.transparencyLocked === true
+    colors: [paintColor(target, foregroundColor), paintColor(target, backgroundColor)], opacity: paintSettings.gradient.opacity,
+    lockAlpha: target.onMask || (target.element.type === 'image' && target.element.transparencyLocked === true)
   }
-  if (applyLiveOp(element.id, image, element.paint ?? [], op) === null) return
-  redraw()
-  void record(element, op, '渐变')
+  void applyOnce(target, op, clip, '渐变', redraw)
 }
 
-/** Photoshop's Alt or Ctrl+Backspace on an image layer: the whole layer filled with a colour. */
-export function fillLayer(element: ImageElement, color: string, summary: string): Promise<boolean> {
-  const op: PaintOp = { id: newId(), kind: 'fill-all', color: color.toUpperCase(), opacity: 1, lockAlpha: element.transparencyLocked === true }
-  return record(element, op, summary)
+/** A target for an action on the selected layer (fill, clear), without a pointer; null when it has no pixels to act on. */
+function actionTarget(element: SceneElement): PaintTarget | null {
+  const onMask = useMaskState.getState().editing === element.id
+  if (!onMask && element.type !== 'image') return null
+  if (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape') return null
+  const space = spaceFor(element, onMask)
+  if (space !== null) return { element, onMask, space }
+  // Only a selection needs the layer placed; without one the operation applies to every pixel.
+  return useSelectionStore.getState().mask === null && !onMask ? { element, onMask, space: UNPLACED } : null
+}
+
+/**
+ * Photoshop's Alt or Ctrl+Backspace and Shift+F5 on an image layer or its
+ * mask: filled with a colour, inside the selection when there is one.
+ */
+export function fillLayer(element: SceneElement, color: string, summary: string, opacity = 1): Promise<boolean> {
+  const target = actionTarget(element)
+  if (target === null) return Promise.resolve(false)
+  const clip = clipFor(target)
+  if (clip === null) return Promise.resolve(false)
+  const op: PaintOp = { id: newId(), kind: 'fill-all', color: paintColor(target, color), opacity, lockAlpha: target.onMask || (element.type === 'image' && element.transparencyLocked === true) }
+  return applyOnce(target, op, clip, summary, () => undefined)
+}
+
+/**
+ * Photoshop's Delete with a selection: the selected pixels cleared. On a
+ * transparency-locked layer, or a mask, they fill with the background
+ * colour instead, as Photoshop does.
+ */
+export function clearSelected(element: SceneElement): Promise<boolean> {
+  const target = actionTarget(element)
+  if (target === null) return Promise.resolve(false)
+  if (target.onMask || (element.type === 'image' && element.transparencyLocked === true)) {
+    return fillLayer(element, useWorkspaceStore.getState().backgroundColor, '清除')
+  }
+  const clip = clipFor(target)
+  if (clip === null) return Promise.resolve(false)
+  return applyOnce(target, { id: newId(), kind: 'clear' }, clip, '清除', () => undefined)
 }
 
 /** Gradient drags snap to 45° steps with Shift, as in Photoshop. */

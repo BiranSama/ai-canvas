@@ -78,15 +78,23 @@ const unitSchema = finiteNumber.min(0).max(1)
 const paintPointSchema = z.tuple([finiteNumber, finiteNumber])
 
 /**
+ * The selection an operation was limited to: a grayscale asset in the same
+ * pixel space, white where it paints fully and black where it leaves the
+ * pixels alone. One image serves every operation made in the same selection.
+ */
+const paintClip = { clip: idSchema.optional() }
+
+/**
  * One thing done to an image layer's pixels, in the layer's own pixel space
- * (the asset's natural size). The asset is never changed; the operations
- * are replayed over it in order by the shared rasterizer, which draws the
- * canvas, the export and the references alike. lockAlpha keeps each
- * pixel's transparency, as Photoshop's 锁定透明像素 does.
+ * (the asset's natural size), or to a layer mask's. The asset is never
+ * changed; the operations are replayed over it in order by the shared
+ * rasterizer, which draws the canvas, the export and the references alike.
+ * lockAlpha keeps each pixel's transparency, as Photoshop's 锁定透明像素 does.
  */
 export const paintOpSchema = z.discriminatedUnion('kind', [
   z.object({
     id: idSchema,
+    ...paintClip,
     kind: z.literal('stroke'),
     tool: z.enum(['brush', 'eraser']),
     color: hexColorSchema,
@@ -102,6 +110,7 @@ export const paintOpSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     id: idSchema,
+    ...paintClip,
     kind: z.literal('fill'),
     x: finiteNumber,
     y: finiteNumber,
@@ -113,6 +122,7 @@ export const paintOpSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     id: idSchema,
+    ...paintClip,
     kind: z.literal('fill-all'),
     color: hexColorSchema,
     opacity: unitSchema,
@@ -120,6 +130,7 @@ export const paintOpSchema = z.discriminatedUnion('kind', [
   }),
   z.object({
     id: idSchema,
+    ...paintClip,
     kind: z.literal('gradient'),
     shape: z.enum(['linear', 'radial']),
     from: paintPointSchema,
@@ -127,10 +138,29 @@ export const paintOpSchema = z.discriminatedUnion('kind', [
     colors: z.tuple([hexColorSchema, hexColorSchema]),
     opacity: unitSchema,
     lockAlpha: z.boolean()
+  }),
+  /** Photoshop's Delete with a selection: the selected pixels made transparent. */
+  z.object({
+    id: idSchema,
+    ...paintClip,
+    kind: z.literal('clear')
   })
 ])
 
 export const MAX_PAINT_OPS = 500
+
+/**
+ * Photoshop's layer mask: a grayscale asset, white showing the layer and
+ * black hiding it, plus what has been painted on it. For an image layer it
+ * is in the layer's own pixels; for text and shapes it stretches over the
+ * layer's box. Either way it moves and scales with the layer.
+ */
+export const layerMaskSchema = z.object({
+  assetId: idSchema,
+  paint: z.array(paintOpSchema).max(MAX_PAINT_OPS).optional(),
+  /** Shift+click on the mask's thumbnail turns it off without losing it. */
+  enabled: z.boolean().default(true)
+})
 
 export const imageElementSchema = z.object({
   ...elementBaseShape,
@@ -149,7 +179,8 @@ export const imageElementSchema = z.object({
   /** What has been painted on the layer, oldest first. */
   paint: z.array(paintOpSchema).max(MAX_PAINT_OPS).optional(),
   /** Painting keeps each pixel's transparency (Photoshop's 锁定透明像素). */
-  transparencyLocked: z.boolean().optional()
+  transparencyLocked: z.boolean().optional(),
+  mask: layerMaskSchema.nullable().optional()
 })
 
 export const textElementSchema = z.object({
@@ -173,7 +204,8 @@ export const textElementSchema = z.object({
   visualWeight: textVisualWeightSchema.optional(),
   styleDescription: z.string().max(4000),
   renderStrategy: z.enum(['standard', 'ai-material', 'ai-complete', 'editable-overlay']),
-  resultAssetId: idSchema.nullable()
+  resultAssetId: idSchema.nullable(),
+  mask: layerMaskSchema.nullable().optional()
 })
 
 export const sketchStrokeSchema = z.object({
@@ -202,7 +234,8 @@ export const shapeElementSchema = z.object({
   stroke: colorSchema.nullable(),
   strokeWidth: finiteNumber.min(0).max(1),
   cornerRadius: finiteNumber.min(0).max(0.5).default(0),
-  role: z.enum(['final', 'placeholder'])
+  role: z.enum(['final', 'placeholder']),
+  mask: layerMaskSchema.nullable().optional()
 })
 
 export const placeholderElementSchema = z.object({
@@ -395,5 +428,6 @@ export type SceneRelation = z.infer<typeof sceneRelationSchema>
 export type BlendMode = z.infer<typeof blendModeSchema>
 export type ImageEffects = z.infer<typeof imageEffectsSchema>
 export type PaintOp = z.infer<typeof paintOpSchema>
+export type LayerMask = z.infer<typeof layerMaskSchema>
 export type NormalizedTransform = z.infer<typeof normalizedTransformSchema>
 export type Canvas = z.infer<typeof canvasSchema>

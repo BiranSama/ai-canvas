@@ -24,11 +24,72 @@ import { beginProjectHydration, endProjectHydration, projectGeneration } from '.
 
 export type WorkspaceView = 'conversation' | 'canvas' | 'generate'
 export type CanvasTool = 'select' | 'hand' | 'image' | 'text' | 'sketch' | 'shape' | 'placeholder' | 'light' | 'mask' | 'eyedropper' | 'brush' | 'eraser' | 'bucket' | 'gradient'
+  | 'marquee-rect' | 'marquee-ellipse' | 'lasso' | 'lasso-polygon' | 'object-select' | 'magic-wand'
 
 export type PaintTool = 'brush' | 'eraser' | 'bucket' | 'gradient'
+export type SelectionTool = 'marquee-rect' | 'marquee-ellipse' | 'lasso' | 'lasso-polygon' | 'object-select' | 'magic-wand'
 
 export function isPaintTool(tool: CanvasTool): tool is PaintTool {
   return tool === 'brush' || tool === 'eraser' || tool === 'bucket' || tool === 'gradient'
+}
+
+export function isSelectionTool(tool: CanvasTool): tool is SelectionTool {
+  return tool === 'marquee-rect' || tool === 'marquee-ellipse' || tool === 'lasso' || tool === 'lasso-polygon' || tool === 'object-select' || tool === 'magic-wand'
+}
+
+/** The tool each shared toolbar slot last held, which its key or slot brings back. */
+export interface ToolMemory {
+  readonly fill: 'bucket' | 'gradient'
+  readonly annotate: 'sketch' | 'placeholder' | 'light' | 'mask'
+  readonly marquee: 'marquee-rect' | 'marquee-ellipse'
+  readonly lasso: 'lasso' | 'lasso-polygon'
+  readonly wand: 'object-select' | 'magic-wand'
+}
+
+const TOOL_SLOTS: ReadonlyArray<readonly [keyof ToolMemory, readonly CanvasTool[]]> = [
+  ['fill', ['bucket', 'gradient']],
+  ['annotate', ['sketch', 'placeholder', 'light', 'mask']],
+  ['marquee', ['marquee-rect', 'marquee-ellipse']],
+  ['lasso', ['lasso', 'lasso-polygon']],
+  ['wand', ['object-select', 'magic-wand']]
+]
+
+function rememberTool(memory: ToolMemory, tool: CanvasTool): ToolMemory {
+  const slot = TOOL_SLOTS.find(([, tools]) => tools.includes(tool))
+  return slot === undefined ? memory : { ...memory, [slot[0]]: tool }
+}
+
+/*
+ * What Ctrl+Z steps back through, in order: scene batches, which Main keeps,
+ * and selection changes, which stay in the Renderer, as Photoshop's history
+ * holds both. A step is noted when it happens; undo takes the newest.
+ */
+type HistoryStep = 'scene' | 'selection'
+const undoSteps: HistoryStep[] = []
+const redoSteps: HistoryStep[] = []
+/** Batches this window sent, so their change events are not counted twice. */
+const ownBatchIds = new Set<string>()
+const MAX_HISTORY_STEPS = 500
+let selectionHistory: { undo(): boolean; redo(): boolean } | null = null
+
+export function registerSelectionHistory(history: { undo(): boolean; redo(): boolean } | null): void {
+  selectionHistory = history
+}
+
+function noteStep(step: HistoryStep): void {
+  undoSteps.push(step)
+  if (undoSteps.length > MAX_HISTORY_STEPS) undoSteps.splice(0, undoSteps.length - MAX_HISTORY_STEPS)
+  redoSteps.length = 0
+}
+
+/** A selection change went into the selection's own history; Ctrl+Z reaches it in turn. */
+export function noteSelectionStep(): void {
+  noteStep('selection')
+}
+
+function clearHistorySteps(): void {
+  undoSteps.length = 0
+  redoSteps.length = 0
 }
 
 /** Each painting tool keeps its own options, as in Photoshop. Sizes are in canvas pixels. */
@@ -70,8 +131,7 @@ interface WorkspaceState {
   foregroundColor: string
   backgroundColor: string
   paintSettings: PaintSettings
-  /** The tool each shared toolbar slot last held, which its key or slot brings back. */
-  toolMemory: { readonly fill: 'bucket' | 'gradient'; readonly annotate: 'sketch' | 'placeholder' | 'light' }
+  toolMemory: ToolMemory
   inspectorOpen: boolean
   inspectorTab: 'layers' | 'properties'
   zoom: number
@@ -253,6 +313,8 @@ function bindSceneEvents(): void {
   unsubscribeSceneEvents = desktop.onSceneChanged((event: SceneChangedEvent) => {
     const current = useWorkspaceStore.getState()
     if (event.projectId !== current.scene.projectId || event.state.sequence <= current.sceneSequence) return
+    // A batch made elsewhere (the Agent, a placed result) is the newest step for Ctrl+Z; this window's own are noted when they return.
+    if (event.action === 'execute' && event.batch !== null && !ownBatchIds.has(event.batch.id)) noteStep('scene')
     applyAuthorityState(event.state)
   })
 }
@@ -270,7 +332,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     foregroundColor: DEFAULT_FOREGROUND_COLOR,
     backgroundColor: DEFAULT_BACKGROUND_COLOR,
     paintSettings: DEFAULT_PAINT_SETTINGS,
-    toolMemory: { fill: 'bucket', annotate: 'sketch' },
+    toolMemory: { fill: 'bucket', annotate: 'sketch', marquee: 'marquee-rect', lasso: 'lasso', wand: 'object-select' },
     inspectorOpen: true,
     inspectorTab: 'layers',
     zoom: 1,
@@ -284,14 +346,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     workContextProblem: null,
     setActiveView: (activeView) => set({ activeView }),
     setProjectName: (projectName) => set({ projectName }),
-    setActiveTool: (activeTool) => set((state) => ({
-      activeTool,
-      toolMemory: activeTool === 'bucket' || activeTool === 'gradient'
-        ? { ...state.toolMemory, fill: activeTool }
-        : activeTool === 'sketch' || activeTool === 'placeholder' || activeTool === 'light'
-          ? { ...state.toolMemory, annotate: activeTool }
-          : state.toolMemory
-    })),
+    setActiveTool: (activeTool) => set((state) => ({ activeTool, toolMemory: rememberTool(state.toolMemory, activeTool) })),
     setForegroundColor: (foregroundColor) => set({ foregroundColor }),
     setBackgroundColor: (backgroundColor) => set({ backgroundColor }),
     swapColors: () => set((state) => ({ foregroundColor: state.backgroundColor, backgroundColor: state.foregroundColor })),
@@ -357,8 +412,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           summary,
           commands: [...commands]
         }
+        ownBatchIds.add(batch.id)
+        if (ownBatchIds.size > MAX_HISTORY_STEPS) ownBatchIds.delete(ownBatchIds.values().next().value!)
         const result = await client.execute({ projectId: current.projectId, expectedSceneRevision: current.revision, batch })
-        return isCurrent() && applyMutationResult(result)
+        const applied = isCurrent() && applyMutationResult(result)
+        if (applied) noteStep('scene')
+        return applied
       } catch (error) {
         if (isCurrent()) set({ sceneProblem: error instanceof Error ? error.message : '画布修改没有完成。' })
         return false
@@ -581,12 +640,22 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       return success
     },
     undo: async () => { await enqueueMutation(async (isCurrent) => {
+      if (undoSteps.at(-1) === 'selection') {
+        undoSteps.pop()
+        if (selectionHistory?.undo() === true) redoSteps.push('selection')
+        return
+      }
       const client = desktopClient()
       if (client === null) return
       set({ mutationPending: true })
       try {
         const result = await client.undo({ projectId: get().scene.projectId, expectedSceneRevision: get().scene.revision, batchId: null })
-        if (isCurrent() && applyMutationResult(result) && result.ok && result.receipt.affectedBatchId !== null) {
+        const applied = isCurrent() && applyMutationResult(result)
+        if (applied && result.ok) {
+          if (undoSteps.at(-1) === 'scene') undoSteps.pop()
+          redoSteps.push('scene')
+        }
+        if (applied && result.ok && result.receipt.affectedBatchId !== null) {
           await client.markBatchUndone(result.receipt.affectedBatchId).catch(() => undefined)
         }
       } finally {
@@ -607,12 +676,20 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       }
     }),
     redo: async () => { await enqueueMutation(async (isCurrent) => {
+      if (redoSteps.at(-1) === 'selection') {
+        redoSteps.pop()
+        if (selectionHistory?.redo() === true) undoSteps.push('selection')
+        return
+      }
       const client = desktopClient()
       if (client === null) return
       set({ mutationPending: true })
       try {
         const result = await client.redo({ projectId: get().scene.projectId, expectedSceneRevision: get().scene.revision, batchId: null })
-        if (isCurrent()) applyMutationResult(result)
+        if (isCurrent() && applyMutationResult(result) && result.ok) {
+          if (redoSteps.at(-1) === 'scene') redoSteps.pop()
+          undoSteps.push('scene')
+        }
       } finally {
         if (isCurrent()) set({ mutationPending: false })
       }
@@ -627,6 +704,7 @@ export function setWorkspaceSceneClientForTests(client: WorkspaceSceneClient | n
 export function resetWorkspace(scene: Scene = createBlankScene()): void {
   beginProjectHydration()
   clearEphemeralAnnotation()
+  clearHistorySteps()
   mutationChain = Promise.resolve()
   workspaceClipboard = []
   useWorkspaceStore.setState({
@@ -663,6 +741,7 @@ export function hydrateWorkspaceScene(
   const sameProject = useWorkspaceStore.getState().scene.projectId === scene.projectId
   const context = savedContext?.projectId === scene.projectId ? savedContext : defaultProjectWorkContext(scene.projectId, `${scene.canvas.aspectWidth}:${scene.canvas.aspectHeight}`)
   clearEphemeralAnnotation()
+  if (!sameProject) clearHistorySteps()
   workspaceClipboard = []
   useCreationSessionStore.getState().bindProject(scene.projectId, sameProject && savedContext === undefined ? undefined : context.conversationDraft)
   useGenerationDraftStore.getState().bindProject(scene.projectId, sameProject && savedContext === undefined ? undefined : context.generation)

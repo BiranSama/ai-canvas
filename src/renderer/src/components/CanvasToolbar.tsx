@@ -2,22 +2,28 @@ import {
   ArrowLeftRight,
   BoxSelect,
   Brush,
+  CircleDashed,
   Eraser,
   Hand,
   ImagePlus,
+  Lasso,
+  LassoSelect,
   MousePointer2,
   PaintBucket,
   Pencil,
   Pipette,
   Shapes,
+  Sparkles,
   SquareDashed,
+  SquareDashedMousePointer,
   SunMedium,
   Type,
+  WandSparkles,
   type LucideIcon
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useWorkspaceStore, type CanvasTool } from '../store/workspace-store'
+import { useWorkspaceStore, type CanvasTool, type ToolMemory } from '../store/workspace-store'
 
 interface ToolInfo {
   readonly label: string
@@ -36,6 +42,12 @@ const GradientIcon = (({ size = 18, ...props }: { size?: number | string } & Rea
 
 const TOOLS: Readonly<Record<CanvasTool, ToolInfo>> = {
   select: { label: '选择 V', shortcut: 'V', icon: MousePointer2 },
+  'marquee-rect': { label: '矩形选框', shortcut: 'M', icon: SquareDashed },
+  'marquee-ellipse': { label: '椭圆选框', shortcut: 'M', icon: CircleDashed },
+  lasso: { label: '套索', shortcut: 'L', icon: Lasso },
+  'lasso-polygon': { label: '多边形套索', shortcut: 'L', icon: LassoSelect },
+  'object-select': { label: '对象选择', shortcut: 'W', icon: SquareDashedMousePointer },
+  'magic-wand': { label: '魔棒', shortcut: 'W', icon: WandSparkles },
   hand: { label: '抓手 H', shortcut: 'H', icon: Hand },
   image: { label: '导入图片', icon: ImagePlus },
   text: { label: '文字 T', shortcut: 'T', icon: Type },
@@ -45,15 +57,19 @@ const TOOLS: Readonly<Record<CanvasTool, ToolInfo>> = {
   bucket: { label: '油漆桶', shortcut: 'G', icon: PaintBucket },
   gradient: { label: '渐变', shortcut: 'G', icon: GradientIcon },
   eyedropper: { label: '吸管', shortcut: 'I', icon: Pipette },
-  mask: { label: '蒙版', icon: SquareDashed },
+  // The AI's repaint and protect regions; 蒙版 is Photoshop's layer mask, in the layers panel.
+  mask: { label: 'AI 重绘区域', icon: Sparkles },
   sketch: { label: '草图', icon: Pencil },
   placeholder: { label: '主体占位', icon: BoxSelect },
   light: { label: '光影', icon: SunMedium }
 }
 
 /** Toolbar slots top to bottom; a slot of several tools shows the one last used and lists the rest on right-click or a long press. */
-const SLOTS: ReadonlyArray<{ readonly tools: readonly CanvasTool[]; readonly memory?: 'fill' | 'annotate'; readonly name?: string }> = [
+const SLOTS: ReadonlyArray<{ readonly tools: readonly CanvasTool[]; readonly memory?: keyof ToolMemory; readonly name?: string }> = [
   { tools: ['select'] },
+  { tools: ['marquee-rect', 'marquee-ellipse'], memory: 'marquee', name: '选框工具' },
+  { tools: ['lasso', 'lasso-polygon'], memory: 'lasso', name: '套索工具' },
+  { tools: ['object-select', 'magic-wand'], memory: 'wand', name: '对象选择和魔棒' },
   { tools: ['hand'] },
   { tools: ['image'] },
   { tools: ['text'] },
@@ -62,8 +78,7 @@ const SLOTS: ReadonlyArray<{ readonly tools: readonly CanvasTool[]; readonly mem
   { tools: ['eraser'] },
   { tools: ['bucket', 'gradient'], memory: 'fill', name: '油漆桶和渐变' },
   { tools: ['eyedropper'] },
-  { tools: ['mask'] },
-  { tools: ['sketch', 'placeholder', 'light'], memory: 'annotate', name: 'AI 标注' }
+  { tools: ['sketch', 'placeholder', 'light', 'mask'], memory: 'annotate', name: 'AI 标注' }
 ]
 
 const LONG_PRESS_MS = 350
@@ -161,7 +176,7 @@ export function CanvasToolbar({ activeTool, onChoose }: CanvasToolbarProps): Rea
                     <button key={tool} type="button" role="menuitemradio" aria-checked={tool === shown} onClick={() => { setFlyout(null); onChoose(tool) }}>
                       <ToolIcon size={16} strokeWidth={1.65} aria-hidden="true" />
                       <span>{info.label}</span>
-                      {info.shortcut !== undefined && !info.label.endsWith(info.shortcut) && <kbd>{tool === 'bucket' || tool === 'gradient' ? 'Shift+G' : info.shortcut}</kbd>}
+                      {info.shortcut !== undefined && !info.label.endsWith(info.shortcut) && <kbd>{`Shift+${info.shortcut}`}</kbd>}
                     </button>
                   )
                 })}

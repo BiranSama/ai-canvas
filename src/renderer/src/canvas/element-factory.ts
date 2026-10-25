@@ -153,6 +153,12 @@ export function createElementForTool(tool: CanvasTool, scene: Scene, assetId?: s
     case 'eraser':
     case 'bucket':
     case 'gradient':
+    case 'marquee-rect':
+    case 'marquee-ellipse':
+    case 'lasso':
+    case 'lasso-polygon':
+    case 'object-select':
+    case 'magic-wand':
       return null
   }
 }

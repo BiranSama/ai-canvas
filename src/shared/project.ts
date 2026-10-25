@@ -31,8 +31,12 @@ export const pixelImportInputSchema = z.object({
   name: z.string().trim().min(1).max(260),
   width: z.number().int().min(1).max(16_384),
   height: z.number().int().min(1).max(16_384),
-  rgba: z.instanceof(Uint8Array).optional()
+  rgba: z.instanceof(Uint8Array).optional(),
+  /** One coverage byte per pixel, for a mask or a selection's clip; stored as a grayscale PNG. */
+  gray: z.instanceof(Uint8Array).optional()
 }).refine((input) => input.rgba === undefined || input.rgba.byteLength === input.width * input.height * 4, 'Pixels must be width × height × 4 bytes.')
+  .refine((input) => input.gray === undefined || input.gray.byteLength === input.width * input.height, 'Gray pixels must be width × height bytes.')
+  .refine((input) => input.rgba === undefined || input.gray === undefined, 'Give either colour or gray pixels.')
 
 export type PixelImportInput = z.infer<typeof pixelImportInputSchema>
 

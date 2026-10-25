@@ -1,5 +1,10 @@
-import type { NormalizedTransform, SceneCommand, SceneElement } from '../../../domain'
+import type { NormalizedTransform, PaintOp, SceneCommand, SceneElement } from '../../../domain'
+import { imageLayerSpace } from '../../../shared/layer-space'
+import type { GrayMask } from '../../../shared/mask-raster'
 import { showAppNotice } from '../components/app-notice'
+import { selectionClip } from '../selection/selection-clip'
+import { currentSelection } from '../selection/selection-store'
+import { layerSourceImage } from './pixel-layers'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { createElementForTool } from './element-factory'
 import { opaqueBounds, renderLayersAsDrawn, type LayerRenderOptions } from './layer-render'
@@ -17,12 +22,24 @@ const FULL_CANVAS: NormalizedTransform = { x: 0, y: 0, width: 1, height: 1, rota
  * an asset, and where they sit on the canvas. A picture with nothing in it
  * keeps the whole canvas, as a blank layer does.
  */
-async function drawnAsset(ids: readonly string[], summary: string, options: LayerRenderOptions = {}): Promise<{ readonly assetId: string; readonly transform: NormalizedTransform } | null> {
+async function drawnAsset(ids: readonly string[], summary: string, options: LayerRenderOptions = {}, within: GrayMask | null = null): Promise<{ readonly assetId: string; readonly transform: NormalizedTransform } | null> {
   const { scene } = useWorkspaceStore.getState()
   const drawn = await renderLayersAsDrawn(ids, options)
   if (drawn === null) {
     showAppNotice(`没能${summary}：画布上的图层还没画好，稍后再试。`, 'problem')
     return null
+  }
+  // Only what the selection covers, as Photoshop's Layer via Copy takes.
+  if (within !== null && within.width === drawn.width && within.height === drawn.height) {
+    const context = drawn.getContext('2d', { willReadFrequently: true })
+    if (context === null) return null
+    const all = context.getImageData(0, 0, drawn.width, drawn.height)
+    for (let pixel = 0; pixel < within.data.length; pixel += 1) all.data[pixel * 4 + 3] = Math.round(all.data[pixel * 4 + 3]! * within.data[pixel]! / 255)
+    context.putImageData(all, 0, 0)
+    if (opaqueBounds(drawn) === null) {
+      showAppNotice('选区里没有像素。')
+      return null
+    }
   }
   const area = opaqueBounds(drawn) ?? { x: 0, y: 0, width: drawn.width, height: drawn.height }
   const transform = { x: area.x / drawn.width, y: area.y / drawn.height, width: area.width / drawn.width, height: area.height / drawn.height, rotation: 0 }
@@ -33,15 +50,16 @@ async function drawnAsset(ids: readonly string[], summary: string, options: Laye
   return useWorkspaceStore.getState().scene.projectId === scene.projectId ? { assetId: asset.id, transform } : null
 }
 
-/** A new image layer directly above the topmost selected layer (or on top), selected. */
-async function addImageLayer(assetId: string, transform: NormalizedTransform, summary: string): Promise<string | null> {
+/** A new image layer directly above the topmost selected layer (or on top), selected; more commands go in the same step. */
+async function addImageLayer(assetId: string, transform: NormalizedTransform, summary: string, look: Partial<Pick<SceneElement, 'opacity' | 'blendMode'>> = {}, also: readonly SceneCommand[] = []): Promise<string | null> {
   const current = useWorkspaceStore.getState()
   const base = createElementForTool('image', current.scene, assetId)
   if (base?.type !== 'image') return null
-  const layer: SceneElement = { ...base, name: nextLayerName(current.scene.elements), transform, fit: 'fill', referenceRole: 'general' }
+  const layer: SceneElement = { ...base, ...look, name: nextLayerName(current.scene.elements), transform, fit: 'fill', referenceRole: 'general' }
   const above = Math.max(-1, ...current.scene.elements.filter((element) => current.selectedIds.includes(element.id)).map((element) => element.zIndex))
   const commands: SceneCommand[] = [{ kind: 'element.add', element: layer }]
   if (above >= 0 && above + 1 < current.scene.elements.length) commands.push({ kind: 'element.reorder', elementId: layer.id, toIndex: above + 1 })
+  commands.push(...also)
   if (!await current.execute(summary, commands)) return null
   useWorkspaceStore.getState().setSelection([layer.id])
   return layer.id
@@ -183,4 +201,36 @@ export async function rasterizeLayer(elementId: string): Promise<boolean> {
   const drawn = await drawnAsset([element.id], '栅格化图层', { base: element.id, showHidden: true })
   if (drawn === null) return false
   return useWorkspaceStore.getState().execute('栅格化图层', [{ kind: 'element.rasterize', elementId: element.id, assetId: drawn.assetId, transform: drawn.transform }])
+}
+
+/**
+ * Photoshop's Ctrl+J and Ctrl+Shift+J with a selection: what the selection
+ * covers on the selected layer, as drawn, becomes a new layer above it,
+ * keeping its opacity and blend. Cutting also clears those pixels from the
+ * layer, in the same step.
+ */
+export async function layerViaSelection(cut: boolean): Promise<boolean> {
+  const { scene, selectedIds } = useWorkspaceStore.getState()
+  const selection = currentSelection()
+  if (selection === null) return false
+  const element = selectedIds.length === 1 ? scene.elements.find((candidate) => candidate.id === selectedIds[0]) : undefined
+  if (element === undefined || !isPictureLayer(element)) return refuse('先选中一个图片、文字或形状图层。')
+  if (cut && element.type !== 'image') return refuse(`「${element.name}」要先栅格化（图层右键菜单），才能剪切出选区里的像素。`)
+  if (cut && element.locked) return refuse(`「${element.name}」已锁定，解锁后才能剪切。`)
+  const summary = cut ? '通过剪切的图层' : '通过拷贝的图层'
+  const drawn = await drawnAsset([element.id], summary, { base: element.id, showHidden: true }, selection)
+  if (drawn === null) return false
+  const also: SceneCommand[] = []
+  if (cut && element.type === 'image') {
+    const image = layerSourceImage(element.id)
+    if (image === null) return refuse(`「${element.name}」还没画好，稍后再试。`)
+    const space = imageLayerSpace(element, { width: image.naturalWidth, height: image.naturalHeight }, { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight })
+    const clip = selectionClip(element, space, 'layer')
+    const clipId = clip.kind === 'clip' ? await clip.assetId : null
+    if (clip.kind === 'clip' && clipId === null) return refuse('选区没有存好，没有剪切。')
+    const clear: PaintOp = clipId === null ? { id: globalThis.crypto.randomUUID(), kind: 'clear' } : { id: globalThis.crypto.randomUUID(), kind: 'clear', clip: clipId }
+    const current = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === element.id)
+    also.push({ kind: 'element.update', elementId: element.id, changes: { paint: [...(current?.type === 'image' ? current.paint ?? [] : []), clear] } })
+  }
+  return await addImageLayer(drawn.assetId, drawn.transform, summary, { opacity: element.opacity, blendMode: element.blendMode ?? 'normal' }, also) !== null
 }
