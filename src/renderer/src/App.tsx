@@ -38,6 +38,7 @@ import { CanvasToolbar } from './components/CanvasToolbar'
 import { PaintOptionsBar } from './components/PaintOptionsBar'
 import { SelectionOptionsBar } from './components/SelectionOptionsBar'
 import { EditDialogs } from './components/EditDialogs'
+import { SubjectModelDialog } from './components/SubjectModelDialog'
 import { elementAssetIds } from '../../shared/scene-assets'
 import { nudgeSelection } from './selection/selection-gestures'
 import { CanvasSizeControl } from './components/CanvasSizeControl'
@@ -359,6 +360,7 @@ function WorkspaceHeader({
     {settingsOpen && <ProviderSettingsSheet initialProviderId={settingsProviderId} onClose={closeSettings} />}
     {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
     <EditDialogs />
+    <SubjectModelDialog />
     </>
   )
 }

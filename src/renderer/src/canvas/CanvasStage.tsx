@@ -44,6 +44,7 @@ import { useIslandLayoutStore } from '../islands/island-layout-store'
 import { groupBoundsForChildTransforms, isPaintTool, isSelectionTool, useWorkspaceStore } from '../store/workspace-store'
 import { cancelSelectionGesture, polygonLassoActive, selectionKeyDown, selectionPointerDown, selectionPointerMove, selectionPointerUp } from '../selection/selection-gestures'
 import { SelectionOverlay } from '../selection/SelectionOverlay'
+import { warmMagicTouch } from '../selection/magic-touch'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
 import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
@@ -2082,8 +2083,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     if (point !== null) selectionPointerUp(point, { shift: event.shiftKey, alt: event.altKey })
     else cancelSelectionGesture()
   }
-  // A half-drawn selection does not survive a change of tool.
-  useEffect(() => { cancelSelectionGesture() }, [activeTool])
+  // A half-drawn selection does not survive a change of tool; the object selection loads its model ahead of the first click.
+  useEffect(() => {
+    cancelSelectionGesture()
+    if (activeTool === 'object-select') warmMagicTouch()
+  }, [activeTool])
 
   /**
    * The eyedropper reads the picture as drawn under the pointer, background

@@ -34,7 +34,7 @@ function scene(elements: SceneElement[]): Scene {
   return { ...base, canvas: { ...base.canvas, outputWidth: 128, outputHeight: 128, transparent: false, backgroundColor: '#FFFFFF' }, elements }
 }
 
-function paintedLayer(paint: PaintOp[]): SceneElement {
+function paintedLayer(paint: PaintOp[]): Extract<SceneElement, { type: 'image' }> {
   return {
     ...BASE, id: LAYER, type: 'image', name: '图层 1', zIndex: 0, transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 },
     assetId: ASSET, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general', paint
@@ -159,13 +159,13 @@ it('replays paint limited to a selection and shows an image layer through its ma
   expect(expected[(64 * 128 + 20) * 4 + 3]).toBe(0)
   expect(expected[(100 * 128 + 20) * 4 + 3]).toBe(255)
 
-  const layer: SceneElement = { ...paintedLayer(ops), mask: { assetId: MASK, paint: maskOps, enabled: true } }
-  expect(largestDifference(await rgba(await paintedImageBytes(files.get(ASSET)!, ops, resolve, layer.type === 'image' ? layer.mask ?? null : null)), expected)).toBe(0)
+  const layer = { ...paintedLayer(ops), mask: { assetId: MASK, paint: maskOps, enabled: true } }
+  expect(largestDifference(await rgba(await paintedImageBytes(files.get(ASSET)!, ops, resolve, layer.mask)), expected)).toBe(0)
   const rendered = await rgba((await new CompositeReferenceRenderer(resolve).render(scene([layer]), 'final')).buffer)
   expect(largestDifference(rendered, overWhite(expected))).toBeLessThanOrEqual(2)
 
   // A turned-off mask hides nothing.
-  const off = await rgba((await new CompositeReferenceRenderer(resolve).render(scene([{ ...layer, mask: { assetId: MASK, paint: maskOps, enabled: false } } as SceneElement]), 'final')).buffer)
+  const off = await rgba((await new CompositeReferenceRenderer(resolve).render(scene([{ ...layer, mask: { assetId: MASK, paint: maskOps, enabled: false } }]), 'final')).buffer)
   const unmasked = new Uint8ClampedArray(128 * 128 * 4)
   applyPaintOps(unmasked, 128, 128, ops, new Map([[CLIP, clip]]))
   expect(largestDifference(off, overWhite(unmasked))).toBeLessThanOrEqual(2)

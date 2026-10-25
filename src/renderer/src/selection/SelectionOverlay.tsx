@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { traceMaskOutline } from '../../../shared/mask-raster'
+import { maskBounds, traceMaskOutline } from '../../../shared/mask-raster'
 import { selectionDraft, selectionMoveOffset, subscribeSelectionDraft, useSelectionStore, type SelectionDraft } from './selection-store'
 
 /*
@@ -83,6 +83,11 @@ export function SelectionOverlay({ originX, originY, zoom, width, height }: View
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const mask = useSelectionStore((state) => state.mask)
   const outline = useMemo(() => mask === null ? null : outlinePath(traceMaskOutline(mask)), [mask])
+  // Where the selection reaches, in canvas pixels, for tests and assistive reading.
+  const bounds = useMemo(() => {
+    const rect = mask === null ? null : maskBounds(mask)
+    return rect === null ? '' : `${rect.x},${rect.y},${rect.width},${rect.height}`
+  }, [mask])
   const latest = useRef<{ view: View; outline: Path2D | null; phase: number }>({ view: { originX, originY, zoom, width, height }, outline: null, phase: 0 })
 
   useEffect(() => {
@@ -106,5 +111,5 @@ export function SelectionOverlay({ originX, originY, zoom, width, height }: View
     return () => window.clearInterval(timer)
   }, [])
 
-  return <canvas ref={canvasRef} className="selection-ants" aria-hidden="true" data-testid="selection-ants" data-selection={mask === null ? 'none' : 'some'} style={{ width, height }} />
+  return <canvas ref={canvasRef} className="selection-ants" aria-hidden="true" data-testid="selection-ants" data-selection={mask === null ? 'none' : 'some'} data-selection-bounds={bounds} style={{ width, height }} />
 }

@@ -7,6 +7,10 @@ import { openableFileArguments, queueOpenFiles } from './open-file-requests'
 import { DESKTOP_EVENTS } from '../shared/desktop-api'
 import { createMainWindow, hardenSession } from './window'
 
+// Without a usable graphics card Chromium no longer falls back to software WebGL by itself; the object
+// selection's model needs WebGL, and the window only ever shows the app's own pages.
+app.commandLine.appendSwitch('enable-unsafe-swiftshader')
+
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 let generationRuntime: Promise<GenerationRuntime> | null = null
 let allowQuit = false

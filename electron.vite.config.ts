@@ -4,7 +4,16 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // Select Subject's model runs in a background process of its own.
+        input: {
+          index: resolve('src/main/index.ts'),
+          'isnet-worker': resolve('src/main/segmentation/isnet-worker.ts')
+        }
+      }
+    }
   },
   preload: {
     plugins: [externalizeDepsPlugin()],

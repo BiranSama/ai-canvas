@@ -1,4 +1,5 @@
 import type { PsdDocumentImport } from './psd-import'
+import type { SubjectModelDownloadInput, SubjectModelStatus, SubjectSegmentInput, SubjectSegmentResult } from './segmentation'
 import type { AgentRequest, AgentRun, ConversationSnapshot } from './agent'
 import type { AcceptDesignReviewInput } from './design-capability'
 import type { AppearanceSettingsSnapshot, AppearanceSettingsUpdate } from './appearance-settings'
@@ -63,6 +64,11 @@ export const DESKTOP_CHANNELS = {
   localFonts: 'desktop:local-fonts',
   openFileRequests: 'desktop:open-file-requests',
   psdRead: 'project:psd-read',
+  subjectModelStatus: 'segmentation:model-status',
+  subjectModelDownload: 'segmentation:model-download',
+  subjectModelCancel: 'segmentation:model-cancel',
+  subjectSegment: 'segmentation:subject',
+  magicTouchAssets: 'segmentation:magic-touch-assets',
   paintBake: 'scene:paint-bake',
   imageToneMatch: 'scene:image-tone-match',
   unifiedRender: 'generation:unified-render',
@@ -139,7 +145,8 @@ export const DESKTOP_EVENTS = {
   sceneChanged: 'scene:changed',
   agentEvent: 'agent:event',
   appearanceChanged: 'appearance:changed',
-  openFileRequested: 'desktop:open-file-requested'
+  openFileRequested: 'desktop:open-file-requested',
+  subjectModelStatus: 'segmentation:model-status-changed'
 } as const
 
 export type DesktopPlatform =
@@ -202,6 +209,14 @@ export interface DesktopApi {
   onOpenFileRequested(listener: () => void): () => void
   /** A PSD's layers as PNGs with their place, opacity, visibility, blend mode and group, ready to become a project. */
   readPsd(bytes: Uint8Array): Promise<PsdDocumentImport>
+  /** Select Subject's local model: whether it is downloaded, fetching it, and running it. */
+  subjectModelStatus(): Promise<SubjectModelStatus>
+  downloadSubjectModel(input: SubjectModelDownloadInput): Promise<SubjectModelStatus>
+  cancelSubjectModelDownload(): Promise<void>
+  onSubjectModelStatus(listener: (status: SubjectModelStatus) => void): () => void
+  segmentSubject(input: SubjectSegmentInput): Promise<SubjectSegmentResult>
+  /** The click-to-select model and MediaPipe's WebAssembly, read from the app's own files. */
+  readMagicTouchAssets(): Promise<{ readonly wasm: Uint8Array; readonly model: Uint8Array }>
   /** Replays an image layer's recorded paint into a new asset; the scene then swaps it in and drops the operations listed. */
   bakePaint(elementId: string): Promise<{ readonly assetId: string; readonly paintIds: readonly string[] } | null>
   /** How to shift an image's colour part of the way (strength 0–1) towards the picture around it; null when it cannot be measured. */

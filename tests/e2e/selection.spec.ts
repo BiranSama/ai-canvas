@@ -7,12 +7,12 @@ import type { PaintOp, SceneElement } from '../../src/domain'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { applyPaintOps } from '../../src/shared/paint-ops'
 
-async function launch(): Promise<{ app: ElectronApplication, page: Page }> {
+async function launch(env: Record<string, string> = {}): Promise<{ app: ElectronApplication, page: Page }> {
   const userData = await mkdtemp(join(tmpdir(), 'select-'))
   const app = await electron.launch({
     args: ['.', `--user-data-dir=${userData}`],
     cwd: resolve('.'),
-    env: { ...process.env, AI_CANVAS_E2E: 'r2', AI_CANVAS_STARTUP: 'library' }
+    env: { ...process.env, AI_CANVAS_E2E: 'r2', AI_CANVAS_STARTUP: 'library', ...env }
   })
   const page = await app.firstWindow()
   await page.setViewportSize({ width: 1280, height: 800 })
@@ -297,6 +297,98 @@ test('the ellipse, lasso, polygonal lasso and magic wand select, Ctrl+J copies t
     await click(page, 0.4, 0.6)
     await expect(ants(page)).toHaveAttribute('data-selection', 'some')
     await page.screenshot({ path: test.info().outputPath('wand.png') })
+  } finally {
+    await app.close()
+  }
+})
+
+/** A vase on a wall and a table, as a PNG to open as a project. */
+async function vasePicture(): Promise<string> {
+  const svg = `<svg width="640" height="480" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="wall" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C9D3DC"/><stop offset="1" stop-color="#9FAAB5"/></linearGradient>
+      <radialGradient id="vase" cx="0.38" cy="0.35" r="0.75"><stop offset="0" stop-color="#F6A14A"/><stop offset="0.6" stop-color="#D86C1F"/><stop offset="1" stop-color="#8E3F0D"/></radialGradient>
+    </defs>
+    <rect width="640" height="480" fill="url(#wall)"/>
+    <rect y="360" width="640" height="120" fill="#86603A"/>
+    <path d="M 280 120 C 270 150 250 170 240 210 C 225 270 230 330 260 370 L 380 370 C 410 330 415 270 400 210 C 390 170 370 150 360 120 Z" fill="url(#vase)"/>
+  </svg>`
+  const path = join(await mkdtemp(join(tmpdir(), 'vase-')), 'vase.png')
+  await sharp(Buffer.from(svg)).png().toFile(path)
+  return path
+}
+
+async function openPicture(page: Page, path: string): Promise<void> {
+  await page.locator('.new-project-main').click()
+  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await expect(page.getByTestId('canvas-stage')).toBeVisible()
+  const chooser = page.waitForEvent('filechooser')
+  await page.keyboard.press('Control+o')
+  await (await chooser).setFiles(path)
+  await expect.poll(async () => (await bootstrap(page)).scene.canvas.outputWidth, { timeout: 15_000 }).toBe(640)
+}
+
+async function selectionBounds(page: Page): Promise<number[]> {
+  const value = await ants(page).getAttribute('data-selection-bounds')
+  return value === null || value === '' ? [] : value.split(',').map(Number)
+}
+
+test('the object selection picks the object under a click with the bundled model', async () => {
+  const { app, page } = await launch()
+  try {
+    await openPicture(page, await vasePicture())
+    await page.keyboard.press('w')
+    await expect(page.getByRole('button', { name: '对象选择', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await click(page, 320 / 640, 260 / 480)
+    await expect(ants(page)).toHaveAttribute('data-selection', 'some', { timeout: 30_000 })
+    const [x, y, width, height] = await selectionBounds(page)
+    // The vase spans x 230–410 and y 120–370.
+    expect(x).toBeGreaterThan(200)
+    expect(x! + width!).toBeLessThan(440)
+    expect(y).toBeGreaterThan(95)
+    expect(y! + height!).toBeLessThan(395)
+    expect(width).toBeGreaterThan(130)
+    await page.screenshot({ path: test.info().outputPath('object-select.png') })
+  } finally {
+    await app.close()
+  }
+})
+
+test('Select Subject asks to download its model first, and the dialog can be closed', async () => {
+  // An empty model folder, whatever this machine holds.
+  const { app, page } = await launch({ AI_CANVAS_SUBJECT_MODEL_DIR: await mkdtemp(join(tmpdir(), 'no-model-')) })
+  try {
+    await newCanvasWithLayer(page)
+    await page.keyboard.press('m')
+    await page.getByRole('button', { name: '选择主体' }).click()
+    const dialog = page.getByRole('dialog', { name: '下载选择主体模型' })
+    await expect(dialog).toBeVisible()
+    await expect(dialog).toContainText('170 MB')
+    await expect(dialog.getByRole('button', { name: '下载', exact: true })).toBeVisible()
+    await dialog.getByRole('button', { name: '关闭' }).click()
+    await expect(dialog).toBeHidden()
+    await expect(ants(page)).toHaveAttribute('data-selection', 'none')
+  } finally {
+    await app.close()
+  }
+})
+
+// The 170 MB model is not in the repository; AI_CANVAS_SUBJECT_MODEL_DIR points at a folder that holds it.
+const subjectModel = process.env.AI_CANVAS_SUBJECT_MODEL_DIR
+test('Select Subject selects the subject of the picture with the local model', async () => {
+  test.skip(subjectModel === undefined, 'The ISNet model is not on this machine.')
+  const { app, page } = await launch()
+  try {
+    await openPicture(page, await vasePicture())
+    await page.keyboard.press('m')
+    await page.getByRole('button', { name: '选择主体' }).click()
+    await expect(ants(page)).toHaveAttribute('data-selection', 'some', { timeout: 60_000 })
+    const [x, y, width, height] = await selectionBounds(page)
+    expect(x).toBeGreaterThanOrEqual(225)
+    expect(x! + width!).toBeLessThanOrEqual(420)
+    expect(y).toBeGreaterThanOrEqual(110)
+    expect(y! + height!).toBeLessThanOrEqual(380)
+    await page.screenshot({ path: test.info().outputPath('select-subject.png') })
   } finally {
     await app.close()
   }

@@ -30,12 +30,23 @@ import type { AssetImportInput, PixelImportInput, ProjectCreateInput, ProjectFav
 import type { SceneChangedEvent, SceneExecuteInput, SceneHistoryInput } from '../shared/scene-authority'
 import type { DesignDirectionSelectionInput } from '../shared/design-direction-selection'
 import type { ProjectWorkContext } from '../shared/project-work-context'
+import type { SubjectModelDownloadInput, SubjectModelStatus, SubjectSegmentInput } from '../shared/segmentation'
 
 const desktopApi: DesktopApi = Object.freeze({
   getRuntimeInfo: (): Promise<RuntimeInfo> => ipcRenderer.invoke(DESKTOP_CHANNELS.runtimeInfo),
   listLocalFonts: (rescan?: boolean) => ipcRenderer.invoke(DESKTOP_CHANNELS.localFonts, rescan === true),
   takeOpenFileRequests: () => ipcRenderer.invoke(DESKTOP_CHANNELS.openFileRequests),
   readPsd: (bytes: Uint8Array) => ipcRenderer.invoke(DESKTOP_CHANNELS.psdRead, bytes),
+  subjectModelStatus: () => ipcRenderer.invoke(DESKTOP_CHANNELS.subjectModelStatus),
+  downloadSubjectModel: (input: SubjectModelDownloadInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.subjectModelDownload, input),
+  cancelSubjectModelDownload: () => ipcRenderer.invoke(DESKTOP_CHANNELS.subjectModelCancel),
+  onSubjectModelStatus: (listener: (status: SubjectModelStatus) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: SubjectModelStatus): void => listener(value)
+    ipcRenderer.on(DESKTOP_EVENTS.subjectModelStatus, handler)
+    return () => ipcRenderer.removeListener(DESKTOP_EVENTS.subjectModelStatus, handler)
+  },
+  segmentSubject: (input: SubjectSegmentInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.subjectSegment, input),
+  readMagicTouchAssets: () => ipcRenderer.invoke(DESKTOP_CHANNELS.magicTouchAssets),
   bakePaint: (elementId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.paintBake, elementId),
   onOpenFileRequested: (listener: () => void) => {
     const handler = (): void => listener()

@@ -947,6 +947,13 @@ select:focus-visible {
 .edit-dialog-field i { color: var(--muted-slate); font-style: normal; }
 .edit-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .edit-dialog footer button { height: 30px; padding: 0 14px; border: 1px solid var(--hairline); border-radius: 8px; color: var(--graphite); background: transparent; font-size: 12px; cursor: pointer; }
+.subject-model-dialog { width: min(420px, calc(100vw - 64px)); }
+.subject-model-dialog p { margin: 0; color: var(--muted-slate); font-size: 12px; line-height: 1.6; }
+.edit-dialog-field input[type="url"] { height: 28px; min-width: 0; flex: 1; padding: 0 8px; border: 1px solid var(--hairline); border-radius: 7px; color: var(--graphite); background: var(--field); font-size: 12px; }
+.subject-model-progress { position: relative; display: grid; height: 22px; overflow: hidden; place-items: center; border-radius: 7px; background: color-mix(in srgb, var(--graphite) 8%, transparent); }
+.subject-model-progress > span { position: absolute; top: 0; bottom: 0; left: 0; background: color-mix(in srgb, var(--quiet-blue) 45%, transparent); transition: width 200ms ease; }
+.subject-model-progress small { position: relative; color: var(--graphite); font-size: 11px; font-variant-numeric: tabular-nums; }
+.subject-model-error { color: #B23A3A !important; }
 .edit-dialog footer .is-primary { border-color: transparent; color: #FFFFFF; background: var(--quiet-blue); }
 .paint-options { display: flex; height: 28px; align-items: center; gap: 10px; padding: 0 4px 0 10px; border-left: 1px solid var(--hairline); color: var(--muted-slate); font-size: 11px; white-space: nowrap; }
 .paint-amount { display: flex; align-items: center; gap: 5px; }
