@@ -9,6 +9,7 @@ import {
   STEPWISE_COLLABORATION_BUDGET,
   STEPWISE_REVIEW_BUDGET,
   normalizeAgentTaskInput,
+  scaledAgentBudget,
   isTerminalAgentTurnStatus,
   plannerStepSchema,
   type AgentCompletionAssessment,
@@ -142,6 +143,8 @@ export interface PersistentAgentLoopOptions {
   readonly projection?: AgentLoopProjection
   readonly generationPolicy?: GenerationPolicy
   readonly budget?: AgentRunBudget
+  /** The owner's multiple of the standard per-turn allowance, read as each turn starts. */
+  readonly budgetScale?: () => number
   readonly permissionProfileId?: string
   readonly providerIds?: readonly string[]
   readonly now?: () => string
@@ -613,6 +616,7 @@ export class PersistentAgentLoop {
   readonly #generationPolicy: GenerationPolicy
   readonly #budget: AgentRunBudget
   readonly #budgetOverride: AgentRunBudget | null
+  readonly #budgetScale: () => number
   readonly #permissionProfileId: string
   readonly #providerIds: readonly string[]
   readonly #now: () => string
@@ -648,6 +652,7 @@ export class PersistentAgentLoop {
     this.#projection = options.projection ?? {}
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
     this.#budgetOverride = options.budget ?? null
+    this.#budgetScale = options.budgetScale ?? (() => 1)
     this.#budget = options.budget ?? (options.planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
     this.#permissionProfileId = options.permissionProfileId ?? ownerFullPermissionProfile().id
     this.#providerIds = [...(options.providerIds ?? ['image-provider'])]
@@ -2027,11 +2032,11 @@ export class PersistentAgentLoop {
 
   async #createGoal(threadId: string, request: AgentRequest, mode: AgentMode): Promise<AgentGoalContract> {
     const stepwise = this.#planner.stepwise === true
-    const budget = this.#budgetOverride ?? (mode === 'auto'
+    const budget = this.#budgetOverride ?? scaledAgentBudget(mode === 'auto'
       ? stepwise ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET
       : mode === 'review'
         ? stepwise ? STEPWISE_REVIEW_BUDGET : DEFAULT_REVIEW_BUDGET
-        : stepwise ? STEPWISE_COLLABORATION_BUDGET : DEFAULT_COLLABORATION_BUDGET)
+        : stepwise ? STEPWISE_COLLABORATION_BUDGET : DEFAULT_COLLABORATION_BUDGET, this.#budgetScale())
     return this.#repository.createGoal(threadId, {
       objective: request.text,
       completionDefinition: ['所需设计与生成操作有可核对回执', '外发、费用与项目写入符合当前 Owner 权限和预算'],

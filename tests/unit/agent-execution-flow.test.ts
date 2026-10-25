@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { AgentEvent, AgentHarnessSnapshot, AgentItem, AgentTurn } from '../../src/shared/agent-harness'
 import type { AgentActivity } from '../../src/shared/agent'
 import { projectAgentExecutionFlow } from '../../src/renderer/src/agent/agent-execution-flow'
+import { DEFAULT_COLLABORATION_BUDGET, scaledAgentBudget, type AgentGoalContract } from '../../src/shared/agent-harness'
 
 const THREAD_ID = '71000000-0000-4000-8000-000000000001'
 const TURN_ID = '71000000-0000-4000-8000-000000000002'
@@ -391,5 +392,24 @@ describe('Agent execution flow projection', () => {
     expect(compact.hiddenStageCount).toBeGreaterThan(0)
     expect(expanded.stages).toHaveLength(24)
     expect(expanded.hiddenStageCount).toBeGreaterThan(0)
+  })
+  it('names the step limit a turn ran out of, with its count, and offers to carry on', () => {
+    const GOAL_ID = '71000000-0000-4000-8000-000000000009'
+    const stopped = turn({ goalId: GOAL_ID, status: 'budget_limited', errorCode: 'BUDGET_SCENE_WRITES', sceneWriteBatchesUsed: 4, toolCallsUsed: 4, completedAt: '2026-09-01T10:00:09.000Z' })
+    const goal = { id: GOAL_ID, budget: DEFAULT_COLLABORATION_BUDGET } as AgentGoalContract
+    const flow = projectAgentExecutionFlow({ ...snapshot(stopped), activeGoal: goal }, TURN_ID, Date.parse('2026-09-01T10:00:10.000Z'))
+    expect(flow).toMatchObject({ headline: '本轮画布修改次数已用完', statusLabel: '已停止', canContinue: true, canRestoreRequest: false })
+    expect(flow?.summary).toContain('4/4 批')
+    expect(flow?.summary).toContain('Agent 每轮步数')
+
+    const timedOut = projectAgentExecutionFlow(snapshot(turn({ status: 'budget_limited', errorCode: 'BUDGET_WALL_TIME' })), TURN_ID)
+    expect(timedOut?.canContinue).toBe(false)
+  })
+
+  it('raises the per-turn allowance by the owner\'s multiple, but never the spending', () => {
+    const raised = scaledAgentBudget(DEFAULT_COLLABORATION_BUDGET, 4)
+    expect(raised).toMatchObject({ maxModelTurns: 32, maxToolCalls: 48, maxSceneWriteBatches: 16, maxWallTimeMs: 20 * 60_000 })
+    expect(raised).toMatchObject({ maxGenerationJobs: 0, maxGeneratedImages: 0, maxCostCny: 0, maxRecoveryAttempts: 3 })
+    expect(scaledAgentBudget(DEFAULT_COLLABORATION_BUDGET, 1)).toBe(DEFAULT_COLLABORATION_BUDGET)
   })
 })

@@ -100,6 +100,7 @@ import { DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imagePro
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
+  ProviderExecutionPolicyInput,
   ProviderConfigFile,
   ProviderConnectionTestInput,
   ProviderConnectionTestResult,
@@ -676,6 +677,7 @@ export class GenerationRuntime {
       planner,
       ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: 40 }),
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
+      budgetScale: () => this.#executionPolicy.agentStepScale,
       logger: this.#diagnosticLog,
       activityLedger,
       toolExecutor,
@@ -1422,7 +1424,7 @@ export class GenerationRuntime {
     return snapshot
   }
 
-  async setProviderExecutionPolicy(input: ProviderExecutionPolicy): Promise<ProviderSettingsSnapshot> {
+  async setProviderExecutionPolicy(input: ProviderExecutionPolicyInput): Promise<ProviderSettingsSnapshot> {
     const snapshot = await this.#providerSettings.setExecutionPolicy(input)
     await this.#refreshConfiguredImageProvider()
     return snapshot

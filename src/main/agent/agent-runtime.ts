@@ -52,6 +52,8 @@ export interface AgentRuntimeOptions {
   readonly repository: ConversationRepository
   readonly planner: AgentPlanner
   readonly generationPolicy?: GenerationPolicy
+  /** The owner's multiple of the standard per-turn allowance. */
+  readonly budgetScale?: () => number
   readonly maxSteps?: number
   readonly now?: () => string
   readonly logger?: DiagnosticLogger
@@ -155,6 +157,7 @@ export class AgentRuntime {
       ...(options.loadGenerationJob === undefined ? {} : { loadGenerationJob: options.loadGenerationJob }),
       ...(options.activateGenerationJob === undefined ? {} : { activateGenerationJob: options.activateGenerationJob }),
       generationPolicy: this.#generationPolicy,
+      ...(options.budgetScale === undefined ? {} : { budgetScale: options.budgetScale }),
       now: this.#now,
       projection: this.#persistentProjection()
     })

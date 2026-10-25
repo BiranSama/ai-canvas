@@ -501,7 +501,13 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
 
   const submit = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault()
-    const text = draft.trim()
+    await submitText(draft.trim(), true)
+  }
+
+  // After a turn runs out of steps: a new turn on the same work, leaving whatever is being typed alone.
+  const continueAfterLimit = (): Promise<void> => submitText('接着完成刚才没做完的部分。', false)
+
+  const submitText = async (text: string, fromDraft: boolean): Promise<void> => {
     if (text.length === 0 || submittingRef.current) return
     submittingRef.current = true
     setSubmitting(true)
@@ -511,12 +517,12 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
       const request = await createAgentRequest(text, autoGenerate, 'selection', ephemeralAnnotation)
       if (!isCurrentProject()) return
       const run = !hasActiveTurn
-        ? await window.desktop.startAgentRun(request, agentMode, effectiveIdleTaskRelation)
+        ? await window.desktop.startAgentRun(request, agentMode, fromDraft ? effectiveIdleTaskRelation : 'continue_current')
         : await window.desktop.inputAgentRun(request, adaptLegacyTurnInputMode(inputMode))
       if (!isCurrentProject()) return
       if (ephemeralAnnotation !== null) markAnnotationSubmitted(run.id, text)
       else if (annotationVisible) clearAnnotation()
-      completeAcceptedTurn()
+      if (fromDraft) completeAcceptedTurn()
       if (!hasActiveTurn) setIdleTaskRelation('continue_current')
       setExplicitInputMode(null)
       await refresh()
@@ -918,6 +924,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                     onToggle={() => setActivityExpanded((current) => !current)}
                     onCancel={() => void cancel()}
                     onRestoreRequest={restoreCurrentRequest}
+                    onContinue={() => void continueAfterLimit()}
                     showCancel={waitingDecision === null || activeRun?.status !== 'awaiting_confirmation'}
                   />
                 )}

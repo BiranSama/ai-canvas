@@ -27,7 +27,7 @@ import type {
   ConfigurableProviderId,
   ProviderConnectionTestInput,
   ProviderConnectionTestResult,
-  ProviderExecutionPolicy,
+  ProviderExecutionPolicyInput,
   ProviderPublicConfigInput,
   ProviderSecretInput,
   ProviderSettingsSnapshot
@@ -231,7 +231,7 @@ export interface DesktopApi {
   getAgentEngine(): Promise<AgentEngineSetting>
   setAgentEngine(engine: AgentEngine): Promise<AgentEngineSetting>
   setProviderConfig(input: ProviderPublicConfigInput): Promise<ProviderSettingsSnapshot>
-  setProviderExecutionPolicy(input: ProviderExecutionPolicy): Promise<ProviderSettingsSnapshot>
+  setProviderExecutionPolicy(input: ProviderExecutionPolicyInput): Promise<ProviderSettingsSnapshot>
   setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot>
   deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot>
   addImageProvider(): Promise<ProviderSettingsSnapshot>

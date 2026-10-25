@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentHarnessSnapshot, AgentItem, AgentItemStatus, AgentTurn, AgentTurnStatus } from '../../../shared/agent-harness'
+import type { AgentEvent, AgentHarnessSnapshot, AgentItem, AgentItemStatus, AgentRunBudget, AgentTurn, AgentTurnStatus } from '../../../shared/agent-harness'
 import type { AgentActivity, AgentActivityState } from '../../../shared/agent'
 import { completionFactsSchema } from '../../../shared/design-capability'
 import { activeTurnElapsedMs } from '../../../shared/execution-timing'
@@ -52,6 +52,19 @@ export interface AgentExecutionFlow {
   readonly hiddenStageCount: number
   readonly canCancel: boolean
   readonly canRestoreRequest: boolean
+  /** The turn ran out of steps with work left; a follow-up turn can pick it up. */
+  readonly canContinue?: boolean
+}
+
+/** The per-turn step limits, what each counts, and the turn's use of it. */
+const STEP_LIMITS = {
+  BUDGET_SCENE_WRITES: { label: '画布修改', unit: '批', used: (turn: AgentTurn) => turn.sceneWriteBatchesUsed, limit: (budget: AgentRunBudget) => budget.maxSceneWriteBatches },
+  BUDGET_TOOL_CALLS: { label: '工具调用', unit: '次', used: (turn: AgentTurn) => turn.toolCallsUsed, limit: (budget: AgentRunBudget) => budget.maxToolCalls },
+  BUDGET_MODEL_TURNS: { label: '模型回合', unit: '轮', used: (turn: AgentTurn) => turn.modelTurnsUsed, limit: (budget: AgentRunBudget) => budget.maxModelTurns }
+} as const
+
+function isStepLimit(code: string | null): code is keyof typeof STEP_LIMITS {
+  return code !== null && code in STEP_LIMITS
 }
 
 interface ProjectionOptions {
@@ -544,8 +557,17 @@ function isTimeout(turn: AgentTurn): boolean {
 function flowCopy(
   turn: AgentTurn,
   timeout: boolean,
-  latestProvider: AgentProviderAttemptEventV1 | null
+  latestProvider: AgentProviderAttemptEventV1 | null,
+  budget: AgentRunBudget | null
 ): Pick<AgentExecutionFlow, 'headline' | 'summary' | 'statusLabel'> {
+  if (isStepLimit(turn.errorCode)) {
+    const limit = STEP_LIMITS[turn.errorCode]
+    const count = budget === null ? `${limit.used(turn)} ${limit.unit}` : `${limit.used(turn)}/${limit.limit(budget)} ${limit.unit}`
+    return {
+      headline: `本轮${limit.label}次数已用完`, statusLabel: '已停止',
+      summary: `这一轮的${limit.label}已用 ${count}，做好的部分都保留。点「接着做」会开始新的一轮继续；常做大改动的话，可以在 设置 → 执行策略 把「Agent 每轮步数」调大。`
+    }
+  }
   if (turn.errorCode === 'BUDGET_WALL_TIME') return { headline: '本轮时限已到', statusLabel: '已停止',
     summary: '后续操作已停止，已完成的作品保留。已提交图片继续受原任务时限约束，可在生成页查看或停止。' }
   if (turn.errorCode === 'TURN_TIME_UNVERIFIED') return { headline: '原任务时限待核对', statusLabel: '已停止', summary: '旧任务没有可核对的时限，未补一段新的执行时间。现有作品仍可查看。' }
@@ -643,7 +665,8 @@ export function projectAgentExecutionFlow(
 
   const limit = options.expanded === true ? 24 : 6
   const visibleStages = stages.length > limit ? stages.slice(-limit) : stages
-  const copy = flowCopy(turn, timeout, latestProvider)
+  const goal = snapshot.activeGoal?.id === turn.goalId ? snapshot.activeGoal : null
+  const copy = flowCopy(turn, timeout, latestProvider, goal?.budget ?? null)
   const latestLifecycle = observableEvents.flatMap((event) => {
     const parsed = parseAgentObservableEvent(event.type, event.payload)
     return parsed === null ? [] : [parsed]
@@ -675,6 +698,7 @@ export function projectAgentExecutionFlow(
     totalStageCount: stages.length,
     hiddenStageCount: Math.max(0, stages.length - visibleStages.length),
     canCancel: ACTIVE_TURN_STATUSES.has(turn.status),
+    canContinue: turn.status === 'budget_limited' && isStepLimit(turn.errorCode),
     canRestoreRequest: timeout || turn.status === 'failed' || turn.status === 'cancelled' || turn.status === 'interrupted' || turn.errorCode === 'BUDGET_WALL_TIME' || turn.errorCode === 'TURN_TIME_UNVERIFIED'
   }
 }
