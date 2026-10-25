@@ -59,6 +59,8 @@ describe('aspect-ratio decision', () => {
       { aspectWidth: 16, aspectHeight: 9 }, { aspectWidth: 16, aspectHeight: 9 }, { aspectWidth: 16, aspectHeight: 9 }
     ])
     expect(statedRatio('做一张 1024x1280 的海报')).toBeNull()
+    expect(statedRatio('做一张 512x768 的海报')).toBeNull()
+    expect(statedRatio('做一张 512x768 的海报，比例 2:3')).toEqual({ aspectWidth: 2, aspectHeight: 3 })
     expect(statedRatio('做一张咖啡海报')).toBeNull()
   })
 })

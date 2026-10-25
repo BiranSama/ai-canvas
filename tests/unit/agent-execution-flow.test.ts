@@ -404,6 +404,11 @@ describe('Agent execution flow projection', () => {
 
     const timedOut = projectAgentExecutionFlow(snapshot(turn({ status: 'budget_limited', errorCode: 'BUDGET_WALL_TIME' })), TURN_ID)
     expect(timedOut?.canContinue).toBe(false)
+
+    // A temporary try is accepted or dropped first; carrying on would pick up the formal task instead.
+    const temporary = projectAgentExecutionFlow(snapshot(turn({ status: 'budget_limited', errorCode: 'BUDGET_TOOL_CALLS', taskRelation: 'temporary_try', temporaryState: 'pending' })), TURN_ID)
+    expect(temporary?.canContinue).toBe(false)
+    expect(temporary?.summary).toContain('接受或放弃这个临时方向')
   })
 
   it('raises the per-turn allowance by the owner\'s multiple, but never the spending', () => {

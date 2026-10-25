@@ -67,6 +67,14 @@ function isStepLimit(code: string | null): code is keyof typeof STEP_LIMITS {
   return code !== null && code in STEP_LIMITS
 }
 
+/**
+ * A follow-up turn carries on the current formal task; a temporary try
+ * waiting to be accepted or dropped is not one, so it is decided first.
+ */
+function canContinue(turn: AgentTurn): boolean {
+  return turn.status === 'budget_limited' && isStepLimit(turn.errorCode) && turn.taskRelation !== 'temporary_try'
+}
+
 interface ProjectionOptions {
   readonly expanded?: boolean
   readonly activities?: readonly AgentActivity[]
@@ -563,9 +571,10 @@ function flowCopy(
   if (isStepLimit(turn.errorCode)) {
     const limit = STEP_LIMITS[turn.errorCode]
     const count = budget === null ? `${limit.used(turn)} ${limit.unit}` : `${limit.used(turn)}/${limit.limit(budget)} ${limit.unit}`
+    const next = canContinue(turn) ? '点「接着做」会开始新的一轮继续' : '先决定接受或放弃这个临时方向'
     return {
       headline: `本轮${limit.label}次数已用完`, statusLabel: '已停止',
-      summary: `这一轮的${limit.label}已用 ${count}，做好的部分都保留。点「接着做」会开始新的一轮继续；常做大改动的话，可以在 设置 → 执行策略 把「Agent 每轮步数」调大。`
+      summary: `这一轮的${limit.label}已用 ${count}，做好的部分都保留。${next}；常做大改动的话，可以在 设置 → 执行策略 把「Agent 每轮步数」调大。`
     }
   }
   if (turn.errorCode === 'BUDGET_WALL_TIME') return { headline: '本轮时限已到', statusLabel: '已停止',
@@ -698,7 +707,7 @@ export function projectAgentExecutionFlow(
     totalStageCount: stages.length,
     hiddenStageCount: Math.max(0, stages.length - visibleStages.length),
     canCancel: ACTIVE_TURN_STATUSES.has(turn.status),
-    canContinue: turn.status === 'budget_limited' && isStepLimit(turn.errorCode),
+    canContinue: canContinue(turn),
     canRestoreRequest: timeout || turn.status === 'failed' || turn.status === 'cancelled' || turn.status === 'interrupted' || turn.errorCode === 'BUDGET_WALL_TIME' || turn.errorCode === 'TURN_TIME_UNVERIFIED'
   }
 }
