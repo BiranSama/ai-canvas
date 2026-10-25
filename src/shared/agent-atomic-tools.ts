@@ -5,6 +5,7 @@ import {
   elementControlIntentSchema,
   elementProvenanceSchema,
   groupElementSchema,
+  imageEffectsSchema,
   normalizedTransformSchema,
   sceneElementSchema,
   textVisualWeightSchema
@@ -81,7 +82,8 @@ export const sceneElementChangesSchema = z.object({
   resultAssetId: idSchema.nullable().optional(),
   fidelity: z.number().finite().min(0).max(1).optional(),
   finalVisible: z.boolean().optional(),
-  shape: z.enum(['rectangle', 'ellipse', 'line']).optional(),
+  shape: z.enum(['rectangle', 'ellipse', 'line', 'path']).optional(),
+  path: z.string().min(1).max(60_000).optional(),
   cornerRadius: z.number().finite().min(0).max(0.5).optional(),
   role: z.enum(['final', 'placeholder']).optional(),
   subject: z.string().trim().min(1).max(1_000).optional(),
@@ -99,7 +101,8 @@ export const sceneElementChangesSchema = z.object({
   range: z.number().finite().positive().max(4).optional(),
   targetElementIds: z.array(idSchema).max(1_000).optional(),
   mode: z.enum(['edit', 'protect', 'generate']).optional(),
-  feather: z.number().finite().min(0).max(1).optional()
+  feather: z.number().finite().min(0).max(1).optional(),
+  effects: imageEffectsSchema.optional()
 }).strict().refine((changes) => Object.keys(changes).length > 0, 'At least one supported element field is required.')
 
 export const sceneUpdateElementsToolSchema = z.object({

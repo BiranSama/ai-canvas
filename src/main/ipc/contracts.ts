@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { appearanceSettingsUpdateSchema } from '../../shared/appearance-settings'
+import { agentEngineSchema } from '../../shared/agent-engine'
 export {
   generationResultFavoriteInputSchema,
   placeGenerationResultInputSchema
@@ -19,6 +20,7 @@ import { canvasGenerationInputSchema } from '../../shared/reference'
 import { canvasEditInputSchema } from '../../shared/edit'
 import {
   configurableProviderIdSchema,
+  imageProviderIdSchema,
   providerConnectionTestInputSchema,
   providerExecutionPolicySchema,
   providerPublicConfigSchema,
@@ -58,6 +60,16 @@ export const appearanceSettingsSetSchema = appearanceSettingsUpdateSchema
 export const diagnosticExportSchema = diagnosticExportInputSchema
 
 export const generationJobIdSchema = z.string().min(1).max(200)
+
+export const unifiedRenderStartSchema = z.object({
+  requirement: z.string().trim().max(2_000),
+  count: z.number().int().min(1).max(4)
+}).strict()
+
+export const imageToneMatchSchema = z.object({
+  elementId: z.string().uuid(),
+  strength: z.number().finite().min(0).max(1)
+}).strict()
 export const generationEnqueueSchema = generationRequestSchema
 export const generationProfileEnqueueSchema = generationProfileRequestSchema
 export const generationRetrySchema = z.object({
@@ -77,9 +89,11 @@ export const canvasGenerationSchema = canvasGenerationInputSchema
 export const canvasEditSchema = canvasEditInputSchema
 export const providerSecretSetSchema = providerSecretInputSchema
 export const providerConnectionTestSchema = providerConnectionTestInputSchema
+export const agentEngineSetSchema = agentEngineSchema
 export const providerConfigSetSchema = providerPublicConfigSchema
 export const providerExecutionPolicySetSchema = providerExecutionPolicySchema
 export const providerSecretDeleteSchema = configurableProviderIdSchema
+export const providerImageIdSchema = imageProviderIdSchema
 export const projectCreateSchema = projectCreateInputSchema
 export const projectIdSchema = projectIdInputSchema
 export const projectFavoriteSchema = projectFavoriteInputSchema

@@ -9,7 +9,8 @@ import {
   type ProviderConnectionTestResult,
   type ProviderPublicConfig
 } from '../../shared/provider-settings'
-import { createConfiguredLlmProtocol } from '../agent/llm-protocol-factory'
+import { createConfiguredLlmProtocol, createConfiguredTurnProtocol } from '../agent/llm-protocol-factory'
+import { turnText, turnToolCalls, type LlmAssistantTurn, type LlmTurnInput } from '../agent/llm/transcript'
 import { ArkHttpClient, ArkHttpError } from './ark-http-client'
 import type { ProviderUsageReservation } from './provider-usage-ledger'
 
@@ -23,6 +24,30 @@ interface ProviderConnectionValidatorOptions {
 }
 
 const verificationArgumentsSchema = z.object({ ok: z.literal(true) }).strict()
+
+const VERIFY_TOOL = {
+  name: 'verifyAiCanvasConnection',
+  description: '确认文字模型可以返回结构化工具调用。',
+  parameters: {
+    type: 'object',
+    properties: { ok: { type: 'boolean', description: '必须设为 true。' } },
+    required: ['ok'],
+    additionalProperties: false
+  }
+}
+
+/** A 16×16 solid red PNG for checking that images inside tool results are seen. */
+const RED_SQUARE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mN4oKBAEmIY1TCqYfhqAADc5yAQocSb7AAAAABJRU5ErkJggg=='
+
+function showsThinking(turn: LlmAssistantTurn): boolean {
+  if (turn.parts.some((part) => part.type === 'reasoning') || (turn.usage?.reasoningTokens ?? 0) > 0) return true
+  const payload = turn.native.payload
+  const entries: unknown[] = Array.isArray(payload) ? payload : [payload]
+  return entries.some((entry) => typeof entry === 'object' && entry !== null && (
+    ['reasoning', 'thinking', 'redacted_thinking'].includes(String((entry as Record<string, unknown>).type))
+    || typeof (entry as Record<string, unknown>).reasoning_content === 'string'
+  ))
+}
 
 function failurePresentation(error: unknown): {
   code: string
@@ -65,6 +90,9 @@ function failurePresentation(error: unknown): {
   if (code === 'PROVIDER_THINKING_TOOL_CHOICE_UNSUPPORTED') {
     return { code, title: '思考模式不接受强制工具选择', detail, nextAction: '连接验证将在思考模式下改用自动工具选择；不会自动重试本次请求。', httpStatus, contentType }
   }
+  if (code === 'PROVIDER_REPLAY_REJECTED') {
+    return { code, title: '多步工具调用未通过', detail, nextAction: '第一步正常，但服务拒绝了交回的思考内容或工具结果。请换用该厂商推荐的协议后重试，或把这条结果发给开发者。', httpStatus, contentType }
+  }
   if (code === 'PROVIDER_PROTOCOL_MISMATCH' || code === 'MODEL_TOOL_CALL_MISSING') {
     return { code, title: '协议或工具调用不匹配', detail, nextAction: '核对协议选项、Base URL 和模型的 Function Calling 能力。', httpStatus, contentType }
   }
@@ -82,7 +110,7 @@ export class ProviderConnectionValidator {
   }
 
   async validate(inputValue: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
-    providerConnectionTestInputSchema.parse(inputValue)
+    const input = providerConnectionTestInputSchema.parse(inputValue)
     const config = await this.#options.config.read()
     const llm = config.providers.find((provider): provider is Extract<ProviderPublicConfig, { kind: 'llm' }> => provider.kind === 'llm')!
     const base = {
@@ -97,6 +125,7 @@ export class ProviderConnectionValidator {
     }
 
     let requestReserved = false
+    if (input.scope === 'agent_loop') return this.#validateAgentLoop(llm, base)
     try {
       if (llm.baseUrl === '' || llm.defaultModel === '') {
         throw new ArkHttpError('PROVIDER_CONFIG_INCOMPLETE', '请先保存完整的 Base URL、模型 ID 和协议。')
@@ -176,6 +205,118 @@ export class ProviderConnectionValidator {
         ...base,
         ok: false,
         requestsUsed: requestReserved ? 1 : 0,
+        toolCallingVerified: false,
+        failure: failurePresentation(error)
+      })
+    }
+  }
+
+  /**
+   * Two real steps, as the multi-step agent takes them: thinking on, a tool
+   * call, then the step's own output and the tool result sent back (with a
+   * small image when the model is declared to see images).
+   */
+  async #validateAgentLoop(
+    llm: Extract<ProviderPublicConfig, { kind: 'llm' }>,
+    base: Omit<ProviderConnectionTestResult, 'ok' | 'requestsUsed' | 'toolCallingVerified' | 'failure' | 'agentLoop'>
+  ): Promise<ProviderConnectionTestResult> {
+    let requestsUsed = 0
+    let step = 1
+    try {
+      if (llm.baseUrl === '' || llm.defaultModel === '') {
+        throw new ArkHttpError('PROVIDER_CONFIG_INCOMPLETE', '请先保存完整的 Base URL、模型 ID 和协议。')
+      }
+      const protocol = createConfiguredTurnProtocol(llm)
+      const stream = llm.transport.mode === 'stream' || llm.transport.mode === 'auto' && llm.capabilities.streaming
+      if (stream && !protocol.capabilities.streaming) {
+        throw new ArkHttpError('PROVIDER_STREAM_UNSUPPORTED', '当前协议没有声明流式能力；验证请求尚未发送。')
+      }
+      const http = new ArkHttpClient({
+        secrets: this.#options.secrets,
+        authorization: this.#options.authorization,
+        allowedBaseUrls: [llm.baseUrl],
+        ...(this.#options.fetcher === undefined ? {} : { fetcher: this.#options.fetcher })
+      })
+      const scopeId = randomUUID()
+      const send = async (input: LlmTurnInput): Promise<LlmAssistantTurn> => {
+        const request = protocol.buildTurnRequest(input, stream)
+        const live = {
+          ...request,
+          secretId: 'openai-compatible-llm',
+          providerId: 'openai-compatible-llm',
+          providerLabel: llm.label,
+          authorizationScopeId: `provider-connection:${scopeId}:${step}`,
+          expectedImages: 0,
+          costCeilingCny: CONNECTION_COST_CEILING_CNY,
+          signal: new AbortController().signal,
+          timeoutMs: llm.timeoutMs,
+          connectTimeoutMs: llm.transport.connectTimeoutMs,
+          firstEventTimeoutMs: llm.transport.firstEventTimeoutMs,
+          idleTimeoutMs: llm.transport.idleTimeoutMs,
+          observe: (event: { readonly phase: string }) => {
+            if (event.phase === 'reserved') requestsUsed += 1
+          }
+        } as const
+        return stream
+          ? http.postEventStream(live, protocol.createTurnStreamAccumulator())
+          : protocol.parseTurnResponse(await http.postLlmJson(live))
+      }
+      const maxOutputTokens = Math.max(2_048, Math.min(8_192, llm.maxOutputTokens))
+      const system = '你在帮 AI Canvas 验证连接。先调用 verifyAiCanvasConnection 并把 ok 设为 true；收到工具结果后，只按结果里的要求用一句话回复。'
+      const user = { role: 'user' as const, parts: [{ type: 'text' as const, text: '开始验证多步工具调用。' }] }
+      const first = await send({ system, messages: [user], tools: [VERIFY_TOOL], maxOutputTokens })
+      const call = turnToolCalls(first).find((candidate) => candidate.name === VERIFY_TOOL.name)
+      if (call === undefined || !verificationArgumentsSchema.safeParse(call.arguments).success) {
+        throw new ArkHttpError('MODEL_TOOL_CALL_MISSING', '模型返回了响应，但没有返回唯一且有效的验证工具调用。')
+      }
+      const vision = llm.capabilities.vision
+      step = 2
+      let second: LlmAssistantTurn
+      try {
+        second = await send({
+          system,
+          messages: [
+            user,
+            { role: 'assistant', parts: [...first.parts], native: first.native },
+            {
+              role: 'tool',
+              results: [{
+                callId: call.callId,
+                name: call.name,
+                isError: false,
+                content: [
+                  { type: 'text', text: vision ? '验证成功。附带的图片是一个纯色方块，请用一个词说出它的颜色。' : '验证成功。请回复「完成」。' },
+                  ...(vision ? [{ type: 'image' as const, image: { mimeType: 'image/png' as const, base64: RED_SQUARE_PNG } }] : [])
+                ]
+              }]
+            }
+          ],
+          tools: [VERIFY_TOOL],
+          maxOutputTokens
+        })
+      } catch (error) {
+        if (error instanceof ArkHttpError && error.status !== null && error.status >= 400 && error.status < 500 && error.status !== 401 && error.status !== 403 && error.status !== 429) {
+          throw new ArkHttpError('PROVIDER_REPLAY_REJECTED', error.message, error.status, error.contentType)
+        }
+        throw error
+      }
+      return providerConnectionTestResultSchema.parse({
+        ...base,
+        ok: true,
+        requestsUsed,
+        toolCallingVerified: true,
+        failure: null,
+        agentLoop: {
+          dialect: protocol.dialect.label,
+          thinkingObserved: showsThinking(first) || showsThinking(second),
+          visionVerified: vision ? /红|red/i.test(turnText(second)) : null
+        }
+      })
+    } catch (error) {
+      return providerConnectionTestResultSchema.parse({
+        ...base,
+        ok: false,
+        requestsUsed,
         toolCallingVerified: false,
         failure: failurePresentation(error)
       })

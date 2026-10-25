@@ -23,7 +23,32 @@ import { defaultProjectWorkContext, type ProjectWorkContext } from '../../../sha
 import { beginProjectHydration, endProjectHydration, projectGeneration } from './project-context-lifecycle'
 
 export type WorkspaceView = 'conversation' | 'canvas' | 'generate'
-export type CanvasTool = 'select' | 'hand' | 'image' | 'text' | 'sketch' | 'shape' | 'placeholder' | 'light' | 'mask'
+export type CanvasTool = 'select' | 'hand' | 'image' | 'text' | 'sketch' | 'shape' | 'placeholder' | 'light' | 'mask' | 'eyedropper' | 'brush' | 'eraser' | 'bucket' | 'gradient'
+
+export type PaintTool = 'brush' | 'eraser' | 'bucket' | 'gradient'
+
+export function isPaintTool(tool: CanvasTool): tool is PaintTool {
+  return tool === 'brush' || tool === 'eraser' || tool === 'bucket' || tool === 'gradient'
+}
+
+/** Each painting tool keeps its own options, as in Photoshop. Sizes are in canvas pixels. */
+export interface PaintSettings {
+  readonly brush: { readonly size: number; readonly hardness: number; readonly opacity: number; readonly flow: number }
+  readonly eraser: { readonly size: number; readonly hardness: number; readonly opacity: number; readonly flow: number }
+  readonly bucket: { readonly tolerance: number; readonly contiguous: boolean; readonly opacity: number }
+  readonly gradient: { readonly shape: 'linear' | 'radial'; readonly opacity: number }
+}
+
+export const DEFAULT_PAINT_SETTINGS: PaintSettings = {
+  brush: { size: 24, hardness: 0.8, opacity: 1, flow: 1 },
+  eraser: { size: 40, hardness: 0.8, opacity: 1, flow: 1 },
+  bucket: { tolerance: 32, contiguous: true, opacity: 1 },
+  gradient: { shape: 'linear', opacity: 1 }
+}
+
+/** Photoshop's defaults, which D restores. */
+export const DEFAULT_FOREGROUND_COLOR = '#000000'
+export const DEFAULT_BACKGROUND_COLOR = '#FFFFFF'
 
 export interface WorkspaceSceneClient {
   execute(input: SceneExecuteInput): Promise<SceneMutationResult>
@@ -41,6 +66,12 @@ interface WorkspaceState {
   editingGroupId: string | null
   activeView: WorkspaceView
   activeTool: CanvasTool
+  /** The foreground and background colours, as in Photoshop: the eyedropper sets them and Alt or Ctrl+Backspace fills with them. */
+  foregroundColor: string
+  backgroundColor: string
+  paintSettings: PaintSettings
+  /** The tool each shared toolbar slot last held, which its key or slot brings back. */
+  toolMemory: { readonly fill: 'bucket' | 'gradient'; readonly annotate: 'sketch' | 'placeholder' | 'light' }
   inspectorOpen: boolean
   inspectorTab: 'layers' | 'properties'
   zoom: number
@@ -55,6 +86,11 @@ interface WorkspaceState {
   setActiveView(view: WorkspaceView): void
   setProjectName(name: string): void
   setActiveTool(tool: CanvasTool): void
+  setForegroundColor(color: string): void
+  setBackgroundColor(color: string): void
+  swapColors(): void
+  resetColors(): void
+  setPaintSettings<Tool extends PaintTool>(tool: Tool, changes: Partial<PaintSettings[Tool]>): void
   setInspectorOpen(open: boolean): void
   setInspectorTab(tab: 'layers' | 'properties'): void
   enterGroupEditing(groupId: string): void
@@ -68,7 +104,8 @@ interface WorkspaceState {
   execute(summary: string, commands: readonly SceneCommand[]): Promise<boolean>
   updateElement(id: string, changes: Record<string, unknown>, summary?: string): Promise<boolean>
   deleteSelection(): Promise<boolean>
-  duplicateSelection(): Promise<boolean>
+  /** Copies the selected layers in place, each directly above its source, or moved by offset (Alt+drag). */
+  duplicateSelection(offset?: { readonly x: number; readonly y: number }): Promise<boolean>
   copySelection(): boolean
   cutSelection(): Promise<boolean>
   pasteSelection(): Promise<boolean>
@@ -230,6 +267,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     editingGroupId: null,
     activeView: 'canvas',
     activeTool: 'select',
+    foregroundColor: DEFAULT_FOREGROUND_COLOR,
+    backgroundColor: DEFAULT_BACKGROUND_COLOR,
+    paintSettings: DEFAULT_PAINT_SETTINGS,
+    toolMemory: { fill: 'bucket', annotate: 'sketch' },
     inspectorOpen: true,
     inspectorTab: 'layers',
     zoom: 1,
@@ -243,7 +284,19 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     workContextProblem: null,
     setActiveView: (activeView) => set({ activeView }),
     setProjectName: (projectName) => set({ projectName }),
-    setActiveTool: (activeTool) => set({ activeTool }),
+    setActiveTool: (activeTool) => set((state) => ({
+      activeTool,
+      toolMemory: activeTool === 'bucket' || activeTool === 'gradient'
+        ? { ...state.toolMemory, fill: activeTool }
+        : activeTool === 'sketch' || activeTool === 'placeholder' || activeTool === 'light'
+          ? { ...state.toolMemory, annotate: activeTool }
+          : state.toolMemory
+    })),
+    setForegroundColor: (foregroundColor) => set({ foregroundColor }),
+    setBackgroundColor: (backgroundColor) => set({ backgroundColor }),
+    swapColors: () => set((state) => ({ foregroundColor: state.backgroundColor, backgroundColor: state.foregroundColor })),
+    resetColors: () => set({ foregroundColor: DEFAULT_FOREGROUND_COLOR, backgroundColor: DEFAULT_BACKGROUND_COLOR }),
+    setPaintSettings: (tool, changes) => set((state) => ({ paintSettings: { ...state.paintSettings, [tool]: { ...state.paintSettings[tool], ...changes } } })),
     setInspectorOpen: (inspectorOpen) => set({ inspectorOpen }),
     setInspectorTab: (inspectorTab) => set({ inspectorTab }),
     enterGroupEditing: (groupId) => set((state) => {
@@ -344,7 +397,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       const roots = ids.filter((id) => !groupChildren.has(id))
       return get().execute(`删除 ${roots.length} 个元素`, roots.map((elementId) => ({ kind: 'element.remove', elementId })))
     },
-    duplicateSelection: async () => {
+    duplicateSelection: async (offset = { x: 0, y: 0 }) => {
       const scene = get().scene
       const roots = get().selectedIds
         .map((id) => scene.elements.find((element) => element.id === id))
@@ -352,6 +405,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       if (roots.length === 0) return false
       const commands: SceneCommand[] = []
       const newRootIds: string[] = []
+      const placements: { readonly cloneId: string; readonly sourceIndex: number }[] = []
+      const cloneOf = (source: SceneElement): SceneElement => {
+        const clone = structuredClone(source)
+        clone.id = createId()
+        clone.name = `${source.name} 副本`
+        clone.groupId = null
+        clone.transform = { ...clone.transform, x: clone.transform.x + offset.x, y: clone.transform.y + offset.y }
+        clone.zIndex = scene.elements.length + commands.length
+        if (clone.type === 'sketch') clone.strokes = clone.strokes.map((stroke) => ({ ...stroke, id: createId() }))
+        if (clone.type === 'mask') clone.paths = clone.paths.map((path) => ({ ...path, id: createId() }))
+        return clone
+      }
       for (const root of roots) {
         if (root.type === 'group') {
           const groupId = createId()
@@ -359,14 +424,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           for (const childId of root.childIds) {
             const child = scene.elements.find((element) => element.id === childId)
             if (child === undefined) continue
-            const clone = structuredClone(child)
-            clone.id = createId()
-            clone.name = `${child.name} 副本`
-            clone.groupId = null
-            clone.transform = { ...clone.transform, x: clone.transform.x + 0.02, y: clone.transform.y + 0.02 }
-            clone.zIndex = scene.elements.length + commands.length
-            if (clone.type === 'sketch') clone.strokes = clone.strokes.map((stroke) => ({ ...stroke, id: createId() }))
-            if (clone.type === 'mask') clone.paths = clone.paths.map((path) => ({ ...path, id: createId() }))
+            const clone = cloneOf(child)
             childIds.push(clone.id)
             commands.push({ kind: 'element.add', element: clone })
           }
@@ -380,16 +438,15 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           }
           continue
         }
-        const clone = structuredClone(root)
-        clone.id = createId()
-        clone.name = `${root.name} 副本`
-        clone.groupId = null
-        clone.transform = { ...clone.transform, x: clone.transform.x + 0.02, y: clone.transform.y + 0.02 }
-        clone.zIndex = scene.elements.length + commands.length
-        if (clone.type === 'sketch') clone.strokes = clone.strokes.map((stroke) => ({ ...stroke, id: createId() }))
-        if (clone.type === 'mask') clone.paths = clone.paths.map((path) => ({ ...path, id: createId() }))
+        const clone = cloneOf(root)
         commands.push({ kind: 'element.add', element: clone })
         newRootIds.push(clone.id)
+        placements.push({ cloneId: clone.id, sourceIndex: root.zIndex })
+      }
+      // As in Photoshop each copy sits directly above its source. Going from the
+      // highest source down keeps the lower sources' indices valid.
+      for (const { cloneId, sourceIndex } of [...placements].sort((left, right) => right.sourceIndex - left.sourceIndex)) {
+        commands.push({ kind: 'element.reorder', elementId: cloneId, toIndex: sourceIndex + 1 })
       }
       if (commands.length === 0 || !await get().execute(`复制 ${newRootIds.length} 个元素`, commands)) return false
       get().setSelection(newRootIds)

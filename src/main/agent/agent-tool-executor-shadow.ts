@@ -119,7 +119,7 @@ function tokenHash(token: string): string {
 }
 
 function commandTargetIds(scene: Scene, command: SceneCommand): readonly string[] {
-  if (command.kind === 'element.update' || command.kind === 'element.set-image' || command.kind === 'element.remove' || command.kind === 'element.reorder') {
+  if (command.kind === 'element.update' || command.kind === 'element.set-image' || command.kind === 'element.rasterize' || command.kind === 'element.remove' || command.kind === 'element.reorder') {
     return [command.elementId]
   }
   if (command.kind === 'element.group') return command.elementIds

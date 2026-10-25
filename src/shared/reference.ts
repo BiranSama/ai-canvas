@@ -140,6 +140,32 @@ export const canvasGenerationInputSchema = z.object({
   referenceMode: referenceModeSchema.default('hybrid')
 })
 
+/**
+ * Redraw the whole picture as one image: every exported layer except text
+ * goes to the image model as a reference, and the result is laid over those
+ * layers with the text kept on top.
+ */
+export const unifiedRenderInputSchema = z.object({
+  scene: sceneSchema,
+  requirement: z.string().trim().max(8_000).default(''),
+  providerId: z.string().min(1),
+  model: z.string().min(1),
+  count: z.number().int().min(1).max(4).default(1),
+  profileId: z.string().trim().min(1).max(120).default('local-sketch'),
+  confirmed: z.boolean().default(false),
+  sourceMessageId: z.string().min(1).nullable().default(null)
+})
+
+export const unifiedRenderResultSchema = z.object({
+  jobId: z.string().min(1),
+  jobStatus: generationJobStatusSchema,
+  sourceAssetId: z.string().uuid(),
+  coveredElementIds: z.array(z.string().uuid())
+})
+
+export type UnifiedRenderInput = z.input<typeof unifiedRenderInputSchema>
+export type UnifiedRenderResult = z.infer<typeof unifiedRenderResultSchema>
+
 export const canvasGenerationResultSchema = z.object({
   jobId: z.string().min(1),
   jobStatus: generationJobStatusSchema,

@@ -14,9 +14,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RuntimeInfo } from '../../../shared/desktop-api'
 import type { RecentProjectSummary, WorkspaceBootstrap } from '../../../shared/project'
 import appIconUrl from '../../../../build/icon.png'
-import { createElementForTool } from '../canvas/element-factory'
+import { isOpenableFile, OPENABLE_FILE_ACCEPT, openFileAsProject } from '../project/open-file-project'
+import { showAppNotice } from './app-notice'
 import { projectLibraryLocationLabel } from './project-library-label'
 import { ProviderSettingsSheet } from './ProviderSettingsSheet'
+import { activeModal } from '../interaction/keyboard-scope'
 import { useModalScope } from '../interaction/use-modal-scope'
 import { flushProjectWorkContext } from '../store/project-context-sync'
 
@@ -89,6 +91,19 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
     }
   }, [menuProjectId])
 
+  // Photoshop's Ctrl+N and Ctrl+O work here too: a blank project, or an image opened as one.
+  const createBlankRef = useRef<() => void>(() => undefined)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.defaultPrevented || event.isComposing || activeModal() !== null) return
+      const key = event.key.toLowerCase()
+      if (key === 'n') { event.preventDefault(); createBlankRef.current() }
+      else if (key === 'o') { event.preventDefault(); imageInputRef.current?.click() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   const run = async (action: () => Promise<WorkspaceBootstrap | null>): Promise<void> => {
     if (busy) return
     setBusy(true)
@@ -111,6 +126,7 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
       return result.cancelled ? null : result.bootstrap
     })
   }
+  useEffect(() => { createBlankRef.current = createBlank })
 
   const openExternal = (): void => {
     void run(async () => {
@@ -153,40 +169,11 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
       .finally(() => setBusy(false))
   }
 
-  const createFromImage = (file: File): void => {
+  const openFile = (file: File): void => {
     void run(async () => {
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-        throw new Error('请选择 PNG、JPEG 或 WebP 图片。')
-      }
-      const result = await window.desktop.createProject({ suggestedName: file.name.replace(/\.[^.]+$/, '') || '图片创作' })
-      if (result.cancelled || result.bootstrap === null) return null
-      const asset = await window.desktop.importAsset({
-        projectId: result.bootstrap.projectId,
-        name: file.name,
-        mimeType: file.type as 'image/png' | 'image/jpeg' | 'image/webp',
-        bytes: new Uint8Array(await file.arrayBuffer())
-      })
-      // The opened project's hydrator loads assets after switching Renderer identity.
-      const element = createElementForTool('image', result.bootstrap.scene, asset.id)
-      if (element === null) return result.bootstrap
-      const mutation = await window.desktop.executeSceneCommands({
-        projectId: result.bootstrap.projectId,
-        expectedSceneRevision: result.bootstrap.scene.revision,
-        batch: {
-          id: globalThis.crypto.randomUUID(),
-          origin: 'user',
-          summary: `从“${file.name}”开始项目`,
-          commands: [{ kind: 'element.add', element }]
-        }
-      })
-      if (!mutation.ok) throw new Error(mutation.error.message)
-      return {
-        ...result.bootstrap,
-        scene: mutation.receipt.state.scene,
-        sceneSequence: mutation.receipt.state.sequence,
-        canUndo: mutation.receipt.state.canUndo,
-        canRedo: mutation.receipt.state.canRedo
-      }
+      const opened = await openFileAsProject(file)
+      if (opened?.notice != null) showAppNotice(opened.notice)
+      return opened?.bootstrap ?? null
     })
   }
 
@@ -198,8 +185,8 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
       }}
       onDrop={(event) => {
         event.preventDefault()
-        const file = [...event.dataTransfer.files].find((candidate) => candidate.type.startsWith('image/'))
-        if (file !== undefined) createFromImage(file)
+        const file = [...event.dataTransfer.files].find(isOpenableFile)
+        if (file !== undefined) openFile(file)
       }}
     >
       <header className="library-titlebar">
@@ -304,10 +291,10 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
       </footer>
       {problem !== null && <div className="library-problem glass-surface" role="alert">{problem}</div>}
       {notice !== null && <div className="library-notice glass-surface" role="status">{notice}</div>}
-      <input ref={imageInputRef} className="visually-hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => {
+      <input ref={imageInputRef} className="visually-hidden" type="file" accept={OPENABLE_FILE_ACCEPT} onChange={(event) => {
         const file = event.currentTarget.files?.[0]
         event.currentTarget.value = ''
-        if (file !== undefined) createFromImage(file)
+        if (file !== undefined) openFile(file)
       }} />
       {settingsOpen && <ProviderSettingsSheet onClose={() => setSettingsOpen(false)} />}
       {deleteCandidate !== null && (

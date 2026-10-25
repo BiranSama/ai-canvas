@@ -16,6 +16,10 @@ const vaultFileSchema = z.object({
 })
 type VaultFile = z.infer<typeof vaultFileSchema>
 
+/** What Main needs from a credential vault; the eval harness substitutes an in-memory one. */
+export type ProviderSecretVault = Pick<ElectronSecretVault,
+  'isAvailable' | 'has' | 'set' | 'get' | 'captureReference' | 'hasReference' | 'getByReference' | 'startBoundRequest' | 'delete'>
+
 export class ElectronSecretVault {
   readonly #filePath: string
   #chain = Promise.resolve()

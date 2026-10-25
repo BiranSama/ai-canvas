@@ -1,3 +1,4 @@
+import type { PsdDocumentImport } from './psd-import'
 import type { AgentRequest, AgentRun, ConversationSnapshot } from './agent'
 import type { AcceptDesignReviewInput } from './design-capability'
 import type { AppearanceSettingsSnapshot, AppearanceSettingsUpdate } from './appearance-settings'
@@ -13,8 +14,9 @@ import type {
   UpdateProjectMemoryInput
 } from './agent-context'
 import type { GenerationJob, GenerationProfileRequest, GenerationProfileSnapshot, GenerationRequest, ProviderCapabilities } from './generation'
-import type { CanvasGenerationInput, CanvasGenerationResult } from './reference'
+import type { CanvasGenerationInput, CanvasGenerationResult, UnifiedRenderResult } from './reference'
 import type { CanvasEditInput, CanvasEditResult } from './edit'
+import type { AgentEngine, AgentEngineSetting } from './agent-engine'
 import type {
   GenerationResultFamily,
   GenerationResultFavoriteInput,
@@ -26,13 +28,14 @@ import type {
   ProviderConnectionTestInput,
   ProviderConnectionTestResult,
   ProviderExecutionPolicy,
-  ProviderPublicConfig,
+  ProviderPublicConfigInput,
   ProviderSecretInput,
   ProviderSettingsSnapshot
 } from './provider-settings'
 import type {
   AssetImportInput,
   ImportedAsset,
+  PixelImportInput,
   ProjectActionResult,
   ProjectCreateInput,
   ProjectDeleteResult,
@@ -52,9 +55,17 @@ import type { DesignDirectionSelectionInput, DesignDirectionSelectionResult } fr
 import type { DiagnosticExportResult } from './diagnostics'
 import type { ProjectWorkContext } from './project-work-context'
 import type { GenerationReferencePreviewInput, GenerationReferencePreview } from './generation-reference'
+import type { LocalFontFamily } from './local-fonts'
+import type { ImageEffects } from '../domain'
 
 export const DESKTOP_CHANNELS = {
   runtimeInfo: 'desktop:runtime-info',
+  localFonts: 'desktop:local-fonts',
+  openFileRequests: 'desktop:open-file-requests',
+  psdRead: 'project:psd-read',
+  paintBake: 'scene:paint-bake',
+  imageToneMatch: 'scene:image-tone-match',
+  unifiedRender: 'generation:unified-render',
   appearanceSettings: 'appearance:settings',
   appearanceSettingsSet: 'appearance:settings-set',
   diagnosticExport: 'diagnostic:export',
@@ -74,10 +85,15 @@ export const DESKTOP_CHANNELS = {
   canvasEdit: 'generation:edit',
   providerSettings: 'provider:settings',
   providerConnectionTest: 'provider:connection-test',
+  agentEngineGet: 'agent:engine-get',
+  agentEngineSet: 'agent:engine-set',
   providerConfigSet: 'provider:config-set',
   providerExecutionPolicySet: 'provider:execution-policy-set',
   providerSecretSet: 'provider:secret-set',
   providerSecretDelete: 'provider:secret-delete',
+  providerImageAdd: 'provider:image-add',
+  providerImageRemove: 'provider:image-remove',
+  providerImageDefaultSet: 'provider:image-default-set',
   projectRecent: 'project:recent',
   projectCreate: 'project:create',
   projectOpen: 'project:open',
@@ -88,6 +104,7 @@ export const DESKTOP_CHANNELS = {
   projectLibraryChange: 'project:library-change',
   projectSaveAs: 'project:save-as',
   assetImport: 'asset:import',
+  assetImportPixels: 'asset:import-pixels',
   workspaceBootstrap: 'workspace:bootstrap',
   projectWorkContextSave: 'project:work-context-save',
   windowCloseReady: 'window:close-ready',
@@ -121,7 +138,8 @@ export const DESKTOP_EVENTS = {
   windowClosing: 'window:closing',
   sceneChanged: 'scene:changed',
   agentEvent: 'agent:event',
-  appearanceChanged: 'appearance:changed'
+  appearanceChanged: 'appearance:changed',
+  openFileRequested: 'desktop:open-file-requested'
 } as const
 
 export type DesktopPlatform =
@@ -166,9 +184,28 @@ export interface GenerationProviderInfo {
   }[]
 }
 
+/** An image the system asked the app to open, as from Explorer's 打开方式 or a file dropped on the app's icon. */
+export interface OpenFileRequest {
+  readonly name: string
+  readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/vnd.adobe.photoshop'
+  readonly bytes: Uint8Array
+}
+
 export interface DesktopApi {
   onWindowClosing(listener: () => Promise<void>): () => void
   getRuntimeInfo(): Promise<RuntimeInfo>
+  /** Font families installed on this computer, scanned once per run unless asked to rescan. */
+  listLocalFonts(rescan?: boolean): Promise<readonly LocalFontFamily[]>
+  /** Images waiting to be opened as projects; each is handed over once. */
+  takeOpenFileRequests(): Promise<readonly OpenFileRequest[]>
+  /** Called when the system asks to open another image; take it with takeOpenFileRequests. */
+  onOpenFileRequested(listener: () => void): () => void
+  /** A PSD's layers as PNGs with their place, opacity, visibility, blend mode and group, ready to become a project. */
+  readPsd(bytes: Uint8Array): Promise<PsdDocumentImport>
+  /** Replays an image layer's recorded paint into a new asset; the scene then swaps it in and drops the operations listed. */
+  bakePaint(elementId: string): Promise<{ readonly assetId: string; readonly paintIds: readonly string[] } | null>
+  /** How to shift an image's colour part of the way (strength 0–1) towards the picture around it; null when it cannot be measured. */
+  matchImageTone(input: { readonly elementId: string; readonly strength: number }): Promise<{ readonly colorMatch: NonNullable<ImageEffects['colorMatch']>; readonly opaque: boolean } | null>
   getAppearanceSettings(): Promise<AppearanceSettingsSnapshot>
   setAppearanceSettings(input: AppearanceSettingsUpdate): Promise<AppearanceSettingsSnapshot>
   exportDiagnostics(): Promise<DiagnosticExportResult>
@@ -186,13 +223,20 @@ export interface DesktopApi {
   placeGenerationResult(input: PlaceGenerationResultInput): Promise<PlaceGenerationResultReceipt>
   readGenerationAsset(assetId: string, thumbnail?: boolean, projectId?: string): Promise<string>
   generateFromCanvas(input: CanvasGenerationInput): Promise<CanvasGenerationResult>
+  /** Redraws every layer but text as one picture on the default image service; the owner confirmed the cost first. */
+  startUnifiedRender(input: { readonly requirement: string; readonly count: number }): Promise<UnifiedRenderResult>
   editFromCanvas(input: CanvasEditInput): Promise<CanvasEditResult>
   getProviderSettings(): Promise<ProviderSettingsSnapshot>
   validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult>
-  setProviderConfig(input: ProviderPublicConfig): Promise<ProviderSettingsSnapshot>
+  getAgentEngine(): Promise<AgentEngineSetting>
+  setAgentEngine(engine: AgentEngine): Promise<AgentEngineSetting>
+  setProviderConfig(input: ProviderPublicConfigInput): Promise<ProviderSettingsSnapshot>
   setProviderExecutionPolicy(input: ProviderExecutionPolicy): Promise<ProviderSettingsSnapshot>
   setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot>
   deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot>
+  addImageProvider(): Promise<ProviderSettingsSnapshot>
+  removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
+  setDefaultImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
   listRecentProjects(): Promise<readonly RecentProjectSummary[]>
   createProject(input: ProjectCreateInput): Promise<ProjectActionResult>
   openProject(): Promise<ProjectActionResult>
@@ -203,6 +247,7 @@ export interface DesktopApi {
   changeProjectLibraryLocation(mode: ProjectLibraryChangeMode): Promise<ProjectLibraryLocationResult>
   saveProjectAs(input: ProjectCreateInput): Promise<ProjectActionResult>
   importAsset(input: AssetImportInput): Promise<ImportedAsset>
+  importPixels(input: PixelImportInput): Promise<ImportedAsset>
   getWorkspaceBootstrap(): Promise<WorkspaceBootstrap>
   saveProjectWorkContext(context: ProjectWorkContext): Promise<void>
   executeSceneCommands(input: SceneExecuteInput): Promise<SceneMutationResult>

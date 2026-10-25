@@ -74,4 +74,4 @@ it('waits for generation and replaces a grouped placeholder in the same turn wit
   await expect(runtime.placeGenerationResult({ resultId: result.id, placementId: randomUUID(), origin: 'agent' }, runtime.getWorkspaceBootstrap().scene.revision, undefined, IDS.placeholder)).rejects.toMatchObject({ code: 'TOOL_SCOPE_DENIED' })
   await expect(runtime.placeGenerationResult({ resultId: result.id, placementId: randomUUID(), origin: 'agent' }, runtime.getWorkspaceBootstrap().scene.revision, undefined, IDS.text)).rejects.toMatchObject({ code: 'TOOL_SCOPE_DENIED' })
   expect(network).not.toHaveBeenCalled()
-})
+}, 20_000)

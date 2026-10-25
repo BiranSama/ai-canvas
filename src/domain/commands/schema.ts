@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { canvasSchema, sceneElementSchema, sceneRelationSchema } from '../scene/schema'
+import { canvasSchema, normalizedTransformSchema, sceneElementSchema, sceneRelationSchema } from '../scene/schema'
 import { creativeContextSchema, elementProvenanceSchema } from '../creative/schema'
 
 const idSchema = z.string().uuid()
@@ -30,6 +30,14 @@ const setImageCommandSchema = z.object({
   elementId: idSchema,
   assetId: idSchema,
   provenance: elementProvenanceSchema
+})
+
+/** A text, shape or image layer becomes plain pixels, as drawn, in place: Photoshop's 栅格化图层. */
+const rasterizeElementCommandSchema = z.object({
+  kind: z.literal('element.rasterize'),
+  elementId: idSchema,
+  assetId: idSchema,
+  transform: normalizedTransformSchema
 })
 
 const removeElementCommandSchema = z.object({
@@ -72,6 +80,7 @@ export const sceneCommandSchema = z.discriminatedUnion('kind', [
   addElementCommandSchema,
   updateElementCommandSchema,
   setImageCommandSchema,
+  rasterizeElementCommandSchema,
   removeElementCommandSchema,
   reorderElementCommandSchema,
   groupElementsCommandSchema,

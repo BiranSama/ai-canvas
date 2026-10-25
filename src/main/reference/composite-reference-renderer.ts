@@ -1,7 +1,10 @@
 import sharp from 'sharp'
-import { sceneSchema, type Scene, type SceneElement } from '../../domain'
+import { pathInBox, sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
+import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
+import { paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
+import { layoutTextLines } from './text-layout'
 
 export type ReferenceAssetResolver = (assetId: string) => Promise<string | Buffer | null>
 
@@ -12,6 +15,16 @@ export interface CompositeRenderResult {
 
 function escapeXml(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&apos;')
+}
+
+/** An SVG paint for a canvas colour: #RRGGBBAA as rgba(), and fully transparent as none. */
+export function svgPaint(color: string): string {
+  const match = /^#([\da-f]{6})([\da-f]{2})$/i.exec(color)
+  if (match === null) return escapeXml(color)
+  const alpha = parseInt(match[2]!, 16) / 255
+  if (alpha === 0) return 'none'
+  const rgb = match[1]!
+  return `rgba(${parseInt(rgb.slice(0, 2), 16)},${parseInt(rgb.slice(2, 4), 16)},${parseInt(rgb.slice(4, 6), 16)},${Number(alpha.toFixed(3))})`
 }
 
 function finite(value: number): string {
@@ -42,6 +55,36 @@ async function imageDataUri(path: string | Buffer, element: Extract<SceneElement
   const cropHeight = Math.max(1, Math.min(height - top, Math.round(crop.height * height)))
   const cropped = await sharp(path).extract({ left, top, width: cropWidth, height: cropHeight }).png().toBuffer()
   return `data:image/png;base64,${cropped.toString('base64')}`
+}
+
+/**
+ * The image drawn into its box with its effects applied, and its shadow
+ * beneath, as the canvas draws them.
+ */
+async function imageWithEffects(
+  uri: string,
+  element: Extract<SceneElement, { type: 'image' }>,
+  effects: ImageEffects,
+  box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+): Promise<string> {
+  const width = Math.max(1, Math.round(box.w))
+  const height = Math.max(1, Math.round(box.h))
+  const pixels = await sharp(Buffer.from(uri.slice(uri.indexOf(',') + 1), 'base64'))
+    .resize(width, height, { fit: element.fit, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .ensureAlpha()
+    .raw()
+    .toBuffer()
+  applyImageEffects(pixels, width, height, effects)
+  const drawn = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer()
+  let shadow = ''
+  if (effects.shadow !== null && effects.shadow.opacity > 0) {
+    const geometry = shadowGeometry(effects.shadow, width, height)
+    const silhouette = sharp(Buffer.from(shadowSilhouette(pixels, width, height, effects.shadow)), { raw: { width, height, channels: 4 } })
+      .extend({ top: geometry.padding, bottom: geometry.padding, left: geometry.padding, right: geometry.padding, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    const blurred = await (geometry.sigma >= 0.3 ? silhouette.blur(geometry.sigma) : silhouette).png().toBuffer()
+    shadow = `<image x="${finite(box.x - geometry.padding + geometry.offsetX)}" y="${finite(box.y - geometry.padding + geometry.offsetY)}" width="${width + geometry.padding * 2}" height="${height + geometry.padding * 2}" href="data:image/png;base64,${blurred.toString('base64')}" preserveAspectRatio="none"/>`
+  }
+  return `${shadow}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="data:image/png;base64,${drawn.toString('base64')}" preserveAspectRatio="none"/>`
 }
 
 function transform(element: SceneElement, width: number, height: number): { x: number; y: number; w: number; h: number; rotate: string } {
@@ -76,7 +119,9 @@ async function elementSvg(
       return `${groupStart}<rect x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" rx="${finite(Math.min(box.w, box.h) * .04)}" fill="#AEB8C4" fill-opacity=".24" stroke="#8090A2" stroke-width="${finite(Math.max(1, width * .0015))}"/>${groupEnd}`
     }
     try {
-      const uri = await imageDataUri(path, element)
+      const painted = element.paint !== undefined && element.paint.length > 0 ? await paintedImageBytes(path, element.paint) : path
+      const uri = await imageDataUri(painted, element)
+      if (hasVisibleEffects(element.effects)) return `${groupStart}${await imageWithEffects(uri, element, element.effects, box)}${groupEnd}`
       const aspect = element.fit === 'cover' ? 'xMidYMid slice' : element.fit === 'contain' ? 'xMidYMid meet' : 'none'
       return `${groupStart}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="${uri}" preserveAspectRatio="${aspect}"/>${groupEnd}`
     } catch {
@@ -105,20 +150,42 @@ async function elementSvg(
       const y = box.y + box.h * .58
       return `${groupStart}<path d="M ${finite(box.x + box.w * .04)} ${finite(y)} C ${finite(box.x + box.w * .3)} ${finite(y - box.h * .08)}, ${finite(box.x + box.w * .7)} ${finite(y + box.h * .08)}, ${finite(box.x + box.w * .96)} ${finite(y)}" fill="none" stroke="${color}" stroke-opacity="${finite(opacity)}" stroke-width="${finite(strokeWidth)}" stroke-linecap="round"/><path d="M ${finite(box.x + box.w * .04)} ${finite(y - box.h * .16)} V ${finite(y + box.h * .16)} M ${finite(box.x + box.w * .96)} ${finite(y - box.h * .16)} V ${finite(y + box.h * .16)}" fill="none" stroke="${color}" stroke-opacity="${finite(opacity * .56)}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`
     }
-    const anchor = element.align === 'start' ? 'start' : element.align === 'end' ? 'end' : 'middle'
-    const x = element.align === 'start' ? box.x : element.align === 'end' ? box.x + box.w : box.x + box.w / 2
     const fontSize = Math.min(box.h * .95, Math.max(7, element.fontSize))
-    const lines = element.orientation === 'vertical' ? [...element.content] : element.content.split('\n')
+    const letterSpacing = Math.min(element.letterSpacing, box.w * .03)
+    const vertical = element.orientation === 'vertical'
+    // Wrapped and truncated like the editor, so a render shows overflow the way the user sees it.
+    const lines = layoutTextLines({
+      content: element.content, fontSize, letterSpacing, lineHeight: element.lineHeight,
+      width: box.w, height: box.h, wrapping: element.wrapping, vertical
+    })
+    const justify = element.align === 'justify' && !vertical
+    const anchor = justify || element.align === 'start' ? 'start' : element.align === 'end' ? 'end' : 'middle'
+    const x = justify || element.align === 'start' ? box.x : element.align === 'end' ? box.x + box.w : box.x + box.w / 2
     const lineHeight = fontSize * element.lineHeight
     const firstY = box.y + box.h / 2 - (lines.length - 1) * lineHeight / 2
     const stroke = element.stroke === null ? '' : ` stroke="${escapeXml(element.stroke)}" stroke-width="${finite(element.strokeWidth)}"`
-    return `${groupStart}<text text-anchor="${anchor}" dominant-baseline="central" fill="${escapeXml(element.fill)}"${stroke} font-family="${escapeXml(element.fontFamily)}" font-size="${finite(fontSize)}" font-weight="${element.fontWeight}" letter-spacing="${finite(Math.min(element.letterSpacing, box.w * .03))}">${lines.map((line, index) => `<tspan x="${finite(x)}" y="${finite(firstY + index * lineHeight)}">${escapeXml(line)}</tspan>`).join('')}</text>${groupEnd}`
+    const shadowId = `text-shadow-${element.id.replaceAll('-', '')}`
+    const shadow = element.shadowColor === null
+      ? { defs: '', attribute: '' }
+      : {
+          defs: `<defs><filter id="${shadowId}" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="0" stdDeviation="${finite(element.shadowBlur / 2)}" flood-color="${escapeXml(element.shadowColor)}" flood-opacity=".62"/></filter></defs>`,
+          attribute: ` filter="url(#${shadowId})"`
+        }
+    const spans = lines.map((line, index) => {
+      const spread = justify && !line.paragraphEnd && line.text.length > 1 ? ` textLength="${finite(box.w)}" lengthAdjust="spacing"` : ''
+      return `<tspan x="${finite(x)}" y="${finite(firstY + index * lineHeight)}"${spread}>${escapeXml(line.text)}</tspan>`
+    }).join('')
+    return `${groupStart}${shadow.defs}<text text-anchor="${anchor}" dominant-baseline="central" fill="${escapeXml(element.fill)}"${stroke}${shadow.attribute} font-family="${escapeXml(element.fontFamily)}" font-size="${finite(fontSize)}" font-weight="${element.fontWeight}" letter-spacing="${finite(letterSpacing)}">${spans}</text>${groupEnd}`
   }
 
   if (element.type === 'shape') {
     const fill = escapeXml(element.fill)
     const stroke = element.stroke === null ? 'none' : escapeXml(element.stroke)
     const strokeWidth = Math.max(0, element.strokeWidth * Math.min(width, height))
+    if (element.shape === 'path' && element.path !== undefined) {
+      const ownWidth = Math.max(0, element.strokeWidth * Math.min(box.w, box.h))
+      return `${groupStart}<path d="${pathInBox(element.path, box.w, box.h, box.x, box.y)}" fill="${svgPaint(element.fill)}" stroke="${element.stroke === null ? 'none' : svgPaint(element.stroke)}" stroke-width="${finite(ownWidth)}" stroke-linejoin="round" stroke-linecap="round"/>${groupEnd}`
+    }
     if (element.shape === 'ellipse') return `${groupStart}<ellipse cx="${finite(box.x + box.w / 2)}" cy="${finite(box.y + box.h / 2)}" rx="${finite(box.w / 2)}" ry="${finite(box.h / 2)}" fill="${fill}" stroke="${stroke}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`
     if (element.shape === 'line') return `${groupStart}<line x1="${finite(box.x)}" y1="${finite(box.y + box.h / 2)}" x2="${finite(box.x + box.w)}" y2="${finite(box.y + box.h / 2)}" stroke="${stroke === 'none' ? fill : stroke}" stroke-width="${finite(Math.max(1, strokeWidth))}"/>${groupEnd}`
     return `${groupStart}<rect x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" rx="${finite(Math.min(box.w, box.h) * element.cornerRadius)}" fill="${fill}" stroke="${stroke}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`

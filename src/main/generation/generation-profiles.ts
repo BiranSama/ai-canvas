@@ -8,6 +8,7 @@ import {
   type GenerationRequest,
   type ProviderCapabilities
 } from '../../shared/generation'
+import { PRIMARY_IMAGE_PROVIDER_ID } from '../../shared/provider-settings'
 import { ProviderError, type ProviderRegistry } from './provider'
 
 export interface ProfileProviderDescriptor {
@@ -34,10 +35,11 @@ const LOCAL_PROFILES: readonly GenerationProfile[] = [
   }
 ].map((profile) => generationProfileSchema.parse(profile))
 
-function productProfiles(provider: ProfileProviderDescriptor, singleRealProvider: boolean): readonly GenerationProfile[] {
+function productProfiles(provider: ProfileProviderDescriptor): readonly GenerationProfile[] {
   const modelId = provider.models[0]
   if (modelId === undefined || !provider.capabilities.textToImage) return []
-  const prefix = singleRealProvider ? 'configured' : provider.id
+  // The primary image service keeps the ids it always had, so adding another service renames nothing.
+  const prefix = provider.id === PRIMARY_IMAGE_PROVIDER_ID ? 'configured' : provider.id
   const operations: GenerationProfile['supportedOperations'][number][] = ['generate']
   if (provider.capabilities.imageReferences) operations.push('reference')
   if (provider.capabilities.maskEditing) operations.push('edit')
@@ -112,7 +114,7 @@ export class GenerationProfileRegistry {
   snapshot(): GenerationProfileSnapshot {
     const descriptors = this.#descriptors()
     const realProviders = descriptors.filter((provider) => provider.id !== 'mock')
-    const dynamicProfiles = realProviders.flatMap((provider) => productProfiles(provider, realProviders.length === 1))
+    const dynamicProfiles = realProviders.flatMap((provider) => productProfiles(provider))
     return generationProfileSnapshotSchema.parse({
       realCallsAuthorized: realProviders.length > 0,
       profiles: [

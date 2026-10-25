@@ -9,14 +9,16 @@ import {
   type AgentRequest
 } from '../../shared/agent'
 import type { AssetMetadata } from '../storage/project-repository'
-import type {
-  LlmProtocol,
-  LlmTransportSettings,
-  ProviderConfigFile,
-  ProviderPublicConfig
+import {
+  defaultImageProviderConfig,
+  type LlmProtocol,
+  type LlmTransportSettings,
+  type ProviderConfigFile,
+  type ProviderPublicConfig
 } from '../../shared/provider-settings'
 import type { ArkHttpClient, ArkLlmTransportObservation } from '../security/ark-http-client'
 import type { LlmProtocolAdapter, NormalizedLlmResponse } from './llm-provider'
+import type { LlmStreamAccumulator } from './llm-stream'
 import type { AgentPlanner, AgentPlannerAttemptContext } from './planner'
 import type { PlannerProjectContext } from './context-builder'
 import { normalizeAgentPlanCreativeBriefs } from './creative-brief-normalizer'
@@ -66,10 +68,10 @@ interface AssetResolver {
 interface ArkJsonPoster {
   postJson(request: Parameters<ArkHttpClient['postJson']>[0]): Promise<unknown>
   postLlmJson?(request: Parameters<ArkHttpClient['postLlmJson']>[0]): Promise<unknown>
-  postEventStream?(
-    request: Parameters<ArkHttpClient['postEventStream']>[0],
-    accumulator: Parameters<ArkHttpClient['postEventStream']>[1]
-  ): ReturnType<ArkHttpClient['postEventStream']>
+  postEventStream?<T>(
+    request: Parameters<ArkHttpClient['postLlmJson']>[0],
+    accumulator: LlmStreamAccumulator<T>
+  ): Promise<T>
 }
 
 const planJsonSchema = (() => {
@@ -347,6 +349,7 @@ export class ArkAgentPlanner implements AgentPlanner {
   readonly #protocolId: LlmProtocol
   readonly #model: string
   readonly #transport: LlmTransportSettings
+  readonly #endpoint: string
 
   constructor(options: {
     readonly protocol: LlmProtocolAdapter
@@ -362,8 +365,11 @@ export class ArkAgentPlanner implements AgentPlanner {
     readonly protocolId?: LlmProtocol
     readonly model?: string
     readonly transport?: LlmTransportSettings
+    /** Where requests go; decides whether the outbound policy treats the model as local. */
+    readonly endpoint?: string
   }) {
     this.#protocol = options.protocol
+    this.#endpoint = options.endpoint ?? ''
     this.#http = options.http
     this.#assets = options.assets
     this.#timeoutMs = options.timeoutMs
@@ -390,7 +396,7 @@ export class ArkAgentPlanner implements AgentPlanner {
     context?: AgentPlannerAttemptContext
   ): Promise<AgentPlan> {
     const request = agentRequestSchema.parse(requestValue)
-    const images = await this.#readAttachments(request)
+    const attachments = this.#protocol.capabilities.vision ? await this.#readAttachments(request) : []
     const transportMode = this.#transport.mode === 'buffered'
       ? 'buffered'
       : this.#transport.mode === 'stream'
@@ -422,7 +428,33 @@ export class ArkAgentPlanner implements AgentPlanner {
     ): Promise<void> => {
       try { await context?.observe?.(event, delivery) } catch { /* observability cannot change Provider semantics */ }
     }
+    const systemContent = systemPrompt(this.#imageProviderId, this.#imageModel, this.#maxImages, this.#imageGenerationAvailable)
+    const userContent = `请为下面的 AI Canvas 状态提交结构化计划：\n${boundedSceneContext(request)}${projectContextSection(context?.projectContext)}${recoveryInstruction(recovery)}`
+    const outbound = context?.outbound === undefined || context.outbound === null
+      ? null
+      : await context.outbound.authorize({
+          providerId: 'openai-compatible-llm',
+          model: this.#model,
+          endpoint: this.#endpoint,
+          dataTypes: [
+            'user_text',
+            'scene_summary',
+            ...(context.projectContext === undefined || context.projectContext === null ? [] : ['project_context']),
+            ...(attachments.length > 0 ? ['reference_image'] : [])
+          ],
+          textBytes: Buffer.byteLength(systemContent, 'utf8') + Buffer.byteLength(userContent, 'utf8'),
+          imageAssetIds: attachments.map((attachment) => attachment.assetId),
+          imageBytes: attachments.reduce((total, attachment) => total + attachment.bytes, 0)
+        })
+    const images = outbound === null || outbound.imagesAllowed
+      ? attachments.map(({ mimeType, base64 }) => ({ mimeType, base64 }))
+      : []
+    let outboundSent = false
     const observeAttempt = async (observation: ArkLlmTransportObservation): Promise<void> => {
+      if (observation.phase === 'connecting' && outbound !== null && !outboundSent) {
+        outboundSent = true
+        try { await context?.outbound?.sent(outbound.recordId) } catch { /* the ledger entry stays prepared */ }
+      }
       await observePlannerEvent({
         type: `provider.attempt.${observation.phase}`,
         payload: {
@@ -450,8 +482,8 @@ export class ArkAgentPlanner implements AgentPlanner {
     }
     const protocolRequest = this.#protocol.buildRequest({
       messages: [
-        { role: 'system', content: systemPrompt(this.#imageProviderId, this.#imageModel, this.#maxImages, this.#imageGenerationAvailable) },
-        { role: 'user', content: `请为下面的 AI Canvas 状态提交结构化计划：\n${boundedSceneContext(request)}${projectContextSection(context?.projectContext)}${recoveryInstruction(recovery)}` }
+        { role: 'system', content: systemContent },
+        { role: 'user', content: userContent }
       ],
       images,
       tools: [{
@@ -560,21 +592,23 @@ export class ArkAgentPlanner implements AgentPlanner {
   }
 
   async #readAttachments(request: AgentRequest): Promise<{
+    assetId: string
     mimeType: 'image/png' | 'image/jpeg' | 'image/webp'
     base64: string
+    bytes: number
   }[]> {
     const assetIds = [...new Set(request.attachments
       .filter((attachment) => attachment.kind === 'asset')
       .map((attachment) => attachment.id))]
       .slice(0, MAX_ATTACHMENT_COUNT)
-    const images: { mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; base64: string }[] = []
+    const images: { assetId: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; base64: string; bytes: number }[] = []
     let total = 0
     for (const assetId of assetIds) {
       const resolved = await this.#assets.resolveAsset(assetId)
       const bytes = await readFile(resolved.filePath)
       if (bytes.length > MAX_ATTACHMENT_BYTES || total + bytes.length > MAX_TOTAL_ATTACHMENT_BYTES) continue
       total += bytes.length
-      images.push({ mimeType: mimeFor(resolved.asset.format), base64: bytes.toString('base64') })
+      images.push({ assetId, mimeType: mimeFor(resolved.asset.format), base64: bytes.toString('base64'), bytes: bytes.length })
     }
     return images
   }
@@ -653,8 +687,8 @@ export class ConfiguredAgentPlanner implements AgentPlanner {
     }
     const config = await this.#config.read()
     const llm = config.providers.find((provider): provider is Extract<ProviderPublicConfig, { kind: 'llm' }> => provider.kind === 'llm')
-    const image = config.providers.find((provider): provider is Extract<ProviderPublicConfig, { kind: 'image' }> => provider.kind === 'image')
-    if (llm === undefined || image === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !llm.capabilities.toolCalling) {
+    const image = defaultImageProviderConfig(config)
+    if (llm === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !llm.capabilities.toolCalling) {
       return forwardPlan(this.#fallback, request, signal, recovery, context)
     }
     const imageGenerationAvailable = image.protocol !== 'unconfigured'

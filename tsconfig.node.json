@@ -16,6 +16,7 @@
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
     "tests/integration/**/*.ts",
+    "tests/agent-eval/**/*.ts",
     "tests/e2e/**/*.ts",
     "tests/visual/**/*.ts"
   ]

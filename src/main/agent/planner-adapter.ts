@@ -1,6 +1,6 @@
 import { agentPlanSchema, agentRequestSchema, agentToolPlanSchema, type AgentPlan, type AgentRequest, type AgentToolPlan } from '../../shared/agent'
 import { agentFailureEnvelopeSchema, type AgentFailureEnvelope } from '../../shared/agent-recovery'
-import { plannerStepSchema, type AgentItem, type AgentTurn, type PlannerStep } from '../../shared/agent-harness'
+import { plannerStepSchema, type AgentItem, type AgentRunBudget, type AgentTurn, type PlannerStep } from '../../shared/agent-harness'
 import type { ContextManifest } from '../../shared/agent-context'
 import type { AgentPlanner, AgentPlannerAttemptContext } from './planner'
 import { buildLocalRefineTool, CompletionAssessor, designAssessmentNotes } from './design-capability'
@@ -72,6 +72,8 @@ export interface PlannerInput {
   readonly stepIndex: number
   readonly activePlan: AgentPlan | null
   readonly nextToolIndex: number
+  /** The turn's budget, for planners that make several model calls in one pass. */
+  readonly budget?: AgentRunBudget
 }
 
 export interface PlannerStepResult {
@@ -80,6 +82,11 @@ export interface PlannerStepResult {
 }
 
 export interface PlannerAdapter {
+  /**
+   * Set by planners that hand the loop one call at a time and expect every
+   * result back, instead of executing a whole plan.
+   */
+  readonly stepwise?: boolean
   next(input: PlannerInput, signal: AbortSignal, context?: AgentPlannerAttemptContext): Promise<PlannerStepResult>
 }
 

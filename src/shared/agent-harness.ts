@@ -150,24 +150,31 @@ const plannerPlanEnvelopeSchema = z.object({
   designContract: creativeDesignContractSchema.optional()
 })
 
+/** The multi-step engine's model record for one planning pass; validated by that engine. */
+const plannerTraceSchema = z.unknown().optional()
+
 export const plannerStepSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('message'),
-    content: z.string().trim().min(1).max(4_000)
+    content: z.string().trim().min(1).max(4_000),
+    trace: plannerTraceSchema
   }),
   z.object({
     kind: z.literal('decision'),
-    proposal: agentDecisionProposalSchema
+    proposal: agentDecisionProposalSchema,
+    trace: plannerTraceSchema
   }),
   z.object({
     kind: z.literal('tool'),
     call: agentToolPlanSchema,
     toolIndex: z.number().int().nonnegative().max(11),
-    plan: plannerPlanEnvelopeSchema.nullable().default(null)
+    plan: plannerPlanEnvelopeSchema.nullable().default(null),
+    trace: plannerTraceSchema
   }),
   z.object({
     kind: z.literal('complete'),
-    assessment: agentCompletionAssessmentSchema
+    assessment: agentCompletionAssessmentSchema,
+    trace: plannerTraceSchema
   })
 ])
 
@@ -356,6 +363,22 @@ export const DEFAULT_AUTO_BUDGET = agentRunBudgetSchema.parse({
   maxGeneratedImages: 4,
   maxWallTimeMs: 10 * 60_000,
   maxCostCny: 0
+})
+
+/**
+ * The multi-step engine spends one model call and usually one tool call per
+ * step, so its turns need more of both than a single plan does.
+ */
+export const STEPWISE_REVIEW_BUDGET = agentRunBudgetSchema.parse({
+  ...DEFAULT_REVIEW_BUDGET, maxModelTurns: 20, maxToolCalls: 30, maxSceneWriteBatches: 15
+})
+
+export const STEPWISE_COLLABORATION_BUDGET = agentRunBudgetSchema.parse({
+  ...DEFAULT_COLLABORATION_BUDGET, maxModelTurns: 20, maxToolCalls: 30, maxSceneWriteBatches: 15
+})
+
+export const STEPWISE_AUTO_BUDGET = agentRunBudgetSchema.parse({
+  ...DEFAULT_AUTO_BUDGET, maxModelTurns: 30, maxToolCalls: 40, maxSceneWriteBatches: 20
 })
 
 const TERMINAL_TURN_STATUSES = new Set<AgentTurnStatus>([

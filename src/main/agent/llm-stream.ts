@@ -14,14 +14,14 @@ export interface SseFrame {
 }
 
 export interface LlmStreamObservation {
-  readonly kind: 'transport' | 'text' | 'tool_arguments' | 'tool_arguments_complete' | 'terminal'
+  readonly kind: 'transport' | 'reasoning' | 'text' | 'tool_arguments' | 'tool_arguments_complete' | 'terminal'
   readonly responseId: string | null
   readonly semantic: boolean
 }
 
-export interface LlmStreamAccumulator {
+export interface LlmStreamAccumulator<T = NormalizedLlmResponse> {
   accept(frame: SseFrame): readonly LlmStreamObservation[]
-  finalize(): NormalizedLlmResponse
+  finalize(): T
 }
 
 /** Incremental UTF-8 SSE decoder. Network chunks may split any code point or line. */
@@ -83,7 +83,7 @@ function parseSseFrame(raw: string): SseFrame {
   return { event, id, data: data.join('\n'), commentOnly: data.length === 0 && comments > 0 }
 }
 
-function jsonFrame(frame: SseFrame): Record<string, unknown> | null {
+export function jsonFrame(frame: SseFrame): Record<string, unknown> | null {
   if (frame.data.trim() === '' || frame.commentOnly) return null
   try {
     const value = JSON.parse(frame.data)
@@ -98,7 +98,7 @@ function stringField(value: unknown): string | null {
   return typeof value === 'string' && value !== '' ? value : null
 }
 
-function addBounded(target: string, delta: string): string {
+export function addBounded(target: string, delta: string): string {
   if (Buffer.byteLength(target, 'utf8') + Buffer.byteLength(delta, 'utf8') > MAX_TOOL_ARGUMENT_BYTES) {
     throw new LlmProtocolError('PROVIDER_RESPONSE_TOO_LARGE', '单个工具参数超过了 4 MiB 安全上限。')
   }

@@ -22,6 +22,20 @@ export const assetImportInputSchema = z.object({
   bytes: z.instanceof(Uint8Array).refine((bytes) => bytes.byteLength > 0 && bytes.byteLength <= 100 * 1024 * 1024, 'Image must be between 1 byte and 100 MB.')
 })
 
+/**
+ * Pixels the renderer drew (a merge, a new blank layer), as straight RGBA,
+ * for Main to encode; without pixels the image is fully transparent.
+ */
+export const pixelImportInputSchema = z.object({
+  projectId: z.string().uuid().optional(),
+  name: z.string().trim().min(1).max(260),
+  width: z.number().int().min(1).max(16_384),
+  height: z.number().int().min(1).max(16_384),
+  rgba: z.instanceof(Uint8Array).optional()
+}).refine((input) => input.rgba === undefined || input.rgba.byteLength === input.width * input.height * 4, 'Pixels must be width × height × 4 bytes.')
+
+export type PixelImportInput = z.infer<typeof pixelImportInputSchema>
+
 export interface WorkspaceBootstrap {
   readonly workContext?: ProjectWorkContext | null
   readonly workContextProblem?: string | null

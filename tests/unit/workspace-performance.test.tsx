@@ -64,9 +64,10 @@ describe('100 element workspace fixture', () => {
     const editedAt = performance.now()
 
     expect(useWorkspaceStore.getState().scene.elements[99]?.name).toBe('已调整元素')
-    expect(renderedAt - startedAt).toBeLessThan(1_500)
     // JSDOM renders the whole application and is only a coarse regression guard;
     // the Electron E2E performance scenario owns the 500 ms interaction SLO.
-    expect(editedAt - renderedAt).toBeLessThan(1_500)
+    // The render takes about 0.6 s here and about 1.5 s on the Windows runner.
+    expect(renderedAt - startedAt).toBeLessThan(3_000)
+    expect(editedAt - renderedAt).toBeLessThan(3_000)
   })
 })

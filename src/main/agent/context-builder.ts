@@ -190,7 +190,7 @@ export function plannerProjectContext(manifest: ContextManifest, currentRequestT
     const value = record(message)
     const text = boundedText(record(value.payload).text)
     if (text === '') return []
-    return [{ role: value.type === 'assistant_message' ? 'assistant' as const : 'user' as const, text }]
+    return [{ role: value.type === 'user_message' ? 'user' as const : 'assistant' as const, text }]
   })
   // The current request is sent separately; do not repeat it as history.
   const last = recentConversation.at(-1)
@@ -273,19 +273,47 @@ export function detectDirectiveConflicts(
   return conflicts
 }
 
+const MAX_TURN_ACTIONS = 8
+
+/** A turn's reply is its completion assessment; it counts as a message like the user's. */
+export function isConversationItem(item: AgentItem): boolean {
+  return item.status === 'completed'
+    && (item.type === 'user_message' || item.type === 'assistant_message' || item.type === 'completion_assessment')
+}
+
+/** What the turn changed, one line per executed plan: a step of the multi-step engine or a whole one-shot plan. */
+function turnActions(turnId: string, items: readonly AgentItem[]): readonly string[] {
+  const executed = new Set(items.flatMap((item) => {
+    if (item.turnId !== turnId || item.type !== 'tool_result' || item.status !== 'completed') return []
+    const stored = item.payload as { readonly planItemId?: unknown; readonly outcome?: { readonly ok?: unknown } }
+    return stored.outcome?.ok === true && typeof stored.planItemId === 'string' ? [stored.planItemId] : []
+  }))
+  const actions = items.flatMap((item) => {
+    if (!executed.has(item.id)) return []
+    const summary = (item.payload as { readonly plan?: { readonly summary?: unknown } | null }).plan?.summary
+    return typeof summary === 'string' && summary.trim() !== '' ? [summary.trim().slice(0, 80)] : []
+  })
+  return actions.length <= MAX_TURN_ACTIONS ? actions : [...actions.slice(0, MAX_TURN_ACTIONS), `另有 ${actions.length - MAX_TURN_ACTIONS} 步`]
+}
+
+function conversationText(item: AgentItem, items: readonly AgentItem[]): string {
+  const stored = item.payload as { readonly request?: { readonly text?: unknown }; readonly content?: unknown; readonly summary?: unknown }
+  if (item.type === 'user_message') return typeof stored.request?.text === 'string' ? stored.request.text : ''
+  if (item.type === 'assistant_message') return typeof stored.content === 'string' ? stored.content : ''
+  const reply = typeof stored.summary === 'string' ? stored.summary.trim() : ''
+  const actions = turnActions(item.turnId, items)
+  return actions.length === 0 ? reply : `${reply}\n（这一轮做了：${actions.join('；')}）`
+}
+
 function recentConversation(items: readonly AgentItem[]): readonly unknown[] {
   return items
-    .filter((item) => item.status === 'completed' && (item.type === 'user_message' || item.type === 'assistant_message'))
+    .filter(isConversationItem)
     .slice(-RECENT_CONVERSATION_ITEM_LIMIT)
-    .map((item) => {
-      const stored = item.payload as { readonly request?: { readonly text?: unknown }; readonly content?: unknown }
-      const text = item.type === 'user_message' ? stored.request?.text : stored.content
-      return {
-        itemId: item.id,
-        type: item.type,
-        payload: { trust: 'untrusted_data', text: sanitizeContextText(typeof text === 'string' ? text : '') }
-      }
-    })
+    .map((item) => ({
+      itemId: item.id,
+      type: item.type === 'user_message' ? 'user_message' : 'assistant_message',
+      payload: { trust: 'untrusted_data', text: sanitizeContextText(conversationText(item, items)) }
+    }))
 }
 
 function latestCompaction(compactions: readonly ContextCompaction[]): ContextCompaction | null {

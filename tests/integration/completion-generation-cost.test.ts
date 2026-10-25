@@ -84,7 +84,7 @@ it('keeps estimates and reservations independent from unknown, then joins a late
   expect(records).toHaveLength(2); expect(records.every((entry) => entry.cost?.actual.amount === 1.25)).toBe(true)
   const family = await h.coordinator.resultFamilies()
   expect(family.flatMap((entry) => entry.members).every((entry) => entry.actualCostCny === 1.25)).toBe(true)
-  expect(summarizeGenerationCosts([known, known])).toEqual({ currencies: { CNY: 1.25 }, unknownJobs: 0, simulatedJobs: 0, inheritedJobs: 0 })
+  expect(summarizeGenerationCosts([known, known])).toEqual({ currencies: { CNY: 1.25 }, estimated: {}, estimatedJobs: 0, unknownJobs: 0, simulatedJobs: 0, inheritedJobs: 0 })
   await expect(h.jobs.recordCostReceipt(known.id, receipt(8))).rejects.toThrow(/Conflicting/)
   const reopened = new GenerationJobRepository(h.dbPath); closers.push(() => reopened.close())
   expect((await reopened.getJob(known.id)).cost).toEqual(known.cost)
@@ -109,7 +109,7 @@ it('represents simulated free, verified zero, nonzero and different currencies w
   expect(formatGenerationCost(unknown.cost)).toBe('费用未知')
   expect(settled[1]!.cost?.estimate?.amount).toBe(4)
   const summary = summarizeGenerationCosts([...settled, mock, unknown, knownFree, { ...settled[1]!, id: randomUUID(), copiedFromProjectId: randomUUID() }])
-  expect(summary).toEqual({ currencies: { CNY: 2.3, USD: 3 }, unknownJobs: 1, simulatedJobs: 1, inheritedJobs: 1 })
+  expect(summary).toEqual({ currencies: { CNY: 2.3, USD: 3 }, estimated: {}, estimatedJobs: 0, unknownJobs: 1, simulatedJobs: 1, inheritedJobs: 1 })
   expect(formatGenerationCostSummary(summary)).toContain('1 笔费用未知')
 })
 

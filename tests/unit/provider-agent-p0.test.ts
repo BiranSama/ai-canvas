@@ -110,7 +110,7 @@ describe('Provider and Agent P0 contracts without external calls', () => {
     const providers = legacy.providers as Array<Record<string, unknown>>
     delete providers[0]!.protocol
     const migrated = providerConfigFileSchema.parse(legacy)
-    expect(migrated.version).toBe(5)
+    expect(migrated.version).toBe(6)
     expect(migrated.providers[0].protocol).toBe('ark-responses')
     expect(migrated.providers[0].transport.mode).toBe('auto')
 

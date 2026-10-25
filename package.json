@@ -18,6 +18,7 @@
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
+    "eval:agent": "vitest run --config vitest.agent-eval.config.ts",
     "test:ah1-eval": "vitest run --config vitest.config.ts tests/unit/agent-eval-harness.test.ts --maxWorkers=1 && vitest run --config vitest.integration.config.ts tests/integration/agent-eval-catalog.test.ts --maxWorkers=1",
     "test:product-eval": "vitest run --config vitest.product-eval.config.ts && pnpm build && playwright test --config playwright.product-eval.config.ts",
     "test:product-reliability": "vitest run --config vitest.integration.config.ts tests/integration/product-1-f-project-cycles.test.ts --maxWorkers=1 && pnpm build && playwright test --config playwright.product-reliability.config.ts",
@@ -27,6 +28,7 @@
     "package:win:dir": "pnpm build && electron-builder --win dir --config.electronDist=node_modules/electron/dist"
   },
   "dependencies": {
+    "ag-psd": "^31.0.3",
     "ai": "^7.0.58",
     "better-sqlite3": "^13.0.3",
     "immer": "^11.1.16",

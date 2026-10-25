@@ -5,6 +5,7 @@ import { generationRequestSchema } from './generation'
 import { agentFailureEnvelopeSchema } from './agent-recovery'
 import { atomicAgentToolPlanSchemas } from './agent-atomic-tools'
 import { agentResultReferenceSchema } from './agent-result-reference'
+import type { TurnModelUsage } from './model-usage'
 
 export const agentRunStatusSchema = z.enum([
   'queued',
@@ -225,7 +226,9 @@ export const canvasGenerationToolSchema = z.object({
   model: z.string().min(1).default('mock-balanced'),
   count: z.number().int().min(1).max(4).default(1),
   referenceMode: z.enum(['visual', 'structure', 'hybrid']).default('hybrid'),
-  sourceMessageId: z.string().min(1).nullable().default(null)
+  sourceMessageId: z.string().min(1).nullable().default(null),
+  /** Left out to generate from the canvas; unified redraws every layer but text as one picture. */
+  mode: z.enum(['standard', 'unified']).optional()
 })
 
 export const canvasEditToolSchema = z.object({
@@ -236,7 +239,9 @@ export const canvasEditToolSchema = z.object({
   model: z.string().min(1).default('mock-balanced'),
   count: z.number().int().min(1).max(4).default(1),
   sourceMessageId: z.string().min(1).nullable().default(null),
-  ephemeralAnnotation: ephemeralAnnotationSchema.nullable().default(null)
+  ephemeralAnnotation: ephemeralAnnotationSchema.nullable().default(null),
+  /** Left out for a mask edit; in-context redraws the target's box within the picture beneath it. */
+  mode: z.enum(['mask', 'in-context']).optional()
 })
 
 export const cancelGenerationToolSchema = z.object({
@@ -336,6 +341,8 @@ export interface OperationReceipt {
   readonly jobId: string | null
   readonly nextAction: string | null
   readonly undoable: boolean
+  /** Text-model calls of the turn, when the engine records them. */
+  readonly modelUsage?: TurnModelUsage
   readonly designReview?: {
     readonly briefId?: string
     readonly directions: readonly {

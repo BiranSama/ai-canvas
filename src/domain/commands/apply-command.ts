@@ -199,6 +199,27 @@ export function applySceneCommand(scene: Draft<Scene>, command: SceneCommand): v
       })
       return
     }
+    case 'element.rasterize': {
+      const index = findElementIndex(scene, command.elementId)
+      const current = scene.elements[index]!
+      if (current.type !== 'image' && current.type !== 'text' && current.type !== 'shape') {
+        throw new CommandDomainError('INVALID_COMMAND', 'Only an image, text or shape layer can be rasterized.')
+      }
+      if (current.locked) throw new CommandDomainError('ELEMENT_LOCKED', `Element ${current.id} is locked.`)
+      // The layer keeps its identity, name, grouping, stacking, opacity and blend; its look is now in the asset.
+      const { id, version, name, description, zIndex, opacity, blendMode, visible, groupId, semanticRole, referencePolicy, controlIntent, provenance } = current
+      scene.elements[index] = imageElementSchema.parse({
+        id, version, name, description, zIndex, opacity, blendMode, visible, locked: false, groupId, semanticRole, referencePolicy, controlIntent, provenance,
+        type: 'image',
+        assetId: command.assetId,
+        transform: command.transform,
+        crop: { x: 0, y: 0, width: 1, height: 1 },
+        fit: 'fill',
+        referenceRole: current.type === 'image' ? current.referenceRole : 'general',
+        transparencyLocked: current.type === 'image' ? current.transparencyLocked : undefined
+      })
+      return
+    }
     case 'element.remove':
       removeElementAndReferences(scene, command.elementId)
       return
