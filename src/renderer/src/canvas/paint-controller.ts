@@ -1,6 +1,6 @@
 import type { LayerMask, PaintOp, SceneElement } from '../../../domain'
 import { boxLayerSpace, canvasToLayer, imageLayerSpace, type LayerSpace } from '../../../shared/layer-space'
-import { maskGray, paintClipIds } from '../../../shared/paint-ops'
+import { maskGray, paintClipIds, startsWithBaked } from '../../../shared/paint-ops'
 import { showAppNotice } from '../components/app-notice'
 import { selectionClip, type SelectionClip } from '../selection/selection-clip'
 import { useSelectionStore } from '../selection/selection-store'
@@ -110,7 +110,7 @@ async function bakeIfLong(elementId: string): Promise<void> {
     const baked = await window.desktop.bakePaint(elementId)
     if (baked === null) return
     const current = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === elementId)
-    if (current?.type !== 'image') return
+    if (current?.type !== 'image' || current.assetId !== element.assetId || !startsWithBaked(current.paint, baked.paintIds)) return
     const covered = new Set(baked.paintIds)
     await useWorkspaceStore.getState().updateElement(elementId, { assetId: baked.assetId, paint: (current.paint ?? []).filter((op) => !covered.has(op.id)) }, '合并绘制记录')
   } catch {
@@ -170,7 +170,7 @@ async function bakeMaskIfLong(elementId: string): Promise<void> {
     const { scene } = useWorkspaceStore.getState()
     const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: '蒙版.png', width: snapshot.width, height: snapshot.height, gray: snapshot.coverage })
     const current = currentElement(elementId)?.mask
-    if (current === null || current === undefined || current.assetId !== mask.assetId) return
+    if (current === null || current === undefined || current.assetId !== mask.assetId || !startsWithBaked(current.paint, snapshot.applied)) return
     const covered = new Set(snapshot.applied)
     await useWorkspaceStore.getState().updateElement(elementId, { mask: { ...current, assetId: asset.id, paint: (current.paint ?? []).filter((op) => !covered.has(op.id)) } }, '合并蒙版绘制记录')
   } catch {

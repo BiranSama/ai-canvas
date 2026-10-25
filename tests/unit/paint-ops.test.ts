@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { paintOpSchema, type PaintOp } from '../../src/domain'
-import { applyPaintOp, applyPaintOps, StrokeRasterizer } from '../../src/shared/paint-ops'
+import { applyPaintOp, applyPaintOps, startsWithBaked, StrokeRasterizer } from '../../src/shared/paint-ops'
 
 const ID = '00000000-0000-4000-8000-000000000001'
 
@@ -104,5 +104,16 @@ describe('painting on layer pixels', () => {
     expect(paintOpSchema.safeParse(stroke([1, 2, 1])).success).toBe(true)
     expect(paintOpSchema.safeParse(stroke([1, 2])).success).toBe(false)
     expect(paintOpSchema.safeParse(stroke([1, 2, 1], { color: 'red' })).success).toBe(false)
+  })
+
+  it('keeps a background bake only while the recorded operations still begin with the baked ones', () => {
+    const ops = ['a', 'b', 'c'].map((id) => ({ ...stroke([1, 1]), id }))
+    expect(startsWithBaked(ops, ['a', 'b', 'c'])).toBe(true)
+    // A stroke added while baking stays on top of the baked pixels.
+    expect(startsWithBaked([...ops, { ...stroke([1, 1]), id: 'd' }], ['a', 'b', 'c'])).toBe(true)
+    // Undone while baking, or undone and painted over: the baked pixels hold a stroke that is gone.
+    expect(startsWithBaked(ops.slice(0, 2), ['a', 'b', 'c'])).toBe(false)
+    expect(startsWithBaked([...ops.slice(0, 2), { ...stroke([1, 1]), id: 'e' }], ['a', 'b', 'c'])).toBe(false)
+    expect(startsWithBaked(undefined, ['a'])).toBe(false)
   })
 })

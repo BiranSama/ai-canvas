@@ -331,6 +331,17 @@ export function applyPaintOps(pixels: Pixels, width: number, height: number, ops
   for (const op of ops) applyPaintOp(pixels, width, height, op, clips)
 }
 
+/**
+ * Whether the operations recorded now still begin with the ones baked into
+ * new pixels. Baking runs in the background; an undo or a new stroke after
+ * an undo in the meantime means the baked pixels hold an operation that is
+ * no longer there, and the result is dropped.
+ */
+export function startsWithBaked(ops: readonly PaintOp[] | undefined, baked: readonly string[]): boolean {
+  const recorded = ops ?? []
+  return baked.length <= recorded.length && baked.every((id, index) => recorded[index]!.id === id)
+}
+
 /** The clip assets the operations refer to. */
 export function paintClipIds(ops: readonly PaintOp[] | undefined): string[] {
   return [...new Set((ops ?? []).flatMap((op) => op.clip === undefined ? [] : [op.clip]))]
