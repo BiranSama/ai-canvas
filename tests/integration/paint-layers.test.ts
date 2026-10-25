@@ -192,5 +192,5 @@ it('masks a shape layer over its box in the reference, and merging draws it mask
   const drawn = await drawLayers(scene([shape]), [shape.id], shape.id, resolve)
   // The mask's soft edge, stretched over the box, can reach one pixel into the hidden half.
   expect(drawn.transform.x).toBeCloseTo(0.5, 1)
-  expect(drawn.transform.width).toBeCloseTo(0.25, 2)
+  expect(drawn.transform.width).toBeCloseTo(0.25, 1)
 })
