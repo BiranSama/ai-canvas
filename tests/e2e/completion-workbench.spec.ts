@@ -88,7 +88,7 @@ for (const size of sizes) for (const zoom of zooms) {
           await hit(settings.getByRole('button', { name: '外观', exact: true }))
           await hit(settings.getByRole('button', { name: '关闭供应商设置', exact: true }))
           await expect(page.getByTestId('open-settings')).toBeFocused()
-          await hit(page.getByRole('button', { name: '蒙版', exact: true }))
+          await hit(page.getByRole('button', { name: '草图', exact: true }))
           await hit(page.getByRole('button', { name: '选择 V', exact: true }))
         }
         if (focus === '生成') {
@@ -110,7 +110,7 @@ for (const size of sizes) for (const zoom of zooms) {
       }
       await hit(page.getByRole('button', { name: '局部修改', exact: true }))
       await expect(page.getByTestId('canvas-stage')).toBeVisible()
-      await expect(page.getByRole('button', { name: '蒙版', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await expect(page.getByRole('button', { name: 'AI 重绘区域', exact: true })).toHaveAttribute('aria-pressed', 'true')
       const finalScene = await page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap()).scene)
       expect(finalScene.elements.some((element) => element.type === 'image')).toBe(true)
       expect(finalScene.elements.some((element) => element.type === 'text' && element.content === '山海之间')).toBe(true)

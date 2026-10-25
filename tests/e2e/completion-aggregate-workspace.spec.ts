@@ -8,6 +8,12 @@ import type { DesktopApi } from '../../src/shared/desktop-api'
 import type { GenerationWorkContext } from '../../src/shared/project-work-context'
 import { captureWorkbench, hitWorkbenchControl as hit } from '../helpers/workbench-ui'
 
+/** The AI repaint region tool lives in the AI 标注 slot's menu, opened with a right-click. */
+async function chooseRepaintRegion(page: Page): Promise<void> {
+  await page.getByRole('navigation', { name: '画布工具' }).locator('.tool-slot.is-grouped').last().getByRole('button').dispatchEvent('contextmenu')
+  await page.getByRole('menuitemradio', { name: 'AI 重绘区域' }).click()
+}
+
 interface Work { kind: 'cover' | 'product' | 'copy'; name: string; projectId: string; projectPath: string; userData: string; titleId: string; imageId: string; compare: GenerationWorkContext }
 interface Manifest { userData: string; works: Work[] }
 const manifestPath = process.env.AI_CANVAS_AGGREGATE_WORKS
@@ -179,7 +185,7 @@ for (const kind of ['cover', 'product', 'copy'] as const) test(`complete ${kind}
     await hit(page.getByRole('button', { name: '画布', exact: true }))
     await hit(page.getByRole('tab', { name: '图层', exact: true }))
     await page.locator(`[data-layer-id="${work.imageId}"] .layer-copy`).click()
-    await hit(page.getByRole('button', { name: '蒙版', exact: true }))
+    await chooseRepaintRegion(page)
     const stage = page.getByTestId('canvas-stage')
     await page.screenshot({ path: test.info().outputPath('04-before-real-mask.png') })
     const geometry = await stage.evaluate((node) => {

@@ -117,6 +117,8 @@ function rebuildMask(elementId: string, mask: LayerMask, gray: ClipPixels, width
   }
   const pixels: MaskPixels = { assetId: mask.assetId, width, height, rgba, coverage, applied: [], revision: 0, alpha: null }
   masks.set(elementId, pixels)
+  // The mask's thumbnail waits for these pixels; it hears of them once the canvas has finished drawing.
+  queueMicrotask(() => notify(elementId))
   return pixels
 }
 
@@ -134,6 +136,7 @@ function ensureMask(elementId: string, mask: LayerMask, gray: ClipPixels, width:
     }
     readCoverage(pixels, null)
     pixels.revision += 1
+    queueMicrotask(() => notify(elementId))
   }
   return pixels
 }

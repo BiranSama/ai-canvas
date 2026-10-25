@@ -50,7 +50,7 @@ for (const viewport of [{ width: 1440, height: 900, zoom: 1 }, { width: 1024, he
             return box !== null && (horizontal ? box.width > box.height : box.width <= 400)
           }).toBe(true)
           if (instrument.id === 'tools') {
-            await hit(island.getByRole('button', { name: '蒙版', exact: true }))
+            await hit(island.getByRole('button', { name: '草图', exact: true }))
             await hit(island.getByRole('button', { name: '选择 V', exact: true }))
           } else if (instrument.id === 'inspector') {
             await hit(island.getByRole('tab', { name: '属性', exact: true }))

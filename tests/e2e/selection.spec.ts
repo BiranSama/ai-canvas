@@ -333,6 +333,38 @@ async function selectionBounds(page: Page): Promise<number[]> {
   return value === null || value === '' ? [] : value.split(',').map(Number)
 }
 
+test('generative fill repaints the selection and comes back as a new layer masked by it', async () => {
+  const { app, page } = await launch()
+  try {
+    await newCanvasWithLayer(page)
+    await page.keyboard.press('m')
+    await drag(page, [0.25, 0.25], [0.5, 0.5])
+    const bar = page.getByRole('toolbar', { name: '选区操作' })
+    await expect(bar).toBeVisible()
+    await bar.getByRole('button', { name: '生成式填充' }).click()
+    await bar.getByRole('textbox', { name: '生成式填充描述' }).fill('一只纸鹤')
+    await bar.getByRole('button', { name: '生成', exact: true }).click()
+    await expect.poll(async () => (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs()))[0]?.status, { timeout: 15_000 }).toBe('completed')
+    const job = (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs()))[0]!
+    expect(job.request).toMatchObject({ kind: 'edit', parameters: { mode: 'selection-fill', selectionMaskAssetId: expect.any(String) } })
+    expect(job.request.prompt).toContain('在选区里画出：一只纸鹤')
+
+    await page.getByRole('button', { name: '放入画布' }).click()
+    await expect.poll(async () => (await bootstrap(page)).scene.elements.map((candidate) => candidate.name)).toEqual(['图层 1', '生成式填充 1'])
+    const filled = await image(page, '生成式填充 1')
+    expect(filled.transform).toMatchObject({ x: 0, y: 0, width: 1, height: 1 })
+    expect(filled.mask).toMatchObject({ assetId: expect.any(String), enabled: true })
+    // The layer shows only inside the square it filled.
+    const { outputWidth: width, outputHeight: height } = (await bootstrap(page)).scene.canvas
+    const picture = await exported(page)
+    expect(pixelAt(picture, 0.1 * width, 0.1 * height)).toEqual([...ARTBOARD, 255])
+    expect(pixelAt(picture, 0.375 * width, 0.375 * height)).not.toEqual([...ARTBOARD, 255])
+    await page.screenshot({ path: test.info().outputPath('generative-fill.png') })
+  } finally {
+    await app.close()
+  }
+})
+
 test('the object selection picks the object under a click with the bundled model', async () => {
   const { app, page } = await launch()
   try {
