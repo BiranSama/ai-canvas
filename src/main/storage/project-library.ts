@@ -23,6 +23,7 @@ import type {
 import { deserializeSceneSnapshot, pathInBox, type Scene } from '../../domain'
 import { svgPaint } from '../reference/composite-reference-renderer'
 import type { AssetMetadata } from './project-repository'
+import { writeImage } from './image-file'
 
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
 const PROJECT_SUFFIX = '.aicanvas'
@@ -296,7 +297,7 @@ export async function rebuildProjectCover(
   }
   await mkdir(previewDirectory, { recursive: true })
   const temporaryPath = join(previewDirectory, `cover.${randomUUID()}.tmp.webp`)
-  await cover.resize({ width: 720, height: 540, fit: 'cover', position: 'attention' }).webp({ quality: 78 }).toFile(temporaryPath)
+  await writeImage(cover.resize({ width: 720, height: 540, fit: 'cover', position: 'attention' }).webp({ quality: 78 }), temporaryPath)
   await rename(temporaryPath, coverPath)
   return { source, dataUrl: `data:image/webp;base64,${(await readFile(coverPath)).toString('base64')}` }
 }

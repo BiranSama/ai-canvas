@@ -6,6 +6,7 @@ import { buildDesignContract } from './design-capability'
 import { hasExplicitGenerationInstruction, hasNegatedGenerationInstruction } from './generation-policy'
 import type { AgentObservableEvent } from '../../shared/agent-observability'
 import type { PlannerProjectContext } from './context-builder'
+import { statedRatio } from './stated-aspect'
 
 export interface AgentPlannerAttemptContext {
   readonly attempt: number
@@ -113,9 +114,9 @@ interface PlannedComposition {
 }
 
 function parseComposition(text: string): ParsedComposition {
-  const aspect = text.match(/(\d{1,3})\s*[:：]\s*(\d{1,3})/)
-  const aspectWidth = Math.max(1, Math.min(100, Number(aspect?.[1] ?? 4)))
-  const aspectHeight = Math.max(1, Math.min(100, Number(aspect?.[2] ?? 5)))
+  const aspect = statedRatio(text)
+  const aspectWidth = Math.max(1, Math.min(100, aspect?.aspectWidth ?? 4))
+  const aspectHeight = Math.max(1, Math.min(100, aspect?.aspectHeight ?? 5))
   const titleMatch = text.match(/标题(?:是|为|写着|写成|写)?\s*[“"「『]?([^，。,.；;”"」』]{1,80})/i)
   const subjectPositionMatch = text.match(/(?:^|[，。,.；;]\s*)([^，。,.；;]{1,40}?)(?:放在?|位于|置于|在)(?:画面)?(?:的)?\s*(中央偏下|中间偏下|中央|中心|左下|左下方|右下|右下方)/)
     ?? text.match(/(?:^|[，。,.；;]\s*)([^，。,.；;]{1,40}?)(中央偏下|中间偏下|中央|中心|左下|左下方|右下|右下方)/)
@@ -249,7 +250,7 @@ export function buildCreativePlan(request: AgentRequest, idFactory: () => string
     : composition.backgroundColor === '#342820'
       ? ['#342820', '#C39267', '#F0D1A9']
       : ['#111722', '#355275', '#A7C9F4']
-  const hasExplicitAspect = /\d{1,3}\s*[:：]\s*\d{1,3}/.test(request.text)
+  const hasExplicitAspect = statedRatio(request.text) !== null
   const precision = hasExplicitAspect && theme !== 'general' ? 'precise' : 'ambiguous'
   const keep = [...request.text.matchAll(/保留([^，。,.；;]{1,80})/g)].map((match) => match[1]!.trim())
   const prohibitions = [...request.text.matchAll(/(?:不要|禁止|避免)([^，。,.；;]{1,80})/g)].map((match) => match[1]!.trim())

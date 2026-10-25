@@ -400,10 +400,12 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
 
   useEffect(() => {
     if (waitingDecisionAnchorRevision === null) return
+    // The recommended answer takes focus, unless the person is in the middle of typing something.
     const focused = document.activeElement
-    if (!(focused instanceof HTMLElement && focused.closest('input, textarea, [contenteditable="true"]'))) {
-      decisionDefaultRef.current?.focus({ preventScroll: true })
-    }
+    const typing = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement
+      ? focused.value.trim() !== ''
+      : focused instanceof HTMLElement && focused.closest('[contenteditable="true"]') !== null
+    if (!typing) decisionDefaultRef.current?.focus({ preventScroll: true })
     const revealDecision = (): void => {
       const thread = threadRef.current
       const card = decisionCardRef.current
@@ -501,7 +503,13 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
 
   const submit = async (event?: FormEvent): Promise<void> => {
     event?.preventDefault()
-    const text = draft.trim()
+    await submitText(draft.trim(), true)
+  }
+
+  // After a turn runs out of steps: a new turn on the same work, leaving whatever is being typed alone.
+  const continueAfterLimit = (): Promise<void> => submitText('接着完成刚才没做完的部分。', false)
+
+  const submitText = async (text: string, fromDraft: boolean): Promise<void> => {
     if (text.length === 0 || submittingRef.current) return
     submittingRef.current = true
     setSubmitting(true)
@@ -511,12 +519,12 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
       const request = await createAgentRequest(text, autoGenerate, 'selection', ephemeralAnnotation)
       if (!isCurrentProject()) return
       const run = !hasActiveTurn
-        ? await window.desktop.startAgentRun(request, agentMode, effectiveIdleTaskRelation)
+        ? await window.desktop.startAgentRun(request, agentMode, fromDraft ? effectiveIdleTaskRelation : 'continue_current')
         : await window.desktop.inputAgentRun(request, adaptLegacyTurnInputMode(inputMode))
       if (!isCurrentProject()) return
       if (ephemeralAnnotation !== null) markAnnotationSubmitted(run.id, text)
       else if (annotationVisible) clearAnnotation()
-      completeAcceptedTurn()
+      if (fromDraft) completeAcceptedTurn()
       if (!hasActiveTurn) setIdleTaskRelation('continue_current')
       setExplicitInputMode(null)
       await refresh()
@@ -762,9 +770,10 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
             </div>
             <h1>{workTitle}</h1>
             <p>{scene.canvas.aspectWidth}:{scene.canvas.aspectHeight} · 可编辑画布 · {scene.elements.length} 个元素</p>
-            {creativeBrief !== null && <CreativeBriefSummary brief={creativeBrief} onRevise={reviseCreativeBrief} />}
           </div>
           <div ref={threadRef} className="conversation-thread" aria-live="polite">
+            {/* The brief scrolls with the conversation, so opening it never squeezes the messages. */}
+            {creativeBrief !== null && <CreativeBriefSummary brief={creativeBrief} onRevise={reviseCreativeBrief} />}
             {snapshot?.messages.length === 0 && (
               <div className="conversation-opening">
                 <Circle size={11} fill="currentColor" />
@@ -917,6 +926,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                     onToggle={() => setActivityExpanded((current) => !current)}
                     onCancel={() => void cancel()}
                     onRestoreRequest={restoreCurrentRequest}
+                    onContinue={() => void continueAfterLimit()}
                     showCancel={waitingDecision === null || activeRun?.status !== 'awaiting_confirmation'}
                   />
                 )}

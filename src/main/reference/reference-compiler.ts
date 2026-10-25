@@ -13,6 +13,7 @@ import { compilePromptIr } from './prompt-ir'
 import { compilePromptPackage } from './prompt-package'
 import { ProviderPromptCompiler } from './provider-prompt-compiler'
 import { SemanticSheetRenderer } from './semantic-sheet-renderer'
+import { writeImage } from '../storage/image-file'
 
 export interface ReferenceCompilation {
   readonly id: string
@@ -72,8 +73,8 @@ export class ReferenceCompiler {
     const stagingPath = join(this.#stagingDirectory, `${id}.png`)
     const semanticStagingPath = join(this.#stagingDirectory, `${id}-semantic.png`)
     try {
-      await sharp(rendered.buffer).png().toFile(stagingPath)
-      await sharp(semanticSheet).png().toFile(semanticStagingPath)
+      await writeImage(sharp(rendered.buffer).png(), stagingPath)
+      await writeImage(sharp(semanticSheet).png(), semanticStagingPath)
       const asset = await this.#assetStore.importImage({ sourcePath: stagingPath, sourceType: 'reference', sourceId: id })
       const semanticSheetAsset = await this.#assetStore.importImage({ sourcePath: semanticStagingPath, sourceType: 'reference', sourceId: `${id}:semantic` })
       const promptPackage = compilePromptPackage(scene, promptIr, {

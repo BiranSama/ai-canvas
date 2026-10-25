@@ -59,3 +59,23 @@ it('adds an image service, makes it the default and removes it after a second cl
   expect(desktop.removeImageProvider).toHaveBeenCalledWith(ADDED)
   expect(screen.queryByText('Grok Imagine')).not.toBeInTheDocument()
 })
+
+it('saves how many steps the Agent may take each turn, apart from the image-task request limit', async () => {
+  const desktop = {
+    getProviderSettings: vi.fn(async () => snapshot('image-provider', false)),
+    getRuntimeInfo: vi.fn(async () => { throw new Error('not needed') }),
+    listGenerationProfiles: vi.fn(async () => ({ realCallsAuthorized: true, profiles: [] })),
+    setProviderExecutionPolicy: vi.fn(async (policy: ProviderSettingsSnapshot['executionPolicy']) => ({ ...snapshot('image-provider', false), executionPolicy: policy }))
+  }
+  Object.defineProperty(window, 'desktop', { configurable: true, value: desktop })
+  render(<ProviderSettingsSheet onClose={() => undefined} />)
+  await act(async () => undefined)
+
+  const steps = screen.getByRole('combobox', { name: 'Agent 每轮步数' })
+  expect(steps).toHaveValue('1')
+  expect(screen.getAllByText(/与图片任务的请求数无关/).length).toBeGreaterThan(0)
+  fireEvent.change(steps, { target: { value: '4' } })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存执行边界' })) })
+  expect(desktop.setProviderExecutionPolicy).toHaveBeenCalledWith(expect.objectContaining({ agentStepScale: 4, maxRequestsPerJob: DEFAULT_PROVIDER_CONFIG.executionPolicy.maxRequestsPerJob }))
+  expect(screen.getAllByText(/标准的 4 倍/).length).toBeGreaterThan(0)
+})

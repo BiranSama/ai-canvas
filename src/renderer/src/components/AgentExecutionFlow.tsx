@@ -1,4 +1,4 @@
-import { Check, ChevronDown, CircleAlert, Clock3, RotateCcw, Settings2, Square } from 'lucide-react'
+import { Check, ChevronDown, CircleAlert, Clock3, Play, RotateCcw, Settings2, Square } from 'lucide-react'
 import type { AgentExecutionFlow, AgentExecutionStage } from '../agent/agent-execution-flow'
 import { formatTimeLimit } from '../../../shared/execution-timing'
 
@@ -8,6 +8,8 @@ interface AgentExecutionFlowProps {
   readonly onToggle: () => void
   readonly onCancel: () => void
   readonly onRestoreRequest: () => void
+  /** Starts a follow-up turn on the current work, after a turn ran out of steps. */
+  readonly onContinue?: () => void
   readonly showCancel?: boolean
 }
 
@@ -63,7 +65,7 @@ function StageNode({ stage }: { readonly stage: AgentExecutionStage }): React.JS
   )
 }
 
-export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onRestoreRequest, showCancel = true }: AgentExecutionFlowProps): React.JSX.Element {
+export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onRestoreRequest, onContinue, showCancel = true }: AgentExecutionFlowProps): React.JSX.Element {
   const stallAnnouncement = flow.stallLevel === 'long'
     ? '模型响应等待时间较长。不操作会继续等待，也可以停止。'
     : flow.stallLevel === 'slow'
@@ -88,6 +90,7 @@ export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onR
           {(flow.stallLevel === 'long' || flow.stallLevel === 'terminal' || flow.state === 'failed') && (
             <button type="button" className="execution-settings" onClick={() => window.dispatchEvent(new CustomEvent('ai-canvas:open-provider-settings', { detail: { providerId: 'openai-compatible-llm' } }))}><Settings2 size={12} />检查设置</button>
           )}
+          {flow.canContinue === true && onContinue !== undefined && <button type="button" className="execution-restore" title="作为新的一轮，接着做这项任务没做完的部分。" onClick={onContinue}><Play size={12} />接着做</button>}
           {flow.canRestoreRequest && <button type="button" className="execution-restore" title="只填回输入框，不发送请求；再次发送将创建新请求并可能产生费用。" onClick={onRestoreRequest}><RotateCcw size={12} />恢复要求</button>}
           <button type="button" className="execution-expand" aria-expanded={expanded} aria-label={expanded ? '简洁显示' : '展开详情'} onClick={onToggle}>
             {expanded ? '简洁显示' : '展开详情'}<ChevronDown size={12} />
