@@ -400,10 +400,12 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
 
   useEffect(() => {
     if (waitingDecisionAnchorRevision === null) return
+    // The recommended answer takes focus, unless the person is in the middle of typing something.
     const focused = document.activeElement
-    if (!(focused instanceof HTMLElement && focused.closest('input, textarea, [contenteditable="true"]'))) {
-      decisionDefaultRef.current?.focus({ preventScroll: true })
-    }
+    const typing = focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement
+      ? focused.value.trim() !== ''
+      : focused instanceof HTMLElement && focused.closest('[contenteditable="true"]') !== null
+    if (!typing) decisionDefaultRef.current?.focus({ preventScroll: true })
     const revealDecision = (): void => {
       const thread = threadRef.current
       const card = decisionCardRef.current

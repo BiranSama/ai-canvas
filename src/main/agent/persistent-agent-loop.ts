@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { assessHonestCompletion, explicitAspectRevision } from './completion-facts'
+import { statesAspect } from './stated-aspect'
 import type { AgentPlan, AgentRequest, AgentToolOutcome, AgentToolPlan } from '../../shared/agent'
 import {
   DEFAULT_AUTO_BUDGET,
@@ -448,10 +449,10 @@ function mergeInputs(items: readonly AgentItem[]): {
 }
 
 export function decisionFor(request: AgentRequest, plan: AgentPlan, generationPolicy: GenerationPolicy): AgentDecisionProposal | null {
-  const hasExplicitAspect = /\d{1,3}\s*[:：]\s*\d{1,3}/.test(request.text)
   const plannedAspect = plan.tools.flatMap((tool) => tool.kind === 'scene_batch'
     ? tool.commands.filter((command) => command.kind === 'scene.set-canvas')
     : tool.kind === 'scene.set_canvas' ? [{ kind: 'scene.set-canvas' as const, canvas: tool.canvas }] : [])[0]
+  const hasExplicitAspect = statesAspect(request.text, plannedAspect?.canvas)
   const current = request.sceneSummary.canvas
   // Ask only when the ratio is being chosen: a new composition, or a plan that
   // changes it. Restyling an existing canvas keeps its ratio without a question.

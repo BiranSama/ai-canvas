@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { GenerationPolicy } from '../../src/main/agent/generation-policy'
 import { decisionFor } from '../../src/main/agent/persistent-agent-loop'
+import { statedRatio } from '../../src/main/agent/stated-aspect'
 import type { AgentPlan, AgentRequest } from '../../src/shared/agent'
 
 const canvas = { aspectWidth: 4, aspectHeight: 5, outputWidth: 1024, outputHeight: 1280, backgroundColor: '#f7f5ef', transparent: false, globalStyle: '' }
@@ -39,7 +40,25 @@ describe('aspect-ratio decision', () => {
     })
   })
 
-  it('never asks when the person stated the ratio', () => {
-    expect(decisionFor(request('做一张 1:1 的咖啡店海报', 0), canvasPlan(1, 1), new GenerationPolicy())).toBeNull()
+  it('never asks when the person stated the ratio, however it was written', () => {
+    for (const text of ['做一张 1:1 的咖啡店海报', '做一张 1：1 的咖啡店海报', '做一张 16比9 的横幅', '做一张 16×9 的横幅', '做一张 16 x 9 的横幅']) {
+      expect(decisionFor(request(text, 0), canvasPlan(1, 1), new GenerationPolicy()), text).toBeNull()
+    }
+  })
+
+  it('takes an orientation as stated when the plan follows it, and asks when it does not', () => {
+    expect(decisionFor(request('做一张竖版咖啡店海报', 0), canvasPlan(4, 5), new GenerationPolicy())).toBeNull()
+    expect(decisionFor(request('做一张横版咖啡店海报', 0), canvasPlan(3, 2), new GenerationPolicy())).toBeNull()
+    expect(decisionFor(request('做一张方形头像', 0), canvasPlan(1, 1), new GenerationPolicy())).toBeNull()
+    expect(decisionFor(request('做一张横版咖啡店海报', 0), canvasPlan(4, 5), new GenerationPolicy())).toMatchObject({ kind: 'aspect_ratio' })
+  })
+
+  it('reads a ratio written in any of the usual ways, and not a pixel size', () => {
+    expect(['4:5', '4：5', '16比9', '16 比 9', '16×9', '16x9', '16 X 9'].map(statedRatio)).toEqual([
+      { aspectWidth: 4, aspectHeight: 5 }, { aspectWidth: 4, aspectHeight: 5 }, { aspectWidth: 16, aspectHeight: 9 }, { aspectWidth: 16, aspectHeight: 9 },
+      { aspectWidth: 16, aspectHeight: 9 }, { aspectWidth: 16, aspectHeight: 9 }, { aspectWidth: 16, aspectHeight: 9 }
+    ])
+    expect(statedRatio('做一张 1024x1280 的海报')).toBeNull()
+    expect(statedRatio('做一张咖啡海报')).toBeNull()
   })
 })
