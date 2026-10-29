@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { agentPlanSchema, agentRequestSchema, type AgentPlan } from '../../src/shared/agent'
-import { validateChatPlan } from '../../src/main/agent/ark-agent-planner'
+import { SUBJECT_ISOLATION, validateChatPlan } from '../../src/main/agent/ark-agent-planner'
 import { receiptItem } from '../../src/main/agent/agent-runtime'
 import { resolvePlannedResult, type PlannerInput } from '../../src/main/agent/planner-adapter'
 import { summarizeScene } from '../../src/renderer/src/agent/agent-client'
@@ -36,6 +36,30 @@ describe('chat flow planning contracts', () => {
     expect(() => validateChatPlan(plan([place, generation]), req)).toThrow('更早的生图工具')
     expect(() => validateChatPlan(plan([{ ...generation, request: { ...generation.request, count: 2 } }, place]), req)).toThrow('只生成1张')
     expect(() => validateChatPlan(plan([generation, place]), { ...req, selectedIds: [IDS.text] })).toThrow('不在本轮选区')
+  })
+  it('asks for the subject alone on a plain background when the picture goes into a placeholder that is cut out', () => {
+    const req = request()
+    const place = { kind: 'place_generation_result', resultId: 'generated:0', targetElementId: IDS.placeholder }
+    const isolated = validateChatPlan(plan([generation, place]), req).tools[0]!
+    expect(isolated.kind === 'generation' && isolated.request.prompt).toBe(`青绿香水瓶\n\n${SUBJECT_ISOLATION}`)
+    // A placeholder kept with its background, a plain picture and a generation placed nowhere are left as written.
+    const framed = { ...req, sceneSummary: { ...req.sceneSummary, elements: req.sceneSummary.elements.map(e => e.id === IDS.placeholder ? { ...e, cutout: false } : e) } }
+    expect(validateChatPlan(plan([generation, place]), framed).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
+    expect(validateChatPlan(plan([generation]), req).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
+  })
+  it('leaves a scene placeholder as the model wrote it, and keeps a long request within the limit', () => {
+    const req = request()
+    const place = { kind: 'place_generation_result', resultId: 'generated:0', targetElementId: IDS.placeholder }
+    const reshaped = (changes: Record<string, unknown>) => ({ ...req, sceneSummary: { ...req.sceneSummary, elements: req.sceneSummary.elements.map(e => e.id === IDS.placeholder ? { ...e, ...changes } : e) } })
+    // A landscape, and a placeholder filling the canvas, are scenes: placement does not cut them out.
+    expect(validateChatPlan(plan([generation, place]), reshaped({ visualKind: 'landscape' })).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
+    expect(validateChatPlan(plan([generation, place]), reshaped({ transform: { x: 0, y: 0, width: 1, height: 0.9, rotation: 0 } })).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
+    // A request already at the limit is cut short to leave room for the ask.
+    const long = { ...generation, request: { ...generation.request, prompt: '瓶'.repeat(8_000) } }
+    const isolated = validateChatPlan(plan([long, place]), req).tools[0]!
+    if (isolated.kind !== 'generation') throw new Error('Expected the generation to stay first.')
+    expect(isolated.request.prompt.length).toBeLessThanOrEqual(8_000)
+    expect(isolated.request.prompt.endsWith(SUBJECT_ISOLATION)).toBe(true)
   })
   it('resolves only a completed same-plan job, never an unrelated earlier result', () => {
     const activePlan = plan([generation, { kind: 'place_generation_result', resultId: 'generated:0', targetElementId: IDS.placeholder }])

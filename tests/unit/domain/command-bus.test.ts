@@ -48,6 +48,24 @@ describe('CommandBus', () => {
     expect(bus.getScene().revision).toBe(3)
   })
 
+  it('drops the paint and mask drawn on an image when a new picture replaces it, and brings them back on undo', () => {
+    const bus = makeBus()
+    const painted = {
+      ...makeImage(99),
+      paint: [{ id: '00000000-0000-4000-8000-000000000501', kind: 'fill' as const, x: 1, y: 1, color: '#FF0000', tolerance: 32, contiguous: true, opacity: 1, lockAlpha: false }],
+      mask: { assetId: '00000000-0000-4000-8000-000000000502', enabled: true }
+    }
+    expect(bus.execute({ id: IDS.batch1, origin: 'user', summary: '加图片', commands: [{ kind: 'element.add', element: painted }] }).ok).toBe(true)
+    expect(bus.execute({ id: IDS.batch2, origin: 'agent', summary: '换图', commands: [
+      { kind: 'element.set-image', elementId: IDS.image, assetId: '00000000-0000-4000-8000-000000000503', provenance: { origin: 'mock-generated', sourceBriefId: null, sourceDirectionId: null, sourceAssetId: '00000000-0000-4000-8000-000000000503' } }
+    ] }).ok).toBe(true)
+    const replaced = bus.getScene().elements[0]!
+    expect(replaced).toMatchObject({ assetId: '00000000-0000-4000-8000-000000000503' })
+    expect('paint' in replaced || 'mask' in replaced).toBe(false)
+    bus.undo()
+    expect(bus.getScene().elements[0]).toMatchObject({ paint: painted.paint, mask: painted.mask })
+  })
+
   it('rejects an invalid later command without partially committing earlier commands', () => {
     const bus = makeBus()
     const before = bus.getScene()

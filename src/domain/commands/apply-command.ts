@@ -191,8 +191,12 @@ export function applySceneCommand(scene: Draft<Scene>, command: SceneCommand): v
         throw new CommandDomainError('INVALID_COMMAND', 'Only an image or placeholder can receive a generated image.')
       }
       // Keep identity, grouping, relations, stacking and geometry in one undoable operation.
+      // Paint and a mask were drawn on the old picture's pixels and do not fit the new one.
+      const kept: Record<string, unknown> = { ...current }
+      delete kept.paint
+      delete kept.mask
       scene.elements[index] = imageElementSchema.parse({
-        ...current, type: 'image', assetId: command.assetId, provenance: command.provenance,
+        ...kept, type: 'image', assetId: command.assetId, provenance: command.provenance,
         crop: current.type === 'image' ? current.crop : { x: 0, y: 0, width: 1, height: 1 },
         fit: current.type === 'image' ? current.fit : 'contain',
         referenceRole: current.type === 'image' ? current.referenceRole : 'subject'

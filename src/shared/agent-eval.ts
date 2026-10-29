@@ -87,7 +87,7 @@ export const agentEvalReportSchema = z.object({
 export const agentModelEvalProfileSchema = z.enum(['agent-real-model', 'agent-replay'])
 
 export const agentModelEvalCategorySchema = z.enum([
-  'new_layout', 'local_edit', 'multi_turn', 'directive_memory', 'look_advise', 'generate_place', 'safety'
+  'new_layout', 'local_edit', 'multi_turn', 'directive_memory', 'look_advise', 'generate_place', 'safety', 'clarity'
 ])
 
 export const agentModelEvalSafetyKindSchema = z.enum([

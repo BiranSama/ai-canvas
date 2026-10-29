@@ -34,10 +34,21 @@ describe('aspect-ratio decision', () => {
     })
   })
 
-  it('asks when a new composition is laid out without a stated ratio', () => {
-    expect(decisionFor(request('做一张咖啡店开业海报', 0), canvasPlan(4, 5), new GenerationPolicy())).toMatchObject({
+  it('asks when a new composition is laid out with nothing said about its shape', () => {
+    expect(decisionFor(request('做一张咖啡店开业宣传图', 0), canvasPlan(4, 5), new GenerationPolicy())).toMatchObject({
       kind: 'aspect_ratio', defaultOptionId: '4:5'
     })
+  })
+
+  it('takes a format with a usual shape as stated when the plan follows it, and asks when it does not', () => {
+    // Issue #8: a poster with its title, subject and colours given was still asked for a ratio.
+    expect(decisionFor(request('做一张咖啡店开业海报，标题『晨光咖啡』，暖色调', 0), canvasPlan(4, 5), new GenerationPolicy())).toBeNull()
+    expect(decisionFor(request('做一个咖啡店的头像', 0), canvasPlan(1, 1), new GenerationPolicy())).toBeNull()
+    expect(decisionFor(request('做一张公众号头图', 0), canvasPlan(21, 9), new GenerationPolicy())).toBeNull()
+    expect(decisionFor(request('做一张咖啡店开业海报', 0), canvasPlan(3, 2), new GenerationPolicy())).toMatchObject({ kind: 'aspect_ratio' })
+    expect(decisionFor(request('创建一张雨夜唱片封面', 0), canvasPlan(4, 5), new GenerationPolicy())).toMatchObject({ kind: 'aspect_ratio' })
+    // An orientation the person names wins over the format's usual shape.
+    expect(decisionFor(request('做一张横版海报', 0), canvasPlan(3, 2), new GenerationPolicy())).toBeNull()
   })
 
   it('never asks when the person stated the ratio, however it was written', () => {

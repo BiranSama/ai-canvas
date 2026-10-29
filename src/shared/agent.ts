@@ -134,6 +134,8 @@ export const sceneElementSummarySchema = z.object({
   resultAssetId: z.string().uuid().nullable().optional(),
   subject: z.string().max(1_000).optional(),
   visualKind: z.enum(['product', 'portrait', 'architecture', 'botanical', 'abstract', 'album', 'coffee', 'landscape', 'generic']).optional(),
+  /** A placeholder whose picture is cut out of its background when it is placed. */
+  cutout: z.boolean().optional(),
   shapeRole: z.enum(['final', 'placeholder']).optional(),
   fill: z.string().max(64).optional(),
   lightIntensity: z.number().min(0).max(1).optional(),

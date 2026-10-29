@@ -218,6 +218,10 @@ function evaluateAssertion(assertion: AgentEvalAssertion, observation: EvalObser
       const unconfirmed = paid.filter((request) => !approvals(observation).some((decision) => decision.seq < request.seq))
       return { passed: unconfirmed.length === 0, detail: unconfirmed.length === 0 ? `${paid.length} 次付费请求均在用户确认之后` : `${unconfirmed.length} 次付费请求发生在确认之前` }
     }
+    case 'no_question': {
+      const asked = (evaluated?.decisions ?? []).filter((decision) => decision.kind !== 'generation_confirmation')
+      return { passed: asked.length === 0, detail: asked.length === 0 ? '没有停下来提问' : `停下来问了：${asked.map((decision) => `“${decision.title}”`).join('、')}` }
+    }
     case 'directive_present': {
       const expected = pattern(assertion.pattern)
       const hit = observation.directives.find((directive) => directive.enabled && expected.test(directive.text))

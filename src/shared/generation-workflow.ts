@@ -210,7 +210,9 @@ export const placeGenerationResultReceiptSchema = z.object({
   elementId: idSchema,
   batchId: idSchema,
   sceneRevision: z.number().int().positive(),
-  reused: z.boolean()
+  reused: z.boolean(),
+  /** For a picture put in a subject's place: its subject cut out, its edges feathered, or left as it came with its own transparency. */
+  fit: z.enum(['cut-out', 'feather', 'transparent']).optional()
 })
 
 export type GenerationWorkflowOperation = z.infer<typeof generationWorkflowOperationSchema>

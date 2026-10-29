@@ -9,7 +9,7 @@ import productHero from './product-hero.md?raw'
 import socialVertical from './social-vertical.md?raw'
 
 /** Bump when a manual changes, so eval reports can tie results to the text the model read. */
-export const MANUALS_VERSION = 'manuals-2'
+export const MANUALS_VERSION = 'manuals-3'
 
 const MANUALS = [
   { id: 'poster-layout', title: '海报版式', purpose: '版式骨架、层级、留白和常见问题的改法', text: posterLayout },
