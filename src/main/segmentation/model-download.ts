@@ -130,6 +130,10 @@ export class ModelDownloader {
     // A server that ignores the range sends the whole file again.
     if (have > 0 && response.status !== 206) have = 0
     const file = createWriteStream(this.#partPath, { flags: have > 0 ? 'a' : 'w' })
+    // A folder that cannot be written or a full disk fails the download, never the app.
+    let failure: Error | null = null
+    const failed = new Promise<never>((_resolve, reject) => file.once('error', (error) => { failure = error; reject(error) }))
+    failed.catch(() => undefined)
     let received = have
     let reported = 0
     try {
@@ -139,7 +143,8 @@ export class ModelDownloader {
         if (done) break
         received += value.byteLength
         if (received > this.#model.bytes) throw new Error('文件比预期的大')
-        if (!file.write(value)) await new Promise((resolve) => file.once('drain', resolve))
+        if (!file.write(value)) await Promise.race([new Promise((resolve) => file.once('drain', resolve)), failed])
+        if (failure !== null) throw failure
         const now = Date.now()
         if (now - reported >= PROGRESS_EVERY_MS) {
           reported = now
@@ -147,8 +152,10 @@ export class ModelDownloader {
         }
       }
     } finally {
-      await new Promise<void>((resolve, reject) => file.end((error?: Error | null) => error ? reject(error) : resolve()))
+      if (failure === null) await Promise.race([new Promise<void>((resolve, reject) => file.end((error?: Error | null) => error ? reject(error) : resolve())), failed])
+      else file.destroy()
     }
+    if (failure !== null) throw failure
     this.#set({ receivedBytes: received })
     if (received !== this.#model.bytes) throw new Error('连接提前断开了')
   }

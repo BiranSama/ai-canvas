@@ -86,11 +86,12 @@ function showHistorySteps(): void {
   if (state.selectionUndo !== selectionUndo || state.selectionRedo !== selectionRedo) useWorkspaceStore.setState({ selectionUndo, selectionRedo })
 }
 
-function noteStep(kind: HistoryStep['kind']): HistoryStep {
+/** Notes a step; a new step ends what could be redone, unless it is only holding a place for a batch still on its way. */
+function noteStep(kind: HistoryStep['kind'], landed = true): HistoryStep {
   const step = { kind }
   undoSteps.push(step)
   if (undoSteps.length > MAX_HISTORY_STEPS) undoSteps.splice(0, undoSteps.length - MAX_HISTORY_STEPS)
-  redoSteps.length = 0
+  if (landed) redoSteps.length = 0
   showHistorySteps()
   return step
 }
@@ -440,7 +441,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     execute: (summary, commands) => {
       // The batch holds its place in the history from the moment it is asked for, so a selection
       // change made while it is on its way to Main comes after it; the place goes if it does not land.
-      const step = noteStep('scene')
+      const step = noteStep('scene', false)
       return enqueueMutation(async (isCurrent) => {
         let applied = false
         try {
@@ -473,6 +474,10 @@ export const useWorkspaceStore = create<WorkspaceState>()(
           }
         } finally {
           if (!applied) dropStep(step)
+          else {
+            redoSteps.length = 0
+            showHistorySteps()
+          }
         }
       })
     },
