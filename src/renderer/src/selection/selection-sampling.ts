@@ -20,6 +20,11 @@ function isPicture(element: SceneElement): boolean {
   return element.type === 'image' || element.type === 'text' || (element.type === 'shape' && element.role === 'final')
 }
 
+/** What the picture as shown is made of: the picture layers, and sketches kept in the final picture; editing marks are not. */
+function inPicture(element: SceneElement): boolean {
+  return isPicture(element) || (element.type === 'sketch' && element.finalVisible)
+}
+
 let cached: { readonly key: string; readonly pixels: SampledPixels } | null = null
 
 /** The single selected picture layer, which a layer-only sample reads. */
@@ -34,7 +39,7 @@ export async function samplePixels(allLayers: boolean): Promise<SampledPixels | 
   const { scene } = useWorkspaceStore.getState()
   const layer = allLayers ? null : sampledLayer()
   const ids = layer === null
-    ? scene.elements.filter((element) => element.visible && isPicture(element)).map((element) => element.id)
+    ? scene.elements.filter((element) => element.visible && inPicture(element)).map((element) => element.id)
     : [layer.id]
   const key = `${scene.projectId}:${scene.revision}:${layer?.id ?? '*'}`
   if (cached?.key === key) return cached.pixels
