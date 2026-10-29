@@ -4,4 +4,6 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
+  # Its install script would fetch CUDA libraries for Linux; the bundled CPU and DirectML builds are what the app uses.
+  onnxruntime-node: false
   sharp: true

@@ -105,6 +105,21 @@ it('makes text-only and all canvas modes match actual Main prompt packages and o
   expect(h.calls).toHaveLength(4)
 })
 
+it('draws a layer mask into the canvas preview', async () => {
+  const h = await fixture()
+  const { projectId } = h.runtime.getWorkspaceBootstrap()
+  const preview = async () => h.runtime.previewGenerationReference({ projectId, source: { kind: 'canvas', sceneRevision: h.runtime.getWorkspaceBootstrap().scene.revision },
+    referenceMode: 'hybrid', profileId: 'configured-draft', modelOverride: null })
+  const shown = await preview()
+  const black = await sharp({ create: { width: 128, height: 128, channels: 3, background: '#000000' } }).png().toBuffer()
+  const mask = await h.runtime.importAsset({ projectId, name: 'mask.png', mimeType: 'image/png', bytes: new Uint8Array(black) })
+  const image = h.runtime.getWorkspaceBootstrap().scene.elements.find((element) => element.type === 'image')!
+  await mutate(h.runtime, [{ kind: 'element.update', elementId: image.id, changes: { mask: { assetId: mask.id, enabled: true } } }])
+  const hidden = await preview()
+  expect(hidden.assetIds).toEqual(expect.arrayContaining([h.imported.id, mask.id]))
+  expect(hidden.thumbnails[0]).not.toBe(shown.thumbnails[0])
+})
+
 it('sends only chosen images or the chosen result and refuses invented structural meaning', async () => {
   const h = await fixture()
   const source = { kind: 'images' as const, assetIds: [h.imported.id] }

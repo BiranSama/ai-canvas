@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import sharp from 'sharp'
 import type { Scene } from '../../../domain'
 import type { AgentEngine } from '../../../shared/agent-engine'
 import { defaultImageProviderConfig, resolveLlmEndpoint, type ProviderConfigFile, type ProviderPublicConfig } from '../../../shared/provider-settings'
@@ -14,6 +15,9 @@ import { MultiStepPlannerAdapter, type MultiStepModel } from './multi-step-plann
 import { SceneLooker } from './scene-looker'
 import { measureToneMatch } from '../../edit/tone-match'
 import { blankLayerBytes, drawLayers } from '../../paint/draw-layers'
+import { buildLayerMask } from '../../paint/layer-mask-build'
+import { paintedImageBytes } from '../../paint/painted-image'
+import type { SubjectSegmentInput, SubjectSegmentResult } from '../../../shared/segmentation'
 import { localFontCatalog } from '../../fonts/local-font-catalog'
 import type { LocalFontFamily } from '../../../shared/local-fonts'
 
@@ -53,6 +57,11 @@ export function createMultiStepPlannerAdapter(options: {
   readonly fetcher?: typeof fetch
   /** This computer's fonts by default. */
   readonly fonts?: () => Promise<readonly LocalFontFamily[]>
+  /** Select Subject's local model, when this app has it. */
+  readonly subject?: {
+    ready(): Promise<boolean>
+    segment(input: SubjectSegmentInput): Promise<SubjectSegmentResult>
+  }
 }): MultiStepPlannerAdapter {
   const providers = async (): Promise<{ readonly llm: LlmConfig | undefined; readonly image: ImageConfig | undefined; readonly file: ProviderConfigFile }> => {
     const file = await options.config.read()
@@ -75,6 +84,14 @@ export function createMultiStepPlannerAdapter(options: {
       return null
     }
   }
+  const assetSize = async (assetId: string): Promise<{ readonly width: number; readonly height: number } | null> => {
+    try {
+      const { asset } = await options.assets.resolveAsset(assetId)
+      return { width: asset.width, height: asset.height }
+    } catch {
+      return null
+    }
+  }
   return new MultiStepPlannerAdapter({
     scene: options.scene,
     manuals: BUILT_IN_MANUALS,
@@ -86,14 +103,7 @@ export function createMultiStepPlannerAdapter(options: {
       return measureToneMatch(scene, element, resolveAssetPath, strength).catch(() => null)
     },
     looker: new SceneLooker(resolveAssetPath),
-    assetSize: async (assetId) => {
-      try {
-        const { asset } = await options.assets.resolveAsset(assetId)
-        return { width: asset.width, height: asset.height }
-      } catch {
-        return null
-      }
-    },
+    assetSize,
     drawLayers: options.importImage === undefined ? null : async (elementIds, base) => {
       const drawn = await drawLayers(options.scene(), elementIds, base, resolveAssetPath).catch(() => null)
       if (drawn === null) return null
@@ -104,6 +114,26 @@ export function createMultiStepPlannerAdapter(options: {
       const { canvas, elements } = options.scene()
       const bytes = await blankLayerBytes(canvas.outputWidth, canvas.outputHeight)
       return (await options.importImage!(bytes, elements[0]?.id ?? 'blank-layer')).id
+    },
+    layerMask: options.importImage === undefined ? null : async (spec) => {
+      const subject = options.subject
+      const built = await buildLayerMask(options.scene(), spec, {
+        resolveAsset: resolveAssetPath,
+        assetSize,
+        subject: subject === undefined || !await subject.ready().catch(() => false) ? null
+          : async (rgba, width, height) => (await subject.segment({ width, height, rgba })).mask
+      }).catch((error: unknown) => `蒙版没有做出来：${error instanceof Error ? error.message : String(error)}`)
+      if (typeof built === 'string') return built
+      const bytes = await sharp(built.data, { raw: { width: built.width, height: built.height, channels: 1 } }).png().toBuffer()
+      return { assetId: (await options.importImage!(bytes, spec.elementId)).id }
+    },
+    bakeImage: options.importImage === undefined ? null : async (elementId) => {
+      const element = options.scene().elements.find((candidate) => candidate.id === elementId)
+      if (element?.type !== 'image') return null
+      const source = await resolveAssetPath(element.assetId)
+      if (source === null) return null
+      const bytes = await paintedImageBytes(source, element.paint, resolveAssetPath, element.mask ?? null).catch(() => null)
+      return bytes === null ? null : (await options.importImage!(bytes, elementId)).id
     },
     model: async (): Promise<MultiStepModel> => {
       const { llm } = await providers()

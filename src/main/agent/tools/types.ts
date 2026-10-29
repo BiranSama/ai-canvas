@@ -2,7 +2,8 @@ import type { ToneMeasurement } from '../../edit/tone-match'
 import type { LocalFontFamily } from '../../../shared/local-fonts'
 import type { z } from 'zod'
 import type { NormalizedTransform, Scene, SceneElement } from '../../../domain'
-import type { AgentToolOutcome, AgentToolPlan } from '../../../shared/agent'
+import type { AgentToolOutcome, AgentToolPlan, EphemeralAnnotation } from '../../../shared/agent'
+import type { LayerMaskSpec } from '../../paint/layer-mask-build'
 import type { LlmImage } from '../llm/transcript'
 import type { ElementRefs } from './refs'
 
@@ -79,6 +80,12 @@ export interface AgentToolContext {
   readonly drawLayers?: ((elementIds: readonly string[], base?: string) => Promise<{ readonly assetId: string; readonly transform: NormalizedTransform } | null>) | null
   /** A new transparent asset the size of the canvas, for a new layer to paint on. */
   readonly blankLayer?: (() => Promise<string | null>) | null
+  /** What the person marked on the canvas for this turn (their selection, or outlines drawn for the Agent); null without it. */
+  readonly marked?: EphemeralAnnotation | null
+  /** Builds a layer mask in the layer's own pixels and stores it, or says why it cannot; null when Main cannot here. */
+  readonly layerMask?: ((spec: LayerMaskSpec) => Promise<{ readonly assetId: string } | string>) | null
+  /** An image layer's pixels with its paint and enabled mask baked in, as a new asset of the same size. */
+  readonly bakeImage?: ((elementId: string) => Promise<string | null>) | null
 }
 
 export interface AgentToolResult {

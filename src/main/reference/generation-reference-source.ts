@@ -5,6 +5,7 @@ import sharp from 'sharp'
 import type { Scene } from '../../domain'
 import type { GenerationJob, ProviderCapabilities } from '../../shared/generation'
 import type { GenerationReferencePreview, GenerationReferencePreviewInput } from '../../shared/generation-reference'
+import { elementAssetIds } from '../../shared/scene-assets'
 import type { ProjectWorkspace } from '../storage/project-workspace'
 import { ProviderError } from '../generation/provider'
 import { readVerifiedReferenceBytes } from '../generation/verified-reference-bytes'
@@ -34,9 +35,10 @@ export async function resolveGenerationReference(input: GenerationReferencePrevi
     assetIds = [result!.assetId]
   } else if (source.kind === 'images') assetIds = [...new Set(source.assetIds)]
   else if (source.kind === 'canvas') {
+    // Masks and the clips paint was drawn through are drawn into the preview as well.
     assetIds = [...new Set(scene.elements.filter((element) => elementPresentation(element, 'reference') !== 'omit')
-      .flatMap((element) => element.type === 'image' ? [element.assetId]
-        : element.type === 'text' && element.renderStrategy !== 'standard' && element.resultAssetId !== null ? [element.resultAssetId] : []))]
+      .flatMap((element) => [...elementAssetIds(element),
+        ...element.type === 'text' && element.renderStrategy !== 'standard' && element.resultAssetId !== null ? [element.resultAssetId] : []]))]
   }
   const assets = await workspace.repository.listAssets()
   const root = await realpath(workspace.directory)

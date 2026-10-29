@@ -163,6 +163,9 @@ test('Ctrl+O opens a PSD as a project with its layers, group and a note on what 
     const opened = (await bootstrap(page)).scene
     expect(opened.canvas).toMatchObject({ outputWidth: 200, outputHeight: 100, transparent: false })
     expect(opened.elements.filter((element) => element.type === 'image').map((element) => element.name)).toEqual(['背景', '阴影', '草稿', '柔光', '减淡', 'PSD 原样（对照用）'])
+    // The PSD's layer mask stays a mask, shown beside the layer's thumbnail.
+    expect(opened.elements.find((element) => element.name === '柔光')).toMatchObject({ mask: { enabled: true } })
+    await expect(page.getByRole('button', { name: '柔光 的蒙版' })).toBeVisible()
     const group = opened.elements.find((element) => element.type === 'group')
     expect(group).toMatchObject({ name: '标题组' })
     const layers = page.getByRole('listbox', { name: '图层' })

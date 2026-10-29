@@ -6,11 +6,20 @@ asarUnpack:
   - node_modules/better-sqlite3/**
   - node_modules/sharp/**
   - node_modules/@img/**
+  - node_modules/onnxruntime-node/**
 directories:
   output: release
 files:
   - out/**
   - package.json
+  # Only the Windows x64 build of ONNX Runtime ships; the other platforms' libraries are hundreds of MB.
+  - '!node_modules/onnxruntime-node/bin/napi-v*/{darwin,linux}/**'
+  - '!node_modules/onnxruntime-node/bin/napi-v*/win32/arm64/**'
+extraResources:
+  - from: resources/models
+    to: models
+    filter:
+      - '*.tflite'
 win:
   executableName: AI Canvas
   icon: build/icon.ico

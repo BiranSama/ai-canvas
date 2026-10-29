@@ -72,7 +72,8 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
     ...(element.blendMode === undefined || element.blendMode === 'normal' ? [] : [`混合 ${element.blendMode}`]),
     ...(element.visible ? [] : ['隐藏']),
     ...(element.locked ? ['已锁定'] : []),
-    ...(element.groupId === null ? [] : [`属于 ${refOrUnknown(refs, element.groupId)}`])
+    ...(element.groupId === null ? [] : [`属于 ${refOrUnknown(refs, element.groupId)}`]),
+    ...('mask' in element && element.mask !== null && element.mask !== undefined ? [element.mask.enabled ? '有图层蒙版' : '图层蒙版已停用'] : [])
   ]
   if (element.type === 'text') {
     facts.push(`内容「${element.content}」`, `字体 ${element.fontFamily}`, `字号 ${element.fontSize}`, `字重 ${element.fontWeight}`,

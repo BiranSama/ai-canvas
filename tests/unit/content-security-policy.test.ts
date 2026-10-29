@@ -17,4 +17,10 @@ describe('renderer content security policy', () => {
       expect(policy).toContain("object-src 'none'")
     }
   })
+
+  it('lets WebAssembly compile for the object selection model, and nothing else evaluate', () => {
+    const policy = rendererContentSecurityPolicy(undefined)
+    expect(policy).toContain("'wasm-unsafe-eval'")
+    expect(policy).not.toMatch(/'unsafe-eval'/)
+  })
 })

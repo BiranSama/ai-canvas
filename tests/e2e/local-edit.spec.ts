@@ -5,6 +5,12 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 
+/** The AI repaint region tool lives in the AI 标注 slot's menu, opened with a right-click. */
+async function chooseRepaintRegion(page: Page): Promise<void> {
+  await page.getByRole('navigation', { name: '画布工具' }).locator('.tool-slot.is-grouped').last().getByRole('button').dispatchEvent('contextmenu')
+  await page.getByRole('menuitemradio', { name: 'AI 重绘区域' }).click()
+}
+
 function listJobs(page: Page) {
   return page.evaluate(() => {
     const renderer = globalThis as typeof globalThis & { readonly desktop: DesktopApi }
@@ -35,7 +41,7 @@ test('AC-04 keeps the source immutable and retains a failed mask edit for exact 
     }, sourceResult!.assetId)
 
     await window.getByTestId('insert-generation-result').evaluate((button) => button.click())
-    await window.getByRole('button', { name: '蒙版' }).evaluate((button) => button.click())
+    await chooseRepaintRegion(window)
     const maskSurface = window.getByTestId('canvas-stage').locator('.konvajs-content')
     const surfaceRect = await maskSurface.boundingBox()
     if (surfaceRect === null) throw new Error('Canvas event surface is missing.')

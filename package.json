@@ -28,6 +28,7 @@
     "package:win:dir": "pnpm build && electron-builder --win dir --config.electronDist=node_modules/electron/dist"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "0.10.35",
     "ag-psd": "^31.0.3",
     "ai": "^7.0.58",
     "better-sqlite3": "^13.0.3",
@@ -35,6 +36,7 @@
     "konva": "^10.3.0",
     "kysely": "^0.29.4",
     "lucide-react": "^1.30.0",
+    "onnxruntime-node": "1.30.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-konva": "^19.2.5",

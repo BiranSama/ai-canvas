@@ -1,7 +1,7 @@
 import sharp from 'sharp'
 import { pathInBox, sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
-import { paintedImageBytes } from '../paint/painted-image'
+import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
 import { layoutTextLines } from './text-layout'
@@ -99,6 +99,26 @@ function transform(element: SceneElement, width: number, height: number): { x: n
   return { x, y, w, h, rotate: `rotate(${finite(element.transform.rotation)} ${finite(cx)} ${finite(cy)})` }
 }
 
+/**
+ * A text or shape layer's mask as an SVG luminance mask over its box, in the
+ * layer's own (rotated) space. An image layer's mask goes into its pixels
+ * instead, as the canvas applies it.
+ */
+async function layerMaskSvg(element: SceneElement, box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }, resolveAsset: ReferenceAssetResolver): Promise<{ readonly defs: string; readonly attribute: string }> {
+  const none = { defs: '', attribute: '' }
+  if (element.type !== 'text' && element.type !== 'shape') return none
+  const mask = element.mask
+  if (mask === null || mask === undefined || !mask.enabled) return none
+  const coverage = await layerMaskCoverage(mask, resolveAsset)
+  if (coverage === null) return none
+  const png = await sharp(Buffer.from(coverage.coverage), { raw: { width: coverage.width, height: coverage.height, channels: 1 } }).png().toBuffer()
+  const id = `layer-mask-${element.id.replaceAll('-', '')}`
+  return {
+    defs: `<defs><mask id="${id}" maskUnits="userSpaceOnUse" x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}"><image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="data:image/png;base64,${png.toString('base64')}" preserveAspectRatio="none"/></mask></defs>`,
+    attribute: ` mask="url(#${id})"`
+  }
+}
+
 async function elementSvg(
   element: SceneElement,
   mode: RenderMode,
@@ -111,7 +131,8 @@ async function elementSvg(
   if (presentation === 'omit') return ''
   const box = transform(element, width, height)
   const opacity = finite(element.opacity)
-  const groupStart = `<g opacity="${opacity}" transform="${box.rotate}"${blendModeToSvgStyle(resolveBlendMode(element))}>`
+  const layerMask = await layerMaskSvg(element, box, resolveAsset)
+  const groupStart = `${layerMask.defs}<g opacity="${opacity}" transform="${box.rotate}"${blendModeToSvgStyle(resolveBlendMode(element))}${layerMask.attribute}>`
   const groupEnd = '</g>'
 
   if (element.type === 'image') {
@@ -121,7 +142,8 @@ async function elementSvg(
       return `${groupStart}<rect x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" rx="${finite(Math.min(box.w, box.h) * .04)}" fill="#AEB8C4" fill-opacity=".24" stroke="#8090A2" stroke-width="${finite(Math.max(1, width * .0015))}"/>${groupEnd}`
     }
     try {
-      const painted = element.paint !== undefined && element.paint.length > 0 ? await paintedImageBytes(path, element.paint) : path
+      const masked = element.mask !== null && element.mask !== undefined && element.mask.enabled
+      const painted = (element.paint !== undefined && element.paint.length > 0) || masked ? await paintedImageBytes(path, element.paint, resolveAsset, element.mask ?? null) : path
       const uri = await imageDataUri(painted, element)
       if (hasVisibleEffects(element.effects)) return `${groupStart}${await imageWithEffects(uri, element, element.effects, box)}${groupEnd}`
       const aspect = element.fit === 'cover' ? 'xMidYMid slice' : element.fit === 'contain' ? 'xMidYMid meet' : 'none'

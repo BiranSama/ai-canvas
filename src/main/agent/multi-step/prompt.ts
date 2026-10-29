@@ -68,6 +68,7 @@ function elementLine(scene: Scene, refs: ElementRefs, index: number): string {
   if (element.semanticRole !== 'content') parts.push(`角色 ${element.semanticRole}`)
   if (!element.visible) parts.push('隐藏')
   if (element.locked) parts.push('已锁定')
+  if ('mask' in element && element.mask !== null && element.mask !== undefined) parts.push(element.mask.enabled ? '有蒙版' : '蒙版已停用')
   return parts.join(' ')
 }
 
@@ -86,6 +87,28 @@ function fontSection(fonts: readonly LocalFontFamily[]): string {
     ...(chinese.length === 0 ? [] : [`- 中文：${names(chinese, MAX_LISTED_CHINESE_FONTS)}`]),
     ...(other.length === 0 ? [] : [`- 其他：${names(other, MAX_LISTED_OTHER_FONTS)}`])
   ].join('\n')
+}
+
+/** Where the person's selection (or the outlines they drew for this turn) is, as one line. */
+function markedLine(request: AgentRequest, refs: ElementRefs): string | null {
+  const marked = request.ephemeralAnnotation
+  if (marked === null || marked === undefined) return null
+  const regions = (marked.regions ?? [marked]).filter((region) => region.mode !== 'protect')
+  const points = regions.flatMap((region) => region.points)
+  if (points.length === 0) return null
+  const left = Math.min(...points.map((point) => point.x))
+  const top = Math.min(...points.map((point) => point.y))
+  const right = Math.max(...points.map((point) => point.x))
+  const bottom = Math.max(...points.map((point) => point.y))
+  let target = ''
+  if (marked.targetElementId !== null) {
+    try {
+      target = `，落在 ${refs.ref(marked.targetElementId)} 上`
+    } catch {
+      target = ''
+    }
+  }
+  return `用户在画布上选出了 ${regions.length} 块区域，范围约 ${formatBox(transformToBox({ x: left, y: top, width: right - left, height: bottom - top, rotation: 0 }))}${target}。「这里」「选区」「选中的地方」指它；局部修改图片和 mask_layer 的 source=selection 都按它来。`
 }
 
 /** Everything the model needs about this turn, in one user message at the start of the turn. */
@@ -132,6 +155,8 @@ export function multiStepTurnBrief(input: {
     }
   })
   if (selected.length > 0) sections.push(`用户选中了：${selected.join('、')}。「这个」「它」通常指选中的对象。`)
+  const marked = markedLine(request, refs)
+  if (marked !== null) sections.push(marked)
   if (input.generation !== undefined) {
     sections.push(input.generation === null
       ? '没有配置生图服务，不能生成图片；需要时告诉用户先在设置里配置。'

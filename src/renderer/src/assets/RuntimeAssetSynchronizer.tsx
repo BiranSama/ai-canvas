@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import type { DesktopApi } from '../../../shared/desktop-api'
+import { elementAssetIds } from '../../../shared/scene-assets'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { projectGeneration } from '../store/project-context-lifecycle'
 import {
@@ -15,9 +16,7 @@ import {
  */
 export function RuntimeAssetSynchronizer(): null {
   const scene = useWorkspaceStore((state) => state.scene)
-  const assetIds = [...new Set(scene.elements
-    .filter((element) => element.type === 'image')
-    .map((element) => element.assetId))]
+  const assetIds = [...new Set(scene.elements.flatMap(elementAssetIds))]
   const assetKey = assetIds.slice().sort().join('\u0000')
 
   useEffect(() => {

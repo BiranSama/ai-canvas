@@ -5,8 +5,8 @@ import type { BlendMode } from '../../domain'
 
 /*
  * Reads a PSD into what a project needs: one PNG per pixel layer, at its
- * place on the canvas, with its name, opacity, visibility, blend mode and
- * group. The file comes from the user, so the structure is read first
+ * place on the canvas, with its name, opacity, visibility, blend mode,
+ * group and layer mask. The file comes from the user, so the structure is read first
  * without decoding any bitmap and checked against limits, then each layer
  * is decoded, turned into a PNG and let go before the next.
  *
@@ -53,28 +53,35 @@ function toBytes(pixels: PixelData): Uint8Array {
   return bytes
 }
 
-/** Multiplies the layer's alpha by its enabled layer mask, which can have its own bounds and a colour outside them. */
-function applyMask(rgba: Uint8Array, layer: Layer, width: number, height: number): boolean {
+/**
+ * The layer's mask over the layer's own pixels, as gray values. A
+ * Photoshop mask can have its own bounds and a colour outside them; a
+ * turned-off mask comes along turned off.
+ */
+function layerMask(layer: Layer, width: number, height: number): { readonly gray: Uint8Array<ArrayBuffer>; readonly enabled: boolean } | null {
   const mask = layer.mask
-  if (mask === undefined || mask.disabled === true) return false
+  if (mask === undefined) return null
   const maskPixels = getLayerMaskImageData(layer)
-  if (maskPixels === undefined) return false
+  if (maskPixels === undefined) return null
   const maskBytes = toBytes(maskPixels)
   const maskLeft = mask.left ?? 0
   const maskTop = mask.top ?? 0
   const outside = mask.defaultColor ?? 0
   const layerLeft = layer.left ?? 0
   const layerTop = layer.top ?? 0
+  const gray = new Uint8Array(width * height)
   for (let y = 0; y < height; y += 1) {
     const my = layerTop + y - maskTop
     for (let x = 0; x < width; x += 1) {
       const mx = layerLeft + x - maskLeft
-      const value = mx >= 0 && my >= 0 && mx < maskPixels.width && my < maskPixels.height ? maskBytes[(my * maskPixels.width + mx) * 4]! : outside
-      const alpha = (y * width + x) * 4 + 3
-      rgba[alpha] = Math.round(rgba[alpha]! * value / 255)
+      gray[y * width + x] = mx >= 0 && my >= 0 && mx < maskPixels.width && my < maskPixels.height ? maskBytes[(my * maskPixels.width + mx) * 4]! : outside
     }
   }
-  return true
+  return { gray, enabled: mask.disabled !== true }
+}
+
+async function grayPng(gray: Uint8Array<ArrayBuffer>, width: number, height: number): Promise<Uint8Array<ArrayBuffer>> {
+  return new Uint8Array(await sharp(Buffer.from(gray.buffer), { raw: { width, height, channels: 1 } }).png({ compressionLevel: 6 }).toBuffer())
 }
 
 async function png(rgba: Uint8Array, width: number, height: number): Promise<Uint8Array<ArrayBuffer>> {
@@ -96,7 +103,7 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
   if (psd.width <= 0 || psd.height <= 0 || psd.width > limits.maxEdge || psd.height > limits.maxEdge) throw new PsdImportError(`画布 ${psd.width}×${psd.height} 超出支持的范围（每边最多 ${limits.maxEdge} 像素）。`)
   if (psd.colorMode !== undefined && !SUPPORTED_COLOR_MODES.has(psd.colorMode)) throw new PsdImportError('只支持 RGB、灰度和 CMYK 模式的 PSD，请先在 Photoshop 里转成 RGB。')
 
-  const notes = { styles: 0, adjustments: 0, clipped: 0, nested: 0, blends: 0, deepColor: (psd.bitsPerChannel ?? 8) > 8, text: 0, masks: 0 }
+  const notes = { styles: 0, adjustments: 0, clipped: 0, nested: 0, blends: 0, deepColor: (psd.bitsPerChannel ?? 8) > 8, text: 0 }
   const layers: PsdLayerImport[] = []
   const groups: PsdGroupImport[] = []
   let layerCount = 0
@@ -135,13 +142,17 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     const pixels = getLayerImageData(layer)
     if (pixels === undefined) { notes.adjustments += 1; return }
     const rgba = new Uint8Array(toBytes(pixels))
-    if (applyMask(rgba, layer, width, height)) notes.masks += 1
     if (layer.effects !== undefined && layer.effects.disabled !== true && Object.keys(layer.effects).some((key) => key !== 'disabled' && key !== 'scale')) notes.styles += 1
     if (layer.clipping === true) notes.clipped += 1
     if (layer.text !== undefined) notes.text += 1
     const blendMode = BLEND_MODES[layer.blendMode ?? 'normal']
     if (blendMode === undefined) notes.blends += 1
-    if (layers.length === 0) bottomOpaque = left <= 0 && top <= 0 && left + width >= psd.width && top + height >= psd.height && opacity >= 1 && isOpaque(rgba)
+    const mask = layerMask(layer, width, height)
+    // A mask that is on hides what it covers, so the bottom layer is opaque only if its mask hides nothing.
+    if (layers.length === 0) {
+      bottomOpaque = left <= 0 && top <= 0 && left + width >= psd.width && top + height >= psd.height && opacity >= 1 && isOpaque(rgba)
+        && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))
+    }
     layers.push({
       name: layer.name?.trim() || `图层 ${layers.length + 1}`,
       left, top, width, height,
@@ -149,7 +160,8 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       visible,
       blendMode: blendMode ?? 'normal',
       groupIndex: group?.index ?? null,
-      png: await png(rgba, width, height)
+      png: await png(rgba, width, height),
+      mask: mask === null ? null : { png: await grayPng(mask.gray, width, height), enabled: mask.enabled }
     })
   }
   for (const layer of psd.children ?? []) await visit(layer, null)
@@ -163,8 +175,7 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     notes.deepColor ? `${psd.bitsPerChannel} 位色深转成了 8 位` : null
   ].filter((note): note is string => note !== null)
   const keptAsPictures = [
-    notes.text > 0 ? `${notes.text} 个文字图层按画好的样子保留成图片` : null,
-    notes.masks > 0 ? `${notes.masks} 个图层蒙版合进了图层的透明度` : null
+    notes.text > 0 ? `${notes.text} 个文字图层按画好的样子保留成图片` : null
   ].filter((note): note is string => note !== null)
 
   // When something was simplified, bring Photoshop's own flattened image as a hidden reference.

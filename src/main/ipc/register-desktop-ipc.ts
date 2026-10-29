@@ -11,6 +11,8 @@ import type { GenerationRuntime } from '../generation/generation-runtime'
 import { localFontCatalog } from '../fonts/local-font-catalog'
 import { takeOpenFileRequests } from '../open-file-requests'
 import { readPsdForImport } from '../psd/psd-import'
+import { onSubjectModelStatus, readMagicTouchAssets, subjectSegmentation } from '../segmentation/subject-segmentation-electron'
+import { subjectModelDownloadSchema, subjectSegmentInputSchema } from '../../shared/segmentation'
 
 const MAX_PSD_BYTES = 1024 * 1024 * 1024
 import { inspectNativeModules } from '../native-health'
@@ -78,6 +80,18 @@ function ensureAppearanceBroadcast(service: AppearanceSettingsService): void {
   })
 }
 
+let subjectModelBroadcast: (() => void) | null = null
+
+/** Download progress for Select Subject's model reaches every window, so its dialog can follow it. */
+function ensureSubjectModelBroadcast(): void {
+  if (subjectModelBroadcast !== null) return
+  subjectModelBroadcast = onSubjectModelStatus((status) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send(DESKTOP_EVENTS.subjectModelStatus, status)
+    }
+  })
+}
+
 function ensureSceneBroadcast(generationRuntime: Promise<GenerationRuntime>): void {
   if (subscribedRuntime === generationRuntime) return
   unsubscribeScene?.()
@@ -123,6 +137,7 @@ export function registerDesktopIpc(
 ): void {
   ensureSceneBroadcast(generationRuntime)
   ensureAppearanceBroadcast(appearanceSettings)
+  ensureSubjectModelBroadcast()
   for (const channel of Object.values(DESKTOP_CHANNELS)) ipcMain.removeHandler(channel)
   ipcMain.handle(DESKTOP_CHANNELS.runtimeInfo, async (): Promise<RuntimeInfo> => createRuntimeInfo(backgroundMaterial, generationRuntime))
   ipcMain.handle(DESKTOP_CHANNELS.localFonts, async (_event, rescan: unknown) => localFontCatalog.list({ rescan: rescan === true }))
@@ -131,6 +146,11 @@ export function registerDesktopIpc(
     if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > MAX_PSD_BYTES) throw new Error('PSD 必须大于 0 字节且不超过 1 GB。')
     return readPsdForImport(bytes)
   })
+  ipcMain.handle(DESKTOP_CHANNELS.subjectModelStatus, () => subjectSegmentation().status())
+  ipcMain.handle(DESKTOP_CHANNELS.subjectModelDownload, (_event, input: unknown) => subjectSegmentation().download(subjectModelDownloadSchema.parse(input ?? {}).mirrorUrl))
+  ipcMain.handle(DESKTOP_CHANNELS.subjectModelCancel, () => subjectSegmentation().cancel())
+  ipcMain.handle(DESKTOP_CHANNELS.subjectSegment, (_event, input: unknown) => subjectSegmentation().segment(subjectSegmentInputSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.magicTouchAssets, () => readMagicTouchAssets())
   ipcMain.handle(DESKTOP_CHANNELS.paintBake, async (_event, elementId: unknown) => (await generationRuntime).bakePaint({ elementId: z.string().uuid().parse(elementId) }))
   ipcMain.handle(DESKTOP_CHANNELS.imageToneMatch, async (_event, input: unknown) => (await generationRuntime).matchImageTone(imageToneMatchSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.appearanceSettings, async () => appearanceSettings.snapshot())

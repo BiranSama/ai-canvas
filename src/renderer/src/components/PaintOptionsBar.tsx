@@ -22,7 +22,7 @@ interface AmountProps {
 }
 
 /** A number field whose label drags the value left and right, Photoshop's scrubby slider. */
-function Amount({ label, value, min, max, unit, onChange }: AmountProps): React.JSX.Element {
+export function Amount({ label, value, min, max, unit, onChange }: AmountProps): React.JSX.Element {
   const clamp = (next: number): number => Math.max(min, Math.min(max, Math.round(next)))
   const scrub = useRef<{ readonly x: number; readonly value: number } | null>(null)
   return (

@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -40,10 +41,17 @@ import type { EphemeralAnnotationTool } from '../agent/ephemeral-annotation-stor
 import { activeModal, canvasKeyboardBlocked, isInteractiveTarget, MODAL_SCOPE_CHANGED } from '../interaction/keyboard-scope'
 import { islandFitInsets } from '../islands/island-layout'
 import { useIslandLayoutStore } from '../islands/island-layout-store'
-import { groupBoundsForChildTransforms, isPaintTool, useWorkspaceStore } from '../store/workspace-store'
+import { groupBoundsForChildTransforms, isPaintTool, isSelectionTool, useWorkspaceStore } from '../store/workspace-store'
+import { cancelSelectionGesture, polygonLassoActive, selectionKeyDown, selectionPointerDown, selectionPointerMove, selectionPointerUp } from '../selection/selection-gestures'
+import { SelectionOverlay } from '../selection/SelectionOverlay'
+import { warmMagicTouch } from '../selection/magic-touch'
+import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
-import { paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
+import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
+import { assetPixelsVersion, clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
+import { useMaskState } from './mask-state'
+import { paintClipIds } from '../../../shared/paint-ops'
 import { setLayerRenderer } from './layer-render'
 import { constrainAngle, fillAt, gradientBetween, paintTarget, startStroke, type PaintGeometry, type PaintSession } from './paint-controller'
 import {
@@ -195,12 +203,21 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   const assetUrl = getRuntimeAssetUrl(element.assetId)
   const image = useHtmlImage(assetUrl)
   const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
-  // With paint on it, the layer is drawn from its asset with the operations replayed.
-  const source = useMemo(
-    () => image === null ? null : paintedSource(element.id, image, element.paint),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas
-    [image, element.id, element.paint, paintVersion]
-  )
+  const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
+  const maskView = useMaskState((state) => state.view?.elementId === element.id ? state.view.mode : 'normal')
+  // With paint on it or a mask, the layer is drawn from its asset with the operations replayed, through its mask.
+  const source = useMemo(() => {
+    if (image === null) return null
+    const size = { width: image.naturalWidth, height: image.naturalHeight }
+    const clips = clipLookup(paintClipIds(element.paint), size)
+    const mask = element.mask ?? null
+    const gray = mask === null ? null : grayAssetPixels(mask.assetId, size)
+    const maskClips = mask === null ? new Map<string, Uint8Array>() : clipLookup(paintClipIds(mask.paint), size)
+    // A clip or mask still being read keeps the layer pending, so nothing is drawn beyond its selection.
+    if (clips === null || (mask !== null && (gray === null || maskClips === null))) return null
+    return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask, gray: gray.data, clips: maskClips, view: maskView })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas; pixelsVersion a clip or mask read
+  }, [image, element.id, element.paint, element.mask, maskView, paintVersion, pixelsVersion])
   const shownWidth = Math.round(width)
   const shownHeight = Math.round(height)
   const effected = useMemo(
@@ -252,6 +269,63 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
         cropWidth={crop.width}
         cropHeight={crop.height}
       />
+    </Group>
+  )
+}
+
+/** The most pixels a masked text or shape layer is cached at. */
+const MASK_CACHE_PIXELS = 16_000_000
+
+/**
+ * A text or shape layer through its mask: the group is cached and the mask
+ * cut in with destination-in, so the canvas and its export show what Main
+ * renders with an SVG mask. Alt+click shows the mask alone, \ in red.
+ */
+function MaskedBox({ element, width, height, zoom, children }: { element: Extract<SceneElement, { type: 'text' | 'shape' }>; width: number; height: number; zoom: number; children: React.ReactNode }): React.JSX.Element {
+  const groupRef = useRef<Konva.Group>(null)
+  const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
+  const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
+  const maskView = useMaskState((state) => state.view?.elementId === element.id ? state.view.mode : 'normal')
+  const mask = element.mask ?? null
+  const shown = useMemo(() => {
+    if (mask === null) return null
+    const gray = grayAssetPixels(mask.assetId)
+    const clips = gray === null ? null : clipLookup(paintClipIds(mask.paint), gray)
+    if (gray === null || clips === null) return 'pending' as const
+    const { alpha, mask: pixels } = maskedBoxSource(element.id, mask, gray, clips)
+    if (maskView === 'normal') return { alpha, overlay: null }
+    // The mask alone in gray, or the hidden parts in half-strength red over the layer.
+    const canvas = document.createElement('canvas')
+    canvas.width = pixels.width
+    canvas.height = pixels.height
+    const picture = new ImageData(pixels.width, pixels.height)
+    for (let index = 0; index < pixels.coverage.length; index += 1) {
+      const value = pixels.coverage[index]!
+      if (maskView === 'alone') picture.data.set([value, value, value, 255], index * 4)
+      else picture.data.set([255, 0, 0, Math.round((255 - value) * 0.5)], index * 4)
+    }
+    canvas.getContext('2d')?.putImageData(picture, 0, 0)
+    return { alpha, overlay: canvas }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke on the mask; pixelsVersion the mask read
+  }, [element.id, mask, maskView, paintVersion, pixelsVersion])
+  const masking = shown !== null && shown !== 'pending' && maskView === 'normal' && mask?.enabled === true
+  useLayoutEffect(() => {
+    const group = groupRef.current
+    if (group === null) return
+    group.clearCache()
+    if (masking) {
+      const ratio = Math.min(Math.max(0.25, zoom * (window.devicePixelRatio || 1)), Math.sqrt(MASK_CACHE_PIXELS / Math.max(1, width * height)))
+      group.cache({ pixelRatio: ratio })
+    }
+    group.getLayer()?.batchDraw()
+  })
+  if (shown === 'pending') return <Group name="image-pending">{children}</Group>
+  if (shown !== null && maskView === 'alone') return <KonvaImage image={shown.overlay ?? undefined} width={width} height={height} listening={false} />
+  return (
+    <Group ref={groupRef}>
+      {children}
+      {masking && shown !== null && <KonvaImage image={shown.alpha} width={width} height={height} globalCompositeOperation="destination-in" listening={false} />}
+      {shown !== null && maskView === 'overlay' && shown.overlay !== null && <KonvaImage image={shown.overlay} width={width} height={height} listening={false} />}
     </Group>
   )
 }
@@ -366,6 +440,8 @@ interface ElementNodeProps {
   shapeCornerRadiusOverride?: number | undefined
   shapeTransformOverride?: SceneElement['transform'] | undefined
   blendModeSupported: boolean
+  /** Another layer's mask is being looked at alone (Alt+click on its thumbnail). */
+  soloHidden: boolean
 }
 
 function isFinalContent(element: SceneElement): boolean {
@@ -374,7 +450,7 @@ function isFinalContent(element: SceneElement): boolean {
   return element.type === 'image' || element.type === 'text'
 }
 
-function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag, onFinishDrag, isDragCommitOwner, isDragCancelled, onRequestEdit, isInlineEditing, viewportPanReady, cropOverride, shapeCornerRadiusOverride, shapeTransformOverride, blendModeSupported }: ElementNodeProps): React.JSX.Element | null {
+function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag, onFinishDrag, isDragCommitOwner, isDragCancelled, onRequestEdit, isInlineEditing, viewportPanReady, cropOverride, shapeCornerRadiusOverride, shapeTransformOverride, blendModeSupported, soloHidden }: ElementNodeProps): React.JSX.Element | null {
   const updateElement = useWorkspaceStore((state) => state.updateElement)
   const execute = useWorkspaceStore((state) => state.execute)
   const scene = useWorkspaceStore((state) => state.scene)
@@ -570,7 +646,7 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
       rotation={displayTransform.rotation}
       opacity={element.opacity}
       globalCompositeOperation={blendModeToCanvasOperation(resolveBlendMode(element))}
-      visible={element.visible && !isInlineEditing && blendModeSupported}
+      visible={element.visible && !isInlineEditing && blendModeSupported && !soloHidden}
       draggable={!viewportPanReady && !element.locked && (element.groupId === null || element.groupId === editingGroupId) && activeTool === 'select'}
       onMouseDown={() => { dragOccurredRef.current = false }}
       onMouseUp={(event) => { if (event.evt.altKey && !dragOccurredRef.current) onSelect(event) }}
@@ -706,16 +782,23 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         onFinishDrag(element.id)
       }}
     >
-      <ElementVisual
-        element={element.type === 'image' && cropOverride !== undefined
-          ? { ...element, crop: cropOverride }
-          : element.type === 'shape' && shapeCornerRadiusOverride !== undefined
-            ? { ...element, cornerRadius: shapeCornerRadiusOverride }
-            : element}
-        width={width}
-        height={height}
-        outputScale={artboard.height / scene.canvas.outputHeight}
-      />
+      {(() => {
+        const visual = (
+          <ElementVisual
+            element={element.type === 'image' && cropOverride !== undefined
+              ? { ...element, crop: cropOverride }
+              : element.type === 'shape' && shapeCornerRadiusOverride !== undefined
+                ? { ...element, cornerRadius: shapeCornerRadiusOverride }
+                : element}
+            width={width}
+            height={height}
+            outputScale={artboard.height / scene.canvas.outputHeight}
+          />
+        )
+        return (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
+          ? <MaskedBox element={element} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
+          : visual
+      })()}
     </Group>
   )
 }
@@ -886,6 +969,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const pan = useWorkspaceStore((state) => state.pan)
   const setViewport = useWorkspaceStore((state) => state.setViewport)
   const ratioLocked = useWorkspaceStore((state) => state.transformRatioLocked)
+  const maskAlone = useMaskState((state) => state.view?.mode === 'alone' ? state.view.elementId : null)
   const islandLayouts = useIslandLayoutStore((state) => state.layouts)
   const safeFitInsets = useMemo(
     () => preview || focusMode
@@ -1247,7 +1331,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     const stage = stageRef.current
     const transformer = transformerRef.current
     if (stage === null || transformer === null) return
-    if (preview || inlineTextId !== null || cropSession !== null || shapeEditElement?.shape === 'line' || selectedIds.length === 0) {
+    // Photoshop shows transform handles with the move tool only; painting and selecting reach through to the canvas.
+    if (preview || inlineTextId !== null || cropSession !== null || shapeEditElement?.shape === 'line' || selectedIds.length === 0 || isPaintTool(activeTool) || isSelectionTool(activeTool)) {
       transformer.nodes([])
     } else {
       const nodes = selectedIds.flatMap((id) => {
@@ -1266,7 +1351,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     // canvas one frame behind the visible transformer, making a first click
     // on an anchor intermittently miss.
     transformer.getLayer()?.draw()
-  }, [cropSession, editingGroupId, inlineTextId, preview, scene.elements, selectedIds, shapeEditElement?.shape, size.width])
+  }, [activeTool, cropSession, editingGroupId, inlineTextId, preview, scene.elements, selectedIds, shapeEditElement?.shape, size.width])
 
   const restoreTransformSession = useCallback((session: TransformSession): void => {
     const stage = stageRef.current
@@ -1393,6 +1478,12 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       setShiftPressed(event.shiftKey)
       setAltPressed(event.altKey)
       if (event.isComposing || editableEventTarget(event.target)) return
+      // An open polygonal lasso takes Backspace, Enter and Escape before anything else does.
+      if (selectionKeyDown(event)) {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        return
+      }
       if (event.key === 'Escape') {
         const cancelledDrag = cancelActiveElementDrag()
         const cancelledRadius = cancelShapeRadiusGesture()
@@ -1894,11 +1985,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       sampleColor(false)
       return
     }
-    const element = paintTarget()
-    if (element === null) return
+    const target = paintTarget()
+    if (target === null) return
     event.preventDefault()
     if (activeTool === 'bucket') {
-      fillAt(element, paintGeometry(), point.x, point.y, redrawContent)
+      fillAt(target, paintGeometry(), point.x, point.y, redrawContent)
       return
     }
     event.currentTarget.setPointerCapture(event.pointerId)
@@ -1908,11 +1999,12 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       return
     }
     const pressure = event.pointerType === 'pen' ? event.pressure : null
+    const strokeKey = target.onMask ? `${target.element.id}:mask` : target.element.id
     paintSessionRef.current = startStroke(
-      activeTool, element, paintGeometry(), point.x, point.y, pressure,
-      event.shiftKey ? lastStrokeEndRef.current.get(element.id) ?? null : null,
+      activeTool, target, paintGeometry(), point.x, point.y, pressure,
+      event.shiftKey ? lastStrokeEndRef.current.get(strokeKey) ?? null : null,
       redrawContent,
-      (end) => lastStrokeEndRef.current.set(element.id, end)
+      (end) => lastStrokeEndRef.current.set(strokeKey, end)
     )
   }
 
@@ -1955,10 +2047,48 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     gradientStartRef.current = null
     if (start !== null) {
       setGradientLine(null)
-      const element = point === null ? null : paintTarget()
-      if (element !== null && point !== null) gradientBetween(element, paintGeometry(), start, event.shiftKey ? constrainAngle(start, point) : point, redrawContent)
+      const target = point === null ? null : paintTarget()
+      if (target !== null && point !== null) gradientBetween(target, paintGeometry(), start, event.shiftKey ? constrainAngle(start, point) : point, redrawContent)
     }
   }
+
+  const selectingRef = useRef(false)
+  /** Pointer events do not count clicks, so a double-click (which closes a polygonal lasso) is timed here. */
+  const lastSelectClickRef = useRef<{ readonly at: number, readonly x: number, readonly y: number } | null>(null)
+  const canvasPoint = (event: { clientX: number, clientY: number }): { x: number, y: number } | null => {
+    const point = stagePoint(event)
+    return point === null ? null : { x: (point.x - displayedArtboard.x) / zoom, y: (point.y - displayedArtboard.y) / zoom }
+  }
+  const beginSelect = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isSelectionTool(activeTool) || event.button !== 0 || spacePressed) return
+    if (!(event.target instanceof Element) || event.target.closest('.konvajs-content') === null) return
+    const point = canvasPoint(event)
+    if (point === null) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    selectingRef.current = activeTool !== 'lasso-polygon'
+    const last = lastSelectClickRef.current
+    const doubled = last !== null && event.timeStamp - last.at < 400 && Math.hypot(event.clientX - last.x, event.clientY - last.y) < 5
+    lastSelectClickRef.current = doubled ? null : { at: event.timeStamp, x: event.clientX, y: event.clientY }
+    selectionPointerDown(activeTool, point, { shift: event.shiftKey, alt: event.altKey }, { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }, 6 / zoom, doubled ? 2 : 1)
+  }
+  const continueSelect = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!isSelectionTool(activeTool) || (!selectingRef.current && !polygonLassoActive())) return
+    const point = canvasPoint(event)
+    if (point !== null) selectionPointerMove(point, { shift: event.shiftKey, alt: event.altKey })
+  }
+  const finishSelect = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (!selectingRef.current) return
+    selectingRef.current = false
+    const point = canvasPoint(event)
+    if (point !== null) selectionPointerUp(point, { shift: event.shiftKey, alt: event.altKey })
+    else cancelSelectionGesture()
+  }
+  // A half-drawn selection does not survive a change of tool; the object selection loads its model ahead of the first click.
+  useEffect(() => {
+    cancelSelectionGesture()
+    if (activeTool === 'object-select') warmMagicTouch()
+  }, [activeTool])
 
   /**
    * The eyedropper reads the picture as drawn under the pointer, background
@@ -1983,7 +2113,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
 
   const handleElementSelect = (element: SceneElement, event: KonvaEventObject<MouseEvent | TouchEvent>): void => {
     event.cancelBubble = true
-    if (activeTool === 'eyedropper' || isPaintTool(activeTool)) return
+    if (activeTool === 'eyedropper' || isPaintTool(activeTool) || isSelectionTool(activeTool)) return
     const targetId = element.groupId !== null && element.groupId !== editingGroupId ? element.groupId : element.id
     if (!event.evt.altKey) {
       select(targetId, event.evt.shiftKey || event.evt.ctrlKey || event.evt.metaKey)
@@ -2134,7 +2264,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   return (
     <div
       ref={containerRef}
-      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}${activeTool === 'eyedropper' ? ' is-eyedropper' : ''}${isPaintTool(activeTool) && !spacePressed ? ` is-painting is-${activeTool}` : ''}`}
+      className={`canvas-stage${spacePressed || activeTool === 'hand' ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}${cropSession !== null ? ' is-cropping' : ''}${shapeEditId !== null ? ' is-shape-editing' : ''}${activeTool === 'eyedropper' ? ' is-eyedropper' : ''}${isPaintTool(activeTool) && !spacePressed ? ` is-painting is-${activeTool}` : ''}${isSelectionTool(activeTool) && !spacePressed ? ` is-selecting is-${activeTool}` : ''}`}
       data-testid="canvas-stage"
       tabIndex={preview ? -1 : 0}
       aria-label={preview ? '作品预览' : '画布编辑区'}
@@ -2143,10 +2273,10 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           containerRef.current?.focus({ preventScroll: true })
         }
       }}
-      onPointerDown={(event) => { if (!preview) beginPaint(event) }}
-      onPointerMove={(event) => { if (!preview) continuePaint(event) }}
-      onPointerUp={(event) => { if (!preview) finishPaint(event) }}
-      onPointerCancel={() => { paintSessionRef.current?.cancel(); paintSessionRef.current = null; gradientStartRef.current = null; setGradientLine(null) }}
+      onPointerDown={(event) => { if (!preview) { beginPaint(event); beginSelect(event) } }}
+      onPointerMove={(event) => { if (!preview) { continuePaint(event); continueSelect(event) } }}
+      onPointerUp={(event) => { if (!preview) { finishPaint(event); finishSelect(event) } }}
+      onPointerCancel={() => { paintSessionRef.current?.cancel(); paintSessionRef.current = null; gradientStartRef.current = null; setGradientLine(null); if (selectingRef.current) { selectingRef.current = false; cancelSelectionGesture() } }}
       onPointerLeave={() => { if (brushRingRef.current !== null) brushRingRef.current.hidden = true }}
       data-scene-revision={scene.revision}
       data-shape-editing={shapeEditId ?? ''}
@@ -2178,8 +2308,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
             sampleColor(event.evt.altKey)
             return
           }
-          // Painting runs on pointer events, for pen pressure and every sample the pen sends.
-          if (isPaintTool(activeTool) && event.evt.button === 0 && !spacePressed) return
+          // Painting and selecting run on pointer events, for pen pressure and every sample the pen sends.
+          if ((isPaintTool(activeTool) || isSelectionTool(activeTool)) && event.evt.button === 0 && !spacePressed) return
           if (event.evt.button === 1 || ((spacePressed || activeTool === 'hand') && event.evt.button === 0)) {
             event.evt.preventDefault()
             panningRef.current = true
@@ -2299,6 +2429,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
                 shapeCornerRadiusOverride={shapeRadiusDraft?.elementId === element.id ? shapeRadiusDraft.value : undefined}
                 shapeTransformOverride={shapeLineDraft?.elementId === element.id ? shapeLineDraft.transform : undefined}
                 blendModeSupported={blendSupportByElement.get(element.id) !== false}
+                soloHidden={maskAlone !== null && maskAlone !== element.id && maskAlone !== element.groupId}
               />
             ))}
           </Group>
@@ -2456,6 +2587,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           {!preview && <Circle listening={false} x={artboard.x + 14} y={artboard.y + 14} radius={3} fill="rgba(255,255,255,.55)" />}
         </Layer>
       </Stage>
+      {!preview && <SelectionOverlay originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} />}
+      {!preview && (activeTool === 'select' || isSelectionTool(activeTool)) && <GenerativeFillBar originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} stageWidth={size.width} stageHeight={size.height} />}
       {/* The brush's real size on the canvas, light over dark so it reads on any picture. */}
       {!preview && (activeTool === 'brush' || activeTool === 'eraser') && !spacePressed && <div ref={brushRingRef} className="brush-ring" aria-hidden="true" hidden />}
       {!preview && inlineText !== undefined && (

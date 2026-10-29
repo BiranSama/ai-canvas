@@ -5,7 +5,7 @@ import { defineTool, rejected } from './types'
 export const editImageTool = defineTool({
   name: 'edit_image',
   title: '局部修改图片',
-  description: '付费局部修改画布上的一张图片，只改修改区（先用 add_mask 标出），原图保留。',
+  description: '付费局部修改画布上的一张图片，只改修改区（先用 add_mask 标出；用户本轮选出了区域时直接按选区改），原图保留。',
   parameters: z.object({
     target: z.string().min(1).max(120).describe('图片编号'),
     instruction: z.string().min(1).max(4_000).describe('怎么改'),
@@ -21,7 +21,11 @@ export const editImageTool = defineTool({
     if (typeof target === 'string') return rejected(target)
     if (target.type !== 'image') return rejected(`${args.target} 不是图片。`)
     const hasEditMask = context.scene.elements.some((element) => element.type === 'mask' && element.mode === 'edit' && element.targetElementId === target.id)
-    if (!hasEditMask) return rejected(`${args.target} 还没有修改区。`, '先用 add_mask 在要改的地方标出修改区。')
+    // The person's selection is the region to change when nothing is marked on the image itself.
+    const marked = context.marked ?? null
+    const selection = !hasEditMask && marked !== null && (marked.targetElementId === null || marked.targetElementId === target.id)
+      && (marked.regions ?? [marked]).some((region) => region.mode === 'edit') ? { ...marked, targetElementId: target.id } : null
+    if (!hasEditMask && selection === null) return rejected(`${args.target} 还没有修改区。`, '先用 add_mask 在要改的地方标出修改区。')
     if (args.count > service.maxImages) return rejected(`一次最多生成 ${service.maxImages} 张。`)
     return jobStep({
       kind: 'canvas_edit',
@@ -31,7 +35,7 @@ export const editImageTool = defineTool({
       model: service.model,
       count: args.count,
       sourceMessageId: context.sourceMessageId,
-      ephemeralAnnotation: null
-    }, context, `已提交局部修改 ${args.target} 的任务`)
+      ephemeralAnnotation: selection
+    }, context, `已提交局部修改 ${args.target} 的任务${selection === null ? '' : '，按用户的选区改'}`)
   }
 })

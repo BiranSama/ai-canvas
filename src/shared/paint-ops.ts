@@ -10,6 +10,10 @@ import type { PaintOp } from '../domain'
 
 type Pixels = Uint8Array | Uint8ClampedArray
 type StrokeOp = Extract<PaintOp, { kind: 'stroke' }>
+/** One coverage value per pixel, 0–255: how much of an operation reaches that pixel. */
+export type ClipPixels = ArrayLike<number>
+/** The clips the operations refer to, by asset id. */
+export type ClipLookup = ReadonlyMap<string, ClipPixels>
 type Rgb = readonly [number, number, number]
 
 export interface PixelRect {
@@ -80,17 +84,20 @@ export class StrokeRasterizer {
   readonly #height: number
   readonly #op: Omit<StrokeOp, 'points' | 'id'>
   readonly #rgb: Rgb
+  readonly #clip: ClipPixels | null
   readonly #tiles = new Map<number, Tile>()
   #last: { x: number, y: number, p: number } | null = null
   /** Distance travelled since the last dab, carried across points. */
   #carry = 0
 
-  constructor(pixels: Pixels, width: number, height: number, op: Omit<StrokeOp, 'points' | 'id'>) {
+  /** clip limits the stroke to a selection, as Photoshop's painting tools are. */
+  constructor(pixels: Pixels, width: number, height: number, op: Omit<StrokeOp, 'points' | 'id'>, clip: ClipPixels | null = null) {
     this.#pixels = pixels
     this.#width = width
     this.#height = height
     this.#op = op
     this.#rgb = hexRgb(op.color)
+    this.#clip = clip
   }
 
   #tile(tx: number, ty: number): Tile {
@@ -160,7 +167,7 @@ export class StrokeRasterizer {
         const local = (y & 63) * TILE + (x & 63)
         const coverage = tile.coverage[local]!
         if (coverage <= 0) continue
-        const a = Math.min(1, coverage) * opacity
+        const a = Math.min(1, coverage) * opacity * (this.#clip === null ? 1 : this.#clip[y * this.#width + x]! / 255)
         const index = (y * this.#width + x) * 4
         const origIndex = local * 4
         if (tool === 'eraser' && !lockAlpha) {
@@ -216,13 +223,28 @@ export class StrokeRasterizer {
   }
 }
 
-function fillAll(pixels: Pixels, op: Extract<PaintOp, { kind: 'fill-all' }>): void {
+function reach(clip: ClipPixels | null, pixel: number): number {
+  return clip === null ? 1 : clip[pixel]! / 255
+}
+
+function fillAll(pixels: Pixels, op: Extract<PaintOp, { kind: 'fill-all' }>, clip: ClipPixels | null): void {
   const rgb = hexRgb(op.color)
-  for (let index = 0; index < pixels.length; index += 4) paintPixel(pixels, index, pixels, index, rgb, op.opacity, op.lockAlpha)
+  for (let index = 0; index < pixels.length; index += 4) {
+    const a = op.opacity * reach(clip, index >> 2)
+    if (a > 0) paintPixel(pixels, index, pixels, index, rgb, a, op.lockAlpha)
+  }
+}
+
+/** The selected pixels made transparent, as Photoshop's Delete does; a soft selection clears in part. */
+function clear(pixels: Pixels, clip: ClipPixels | null): void {
+  for (let index = 3; index < pixels.length; index += 4) {
+    const a = reach(clip, index >> 2)
+    if (a > 0) pixels[index] = clampByte(pixels[index]! * (1 - a))
+  }
 }
 
 /** The paint bucket: pixels within tolerance of the one clicked, joined to it (4-connected) or anywhere. */
-function fill(pixels: Pixels, width: number, height: number, op: Extract<PaintOp, { kind: 'fill' }>): void {
+function fill(pixels: Pixels, width: number, height: number, op: Extract<PaintOp, { kind: 'fill' }>, clip: ClipPixels | null): void {
   const sx = Math.floor(op.x)
   const sy = Math.floor(op.y)
   if (sx < 0 || sy < 0 || sx >= width || sy >= height) return
@@ -251,11 +273,15 @@ function fill(pixels: Pixels, width: number, height: number, op: Extract<PaintOp
     for (let at = 0; at < selected.length; at += 1) if (matches(at * 4)) selected[at] = 1
   }
   const rgb = hexRgb(op.color)
-  for (let at = 0; at < selected.length; at += 1) if (selected[at] === 1) paintPixel(pixels, at * 4, pixels, at * 4, rgb, op.opacity, op.lockAlpha)
+  for (let at = 0; at < selected.length; at += 1) {
+    if (selected[at] !== 1) continue
+    const a = op.opacity * reach(clip, at)
+    if (a > 0) paintPixel(pixels, at * 4, pixels, at * 4, rgb, a, op.lockAlpha)
+  }
 }
 
 /** Foreground to background across the drag; before the start and past the end the end colours hold. */
-function gradient(pixels: Pixels, width: number, height: number, op: Extract<PaintOp, { kind: 'gradient' }>): void {
+function gradient(pixels: Pixels, width: number, height: number, op: Extract<PaintOp, { kind: 'gradient' }>, clip: ClipPixels | null): void {
   const [fx, fy] = op.from
   const [tx, ty] = op.to
   const dx = tx - fx
@@ -273,26 +299,100 @@ function gradient(pixels: Pixels, width: number, height: number, op: Extract<Pai
       const t = Math.min(1, Math.max(0, raw))
       const rgb: Rgb = [start[0] + (end[0] - start[0]) * t, start[1] + (end[1] - start[1]) * t, start[2] + (end[2] - start[2]) * t]
       const index = (y * width + x) * 4
-      paintPixel(pixels, index, pixels, index, rgb, op.opacity, op.lockAlpha)
+      const a = op.opacity * reach(clip, y * width + x)
+      if (a > 0) paintPixel(pixels, index, pixels, index, rgb, a, op.lockAlpha)
     }
   }
 }
 
-/** Replays one operation over the pixels, in place. */
-export function applyPaintOp(pixels: Pixels, width: number, height: number, op: PaintOp): void {
+/**
+ * Replays one operation over the pixels, in place, limited to its clip. An
+ * operation whose clip is not at hand is left out rather than painted
+ * beyond its selection.
+ */
+export function applyPaintOp(pixels: Pixels, width: number, height: number, op: PaintOp, clips: ClipLookup = new Map()): void {
+  const clip = op.clip === undefined ? null : clips.get(op.clip) ?? undefined
+  if (clip === undefined || (clip !== null && clip.length < width * height)) return
   switch (op.kind) {
     case 'stroke': {
-      const stroke = new StrokeRasterizer(pixels, width, height, op)
+      const stroke = new StrokeRasterizer(pixels, width, height, op, clip)
       for (let index = 0; index < op.points.length; index += 3) stroke.addPoint(op.points[index]!, op.points[index + 1]!, op.points[index + 2]!)
       return
     }
-    case 'fill': fill(pixels, width, height, op); return
-    case 'fill-all': fillAll(pixels, op); return
-    case 'gradient': gradient(pixels, width, height, op)
+    case 'fill': fill(pixels, width, height, op, clip); return
+    case 'fill-all': fillAll(pixels, op, clip); return
+    case 'gradient': gradient(pixels, width, height, op, clip); return
+    case 'clear': clear(pixels, clip)
   }
 }
 
 /** Replays the operations over the pixels, oldest first, in place. */
-export function applyPaintOps(pixels: Pixels, width: number, height: number, ops: readonly PaintOp[]): void {
-  for (const op of ops) applyPaintOp(pixels, width, height, op)
+export function applyPaintOps(pixels: Pixels, width: number, height: number, ops: readonly PaintOp[], clips: ClipLookup = new Map()): void {
+  for (const op of ops) applyPaintOp(pixels, width, height, op, clips)
+}
+
+/**
+ * Whether the operations recorded now still begin with the ones baked into
+ * new pixels. Baking runs in the background; an undo or a new stroke after
+ * an undo in the meantime means the baked pixels hold an operation that is
+ * no longer there, and the result is dropped.
+ */
+export function startsWithBaked(ops: readonly PaintOp[] | undefined, baked: readonly string[]): boolean {
+  const recorded = ops ?? []
+  return baked.length <= recorded.length && baked.every((id, index) => recorded[index]!.id === id)
+}
+
+/** The clip assets the operations refer to. */
+export function paintClipIds(ops: readonly PaintOp[] | undefined): string[] {
+  return [...new Set((ops ?? []).flatMap((op) => op.clip === undefined ? [] : [op.clip]))]
+}
+
+/**
+ * A layer mask's coverage after its paint: the mask image as opaque gray
+ * RGBA with the operations replayed over it, read from the red channel.
+ */
+export function maskCoverage(gray: ClipPixels, width: number, height: number, ops: readonly PaintOp[] | undefined, clips: ClipLookup = new Map()): Uint8Array {
+  const coverage = new Uint8Array(width * height)
+  if (ops === undefined || ops.length === 0) {
+    for (let index = 0; index < coverage.length; index += 1) coverage[index] = gray[index]!
+    return coverage
+  }
+  const rgba = new Uint8ClampedArray(width * height * 4)
+  for (let index = 0; index < coverage.length; index += 1) {
+    const value = gray[index]!
+    rgba[index * 4] = value; rgba[index * 4 + 1] = value; rgba[index * 4 + 2] = value; rgba[index * 4 + 3] = 255
+  }
+  applyPaintOps(rgba, width, height, ops, clips)
+  for (let index = 0; index < coverage.length; index += 1) coverage[index] = rgba[index * 4]!
+  return coverage
+}
+
+/**
+ * The layer mask applied: target takes source's pixels with each pixel's
+ * transparency scaled by the mask, over the whole layer or one rectangle of
+ * it. Source and target may be the same pixels.
+ */
+export function applyMaskAlpha(source: Pixels, target: Pixels, coverage: ClipPixels, width: number, rect: PixelRect | null = null): void {
+  const height = Math.floor(source.length / 4 / width)
+  const x0 = Math.max(0, rect?.x0 ?? 0)
+  const y0 = Math.max(0, rect?.y0 ?? 0)
+  const x1 = Math.min(width, rect?.x1 ?? width)
+  const y1 = Math.min(height, rect?.y1 ?? height)
+  for (let y = y0; y < y1; y += 1) {
+    for (let x = x0; x < x1; x += 1) {
+      const pixel = y * width + x
+      const index = pixel * 4
+      target[index] = source[index]!
+      target[index + 1] = source[index + 1]!
+      target[index + 2] = source[index + 2]!
+      target[index + 3] = Math.round(source[index + 3]! * coverage[pixel]! / 255)
+    }
+  }
+}
+
+/** A mask colour on the canvas: Photoshop paints a mask in the gray of the colour's luminosity. */
+export function maskGray(hex: string): string {
+  const [r, g, b] = hexRgb(hex)
+  const value = clampByte(0.299 * r + 0.587 * g + 0.114 * b).toString(16).padStart(2, '0').toUpperCase()
+  return `#${value}${value}${value}`
 }

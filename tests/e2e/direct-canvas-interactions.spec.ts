@@ -411,7 +411,7 @@ test('Direct Canvas supports inline editing, viewport conventions, clipboard and
     const selectTool = window.getByRole('button', { name: '选择 V' })
     await selectTool.focus()
     await window.keyboard.press('Tab')
-    await expect(window.getByRole('button', { name: '抓手 H' })).toBeFocused()
+    await expect(window.getByRole('button', { name: '矩形选框', exact: true })).toBeFocused()
     await expect(toolsIsland).toBeVisible()
     await window.getByRole('button', { name: '进入专注' }).focus()
     await window.keyboard.press('Enter')

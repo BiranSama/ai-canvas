@@ -15,6 +15,8 @@ export interface PsdLayerImport {
   /** Index into PsdDocumentImport.groups, or null outside any group. */
   readonly groupIndex: number | null
   readonly png: Uint8Array<ArrayBuffer>
+  /** Its layer mask over the layer's own pixels, as a grayscale PNG, or null without one. */
+  readonly mask: { readonly png: Uint8Array<ArrayBuffer>; readonly enabled: boolean } | null
 }
 
 export interface PsdGroupImport {

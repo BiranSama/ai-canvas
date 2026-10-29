@@ -34,8 +34,14 @@ import { clearEphemeralAnnotation } from './agent/ephemeral-annotation-store'
 import { CanvasStage, type CanvasStageHandle } from './canvas/CanvasStage'
 import { ActionTrace } from './canvas/ActionTrace'
 import { createElementForTool } from './canvas/element-factory'
+import { withMaskViewSetAside } from './canvas/mask-state'
 import { CanvasToolbar } from './components/CanvasToolbar'
 import { PaintOptionsBar } from './components/PaintOptionsBar'
+import { SelectionOptionsBar } from './components/SelectionOptionsBar'
+import { EditDialogs } from './components/EditDialogs'
+import { SubjectModelDialog } from './components/SubjectModelDialog'
+import { elementAssetIds } from '../../shared/scene-assets'
+import { nudgeSelection } from './selection/selection-gestures'
 import { CanvasSizeControl } from './components/CanvasSizeControl'
 import { CreationBar } from './components/CreationBar'
 import { ConversationView } from './components/ConversationView'
@@ -49,7 +55,7 @@ import { showAppNotice } from './components/app-notice'
 import { ShortcutSheet } from './components/ShortcutSheet'
 import { WorkspaceRecoveryView } from './components/RendererErrorBoundary'
 import { createVisualExampleScene, VISUAL_EXAMPLE_KEYS, visualExampleLabels, type VisualExampleKey } from './fixtures/visual-examples'
-import { groupBoundsForChildTransforms, hydrateWorkspaceScene, isPaintTool, useWorkspaceStore, type CanvasTool, type WorkspaceView } from './store/workspace-store'
+import { groupBoundsForChildTransforms, hydrateWorkspaceScene, isPaintTool, isSelectionTool, useWorkspaceStore, type CanvasTool, type WorkspaceView } from './store/workspace-store'
 import { GlassIsland } from './islands/GlassIsland'
 import { resetAllGlassIslands } from './islands/island-events'
 import { waitForWorkspaceStartup } from './startup/workspace-startup'
@@ -95,9 +101,7 @@ async function hydrateRuntimeWorkspace(bootstrap: WorkspaceBootstrap): Promise<v
   if (bootstrap.workContextProblem) useWorkspaceStore.setState({ workContextProblem: bootstrap.workContextProblem })
   const generation = projectGeneration()
   const isCurrent = (): boolean => generation === projectGeneration() && useWorkspaceStore.getState().scene.projectId === bootstrap.scene.projectId
-  const assetIds = [...new Set(bootstrap.scene.elements
-    .filter((element): element is Extract<SceneElement, { type: 'image' }> => element.type === 'image')
-    .map((element) => element.assetId))]
+  const assetIds = [...new Set(bootstrap.scene.elements.flatMap(elementAssetIds))]
   await Promise.all(assetIds.map(async (assetId) => {
     try {
       const url = await window.desktop.readGenerationAsset(assetId, false, bootstrap.scene.projectId)
@@ -150,8 +154,8 @@ function WorkspaceHeader({
   const activeView = useWorkspaceStore((state) => state.activeView)
   const projectName = useWorkspaceStore((state) => state.projectName)
   const setActiveView = useWorkspaceStore((state) => state.setActiveView)
-  const canUndo = useWorkspaceStore((state) => state.canUndo)
-  const canRedo = useWorkspaceStore((state) => state.canRedo)
+  const canUndo = useWorkspaceStore((state) => state.canUndo || state.selectionUndo)
+  const canRedo = useWorkspaceStore((state) => state.canRedo || state.selectionRedo)
   const undo = useWorkspaceStore((state) => state.undo)
   const redo = useWorkspaceStore((state) => state.redo)
   const inspectorOpen = useWorkspaceStore((state) => state.inspectorOpen)
@@ -356,6 +360,8 @@ function WorkspaceHeader({
     }} />
     {settingsOpen && <ProviderSettingsSheet initialProviderId={settingsProviderId} onClose={closeSettings} />}
     {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
+    <EditDialogs />
+    <SubjectModelDialog />
     </>
   )
 }
@@ -463,14 +469,14 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
       const target = scene.elements.find((element) => element.id === selectedIds[0])
       if (target?.type !== 'image') {
         setActiveTool('select')
-        setToolProblem('请先选择需要局部修改的图片，再绘制蒙版。')
+        setToolProblem('请先选择需要局部修改的图片，再画 AI 重绘区域。')
         return
       }
       setActiveTool('mask')
       return
     }
     setActiveTool(tool)
-    if (tool === 'select' || tool === 'hand' || tool === 'eyedropper' || isPaintTool(tool)) return
+    if (tool === 'select' || tool === 'hand' || tool === 'eyedropper' || isPaintTool(tool) || isSelectionTool(tool)) return
     if (tool === 'sketch') return
     if (tool === 'image') {
       setImportChooserOpen(true)
@@ -531,9 +537,6 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
       } else if (command && event.key.toLowerCase() === 'y') {
         event.preventDefault()
         redo()
-      } else if (command && event.key.toLowerCase() === 'a') {
-        event.preventDefault()
-        setSelection(scene.elements.filter((element) => element.visible).map((element) => element.id))
       } else if (command && event.key.toLowerCase() === 'g') {
         event.preventDefault()
         if (event.shiftKey) ungroupSelection()
@@ -549,6 +552,11 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
         setActiveTool('select')
         if (editingGroupId !== null) exitGroupEditing()
         else setSelection([])
+      } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key) && isSelectionTool(useWorkspaceStore.getState().activeTool)) {
+        // With a selection tool the arrows move the selection, not the layers, as in Photoshop.
+        event.preventDefault()
+        const step = event.shiftKey ? 10 : 1
+        nudgeSelection(event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0, event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0)
       } else if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key) && selectedIds.length > 0) {
         event.preventDefault()
         const current = useWorkspaceStore.getState()
@@ -606,8 +614,10 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
   }, [chooseTool, copySelection, cutSelection, deleteSelection, duplicateSelection, editingGroupId, enterGroupEditing, exitGroupEditing, groupSelection, importFile, pasteSelection, redo, reorderElement, scene.elements, selectedIds, setActiveTool, setSelection, undo, ungroupSelection])
 
   const exportCanvas = (format: 'png' | 'jpeg' | 'webp', jpegBackground: string): void => {
-    const dataUrl = stageRef.current?.exportDataUrl(format, jpegBackground)
-    if (dataUrl !== null && dataUrl !== undefined) downloadDataUrl(dataUrl, exportFilename(projectName, format))
+    void withMaskViewSetAside(() => {
+      const dataUrl = stageRef.current?.exportDataUrl(format, jpegBackground)
+      if (dataUrl !== null && dataUrl !== undefined) downloadDataUrl(dataUrl, exportFilename(projectName, format))
+    })
   }
 
   const editingGroup = editingGroupId === null
@@ -672,10 +682,11 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
             </div>
           )}
         </section>
-          <div ref={canvasSizeRef} className={`canvas-size-float glass-surface${isPaintTool(activeTool) ? ' is-painting' : ''}`} style={canvasUtilityStyles?.size}>
+          <div ref={canvasSizeRef} className={`canvas-size-float glass-surface${isPaintTool(activeTool) || isSelectionTool(activeTool) ? ' is-painting' : ''}`} style={canvasUtilityStyles?.size}>
             <CanvasSizeControl />
             {/* The painting tools' options sit beside the canvas size, Photoshop's options bar, and move with it out of the panels' way. */}
             {isPaintTool(activeTool) && <PaintOptionsBar tool={activeTool} />}
+            {isSelectionTool(activeTool) && <SelectionOptionsBar tool={activeTool} />}
           </div>
           <div ref={canvasStatusRef} className="canvas-status glass-surface" style={canvasUtilityStyles?.status}>
             <div className="canvas-status-scale">

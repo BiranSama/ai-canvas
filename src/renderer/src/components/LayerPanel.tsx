@@ -17,6 +17,7 @@ import {
   Lock,
   MoreHorizontal,
   PenLine,
+  RectangleCircle,
   Search,
   SquareDashed,
   Sun,
@@ -29,12 +30,15 @@ import { pathInBox, type SceneElement } from '../../../domain'
 import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
 import { mergeDown, mergeVisible, rasterizeLayer } from '../canvas/layer-actions'
-import { pixelLayerCanvas, pixelLayerVersion, subscribePixelLayers } from '../canvas/pixel-layers'
+import { addLayerMask, applyLayerMask, deleteLayerMask, editMask, isMaskable, loadMaskAsSelection, loadTransparencyAsSelection, setMaskEnabled, toggleMaskAlone } from '../canvas/mask-actions'
+import { useMaskState } from '../canvas/mask-state'
+import { layerMaskPixels, pixelLayerCanvas, pixelLayerVersion, subscribePixelLayers } from '../canvas/pixel-layers'
+import { hasSelection, useSelectionStore } from '../selection/selection-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeInput } from './ImeSafeTextField'
 
 const KIND_LABELS: Record<SceneElement['type'], string> = {
-  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体', light: '光影', mask: '蒙版', group: '组合'
+  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体', light: '光影', mask: 'AI 区域', group: '组合'
 }
 
 interface Row {
@@ -87,6 +91,64 @@ function PaintedThumb({ element, url }: { readonly element: Extract<SceneElement
       {!drawn && (url === null ? <ImageIcon size={14} /> : <img src={url} alt="" draggable={false} />)}
       <canvas ref={canvasRef} hidden={!drawn} />
     </span>
+  )
+}
+
+/**
+ * A layer mask's thumbnail beside the layer's, as in Photoshop: a click
+ * paints on the mask, Alt+click shows it alone, Shift+click turns it off
+ * (a red cross), Ctrl+click loads it as the selection.
+ */
+function MaskThumb({ element }: { readonly element: Extract<SceneElement, { type: 'image' | 'text' | 'shape' }> }): React.JSX.Element | null {
+  const version = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
+  const editing = useMaskState((state) => state.editing === element.id)
+  const alone = useMaskState((state) => state.view?.elementId === element.id && state.view.mode === 'alone')
+  const select = useWorkspaceStore((state) => state.select)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const mask = element.mask
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const target = canvasRef.current
+      const pixels = layerMaskPixels(element.id)
+      const context = target?.getContext('2d')
+      if (target === null || pixels === null || context === null || context === undefined) return
+      const picture = new ImageData(pixels.width, pixels.height)
+      for (let index = 0; index < pixels.coverage.length; index += 1) {
+        const value = pixels.coverage[index]!
+        picture.data[index * 4] = value; picture.data[index * 4 + 1] = value; picture.data[index * 4 + 2] = value; picture.data[index * 4 + 3] = 255
+      }
+      const source = document.createElement('canvas')
+      source.width = pixels.width
+      source.height = pixels.height
+      source.getContext('2d')?.putImageData(picture, 0, 0)
+      target.width = THUMB_PIXELS
+      target.height = THUMB_PIXELS
+      context.fillStyle = '#FFFFFF'
+      context.fillRect(0, 0, THUMB_PIXELS, THUMB_PIXELS)
+      const scale = Math.min(THUMB_PIXELS / pixels.width, THUMB_PIXELS / pixels.height)
+      context.drawImage(source, (THUMB_PIXELS - pixels.width * scale) / 2, (THUMB_PIXELS - pixels.height * scale) / 2, pixels.width * scale, pixels.height * scale)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [element.id, mask, version])
+  if (mask === null || mask === undefined) return null
+  return (
+    <button
+      type="button"
+      className={`layer-thumb is-mask${editing ? ' is-editing' : ''}${mask.enabled ? '' : ' is-disabled'}${alone ? ' is-alone' : ''}`}
+      aria-label={`${element.name} 的蒙版`}
+      aria-pressed={editing}
+      title="单击在蒙版上画 · Alt+单击单独查看 · Shift+单击停用 · Ctrl+单击载入选区"
+      onClick={(event) => {
+        event.stopPropagation()
+        if (event.ctrlKey || event.metaKey) { loadMaskAsSelection(element.id); return }
+        if (event.shiftKey) { void setMaskEnabled(element.id, !mask.enabled); return }
+        if (event.altKey) { toggleMaskAlone(element.id); return }
+        select(element.id, false)
+        editMask(element.id, true)
+      }}
+    >
+      <canvas ref={canvasRef} />
+    </button>
   )
 }
 
@@ -172,6 +234,9 @@ export function LayerPanel(): React.JSX.Element {
   const [solo, setSolo] = useState<{ readonly id: string; readonly before: ReadonlyMap<string, boolean> } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const maskEditing = useMaskState((state) => state.editing)
+  // The add-mask button's tooltip says whether a selection will shape the mask.
+  const selectionPresent = useSelectionStore((state) => state.mask !== null)
 
   const elements = scene.elements
   const byId = useMemo(() => new Map(elements.map((element) => [element.id, element])), [elements])
@@ -251,7 +316,7 @@ export function LayerPanel(): React.JSX.Element {
     setRenaming(null)
   }
 
-  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup' | 'merge' | 'merge-visible' | 'rasterize'): void => {
+  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup' | 'merge' | 'merge-visible' | 'rasterize' | 'mask-add' | 'mask-hide' | 'mask-apply' | 'mask-delete' | 'mask-toggle'): void => {
     setMenu(null)
     const element = byId.get(id)
     if (element === undefined) return
@@ -269,6 +334,10 @@ export function LayerPanel(): React.JSX.Element {
     else if (action === 'merge') void mergeDown()
     else if (action === 'merge-visible') void mergeVisible()
     else if (action === 'rasterize') void rasterizeLayer(id)
+    else if (action === 'mask-add' || action === 'mask-hide') void addLayerMask(id, action === 'mask-hide')
+    else if (action === 'mask-apply') void applyLayerMask(id)
+    else if (action === 'mask-delete') void deleteLayerMask(id)
+    else if (action === 'mask-toggle') { if (isMaskable(element) && element.mask !== null && element.mask !== undefined) void setMaskEnabled(id, !element.mask.enabled) }
     else void ungroup()
   }
 
@@ -410,7 +479,16 @@ export function LayerPanel(): React.JSX.Element {
               {isGroup
                 ? <button type="button" className={`layer-disclosure${open ? ' is-open' : ''}`} aria-label={open ? `折叠${element.name}` : `展开${element.name}`} onClick={(event) => { event.stopPropagation(); toggleCollapsed(element.id) }}><ChevronRight size={13} /></button>
                 : <span className="layer-disclosure-spacer" aria-hidden="true" />}
-              <LayerThumb element={element} open={open} />
+              <span className="layer-thumbs">
+                {/* A click on the layer's thumbnail paints on its pixels again; Ctrl+click loads its transparency as the selection. */}
+                <span className={`layer-thumb-hit${isMaskable(element) && element.mask !== null && element.mask !== undefined && maskEditing !== element.id ? ' is-target' : ''}`} onClick={(event) => {
+                  if (event.ctrlKey || event.metaKey) { event.stopPropagation(); void loadTransparencyAsSelection(element.id); return }
+                  if (maskEditing === element.id) editMask(element.id, false)
+                }}>
+                  <LayerThumb element={element} open={open} />
+                </span>
+                {isMaskable(element) && <MaskThumb element={element} />}
+              </span>
               <span className="layer-copy" title={`${element.name} · ${KIND_LABELS[element.type]}`}>
                 {renaming === element.id
                   ? <ImeSafeInput aria-label={`重命名${element.name}`} autoFocus value={element.name} commitDelayMs={null} commitOnEnter onCommit={(value) => finishRename(element, value)} onEscape={() => setRenaming(null)} onClick={(event) => event.stopPropagation()} />
@@ -443,6 +521,9 @@ export function LayerPanel(): React.JSX.Element {
         <div className="layer-actions" role="group" aria-label="图层">
           <button type="button" title="组合所选" aria-label="组合" disabled={selected.length < 2} onClick={() => void group()}><GroupIcon size={14} /></button>
           <button type="button" title="取消组合" aria-label="取消组合" disabled={!selected.some((element) => element.type === 'group')} onClick={() => void ungroup()}><Ungroup size={14} /></button>
+          <button type="button" title={selectionPresent ? '添加蒙版：只显示选区（Alt：隐藏选区）' : '添加蒙版（Alt：全部隐藏）'} aria-label="添加蒙版"
+            disabled={selected.length !== 1 || !isMaskable(selected[0]) || (selected[0].mask !== null && selected[0].mask !== undefined)}
+            onClick={(event) => { const element = selected[0]; if (element !== undefined) void addLayerMask(element.id, event.altKey) }}><RectangleCircle size={14} /></button>
           <button type="button" title="复制所选" aria-label="复制所选" disabled={selected.length === 0} onClick={() => void duplicateSelection()}><Copy size={14} /></button>
           <button type="button" title="删除所选" aria-label="删除所选" disabled={selected.length === 0} onClick={() => void deleteSelection()}><Trash2 size={14} /></button>
         </div>
@@ -454,7 +535,7 @@ export function LayerPanel(): React.JSX.Element {
 
       {/* The island's backdrop filter would make it the containing block of a fixed menu, so the menu lives on the body. */}
       {menu !== null && menuElement !== undefined && createPortal(
-        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: Math.min(menu.y, window.innerHeight - 450) }}>
+        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: Math.max(8, Math.min(menu.y, window.innerHeight - 540)) }}>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'rename')}>重命名<kbd>F2</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'duplicate')}>复制</button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'visibility')} disabled={menuElement.locked}>{menuElement.visible ? '隐藏' : '显示'}</button>
@@ -468,6 +549,15 @@ export function LayerPanel(): React.JSX.Element {
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'group')} disabled={selected.length < 2}>组合所选</button>
           {menuElement.type === 'group' && <button type="button" role="menuitem" onClick={() => act(menu.id, 'ungroup')}>取消组合</button>}
           <hr />
+          {isMaskable(menuElement) && (menuElement.mask === null || menuElement.mask === undefined) && <>
+            <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-add')} disabled={menuElement.locked}>{hasSelection() ? '添加蒙版（显示选区）' : '添加蒙版'}</button>
+            <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-hide')} disabled={menuElement.locked}>{hasSelection() ? '添加蒙版（隐藏选区）' : '添加蒙版（全部隐藏）'}</button>
+          </>}
+          {isMaskable(menuElement) && menuElement.mask !== null && menuElement.mask !== undefined && <>
+            <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-toggle')} disabled={menuElement.locked}>{menuElement.mask.enabled ? '停用蒙版' : '启用蒙版'}</button>
+            <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-apply')} disabled={menuElement.locked}>应用蒙版</button>
+            <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-delete')} disabled={menuElement.locked}>删除蒙版</button>
+          </>}
           {(menuElement.type === 'text' || menuElement.type === 'shape') && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge')}>{menuElement.type === 'group' ? '合并组' : selected.length > 1 && selectedIds.includes(menu.id) ? '合并图层' : '向下合并'}<kbd>Ctrl+E</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge-visible')}>合并可见图层<kbd>Ctrl+Shift+E</kbd></button>

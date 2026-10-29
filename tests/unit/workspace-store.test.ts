@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createHundredElementScene } from '../../src/renderer/src/fixtures/hundred-elements'
 import { createNightVeilScene, NIGHT_VEIL_IDS } from '../../src/renderer/src/fixtures/night-veil'
 import { resetWorkspace, setWorkspaceSceneClientForTests, useWorkspaceStore } from '../../src/renderer/src/store/workspace-store'
+import { setSelectionMask, useSelectionStore } from '../../src/renderer/src/selection/selection-store'
+import { rectMask } from '../../src/shared/mask-raster'
 import { createLocalWorkspaceSceneClient } from '../helpers/local-workspace-scene-client'
 
 describe('workspace CommandBus projection', () => {
@@ -11,6 +13,7 @@ describe('workspace CommandBus projection', () => {
     resetWorkspace(scene)
   })
   afterEach(() => {
+    setSelectionMask(null)
     setWorkspaceSceneClientForTests(null)
     resetWorkspace()
   })
@@ -28,6 +31,100 @@ describe('workspace CommandBus projection', () => {
 
     await grouped.undo()
     expect(useWorkspaceStore.getState().scene.elements).toEqual(createNightVeilScene().elements)
+  })
+
+  it('works out a queued batch from the scene left by the changes before it, or sends nothing', async () => {
+    const store = useWorkspaceStore.getState()
+    const title = () => useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!
+    expect(await store.execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])).toBe(true)
+    // An undo queued first lands before the batch is worked out, as a background bake meeting an undo would.
+    const undone = store.undo()
+    const seen: string[] = []
+    const later = store.execute('跟着改', (scene) => {
+      const current = scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!
+      seen.push(current.name)
+      return current.name === '标题一' ? [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题二' } }] : null
+    })
+    await undone
+    expect(await later).toBe(false)
+    expect(seen).toEqual([createNightVeilScene().elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!.name])
+    expect(title().name).toBe(seen[0])
+  })
+
+  it('keeps a selection change made while a batch is on its way after that batch in the history', async () => {
+    const scene = createNightVeilScene()
+    const local = createLocalWorkspaceSceneClient(scene)
+    let release: () => void = () => undefined
+    const held = new Promise<void>((resolve) => { release = resolve })
+    setWorkspaceSceneClientForTests({ ...local, execute: async (input) => { await held; return local.execute(input) } })
+    resetWorkspace(scene)
+    const renamed = useWorkspaceStore.getState().execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])
+    // The person selects while Main has not answered yet.
+    setSelectionMask(rectMask(scene.canvas.outputWidth, scene.canvas.outputHeight, { x: 10, y: 10, width: 50, height: 50 }))
+    release()
+    expect(await renamed).toBe(true)
+    // Ctrl+Z takes back the selection, the later of the two, and leaves the rename.
+    await useWorkspaceStore.getState().undo()
+    expect(useSelectionStore.getState().mask).toBeNull()
+    expect(useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)?.name).toBe('标题一')
+    await useWorkspaceStore.getState().undo()
+    expect(useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)?.name).not.toBe('标题一')
+  })
+
+  it('takes a batch that did not land out of the history again', async () => {
+    const scene = createNightVeilScene()
+    setWorkspaceSceneClientForTests({ ...createLocalWorkspaceSceneClient(scene), execute: async () => { throw new Error('Main is gone') } })
+    resetWorkspace(scene)
+    setSelectionMask(rectMask(scene.canvas.outputWidth, scene.canvas.outputHeight, { x: 10, y: 10, width: 50, height: 50 }))
+    expect(await useWorkspaceStore.getState().execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])).toBe(false)
+    expect(useWorkspaceStore.getState().selectionUndo).toBe(true)
+    await useWorkspaceStore.getState().undo()
+    expect(useSelectionStore.getState().mask).toBeNull()
+  })
+
+  it('keeps what can be redone when a batch does not land', async () => {
+    const scene = createNightVeilScene()
+    setWorkspaceSceneClientForTests({ ...createLocalWorkspaceSceneClient(scene), execute: async () => { throw new Error('Main is gone') } })
+    resetWorkspace(scene)
+    setSelectionMask(rectMask(scene.canvas.outputWidth, scene.canvas.outputHeight, { x: 10, y: 10, width: 50, height: 50 }))
+    await useWorkspaceStore.getState().undo()
+    expect(useWorkspaceStore.getState().selectionRedo).toBe(true)
+    expect(await useWorkspaceStore.getState().execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])).toBe(false)
+    expect(useWorkspaceStore.getState().selectionRedo).toBe(true)
+    await useWorkspaceStore.getState().redo()
+    expect(useSelectionStore.getState().mask).not.toBeNull()
+  })
+
+  it('takes back the step an undo was for, though a later batch holds a place above it', async () => {
+    const scene = createNightVeilScene()
+    const local = createLocalWorkspaceSceneClient(scene)
+    setWorkspaceSceneClientForTests({ ...local, undo: async (input) => { await new Promise((resolve) => setTimeout(resolve, 20)); return local.undo(input) } })
+    resetWorkspace(scene)
+    setSelectionMask(rectMask(scene.canvas.outputWidth, scene.canvas.outputHeight, { x: 10, y: 10, width: 50, height: 50 }))
+    expect(await useWorkspaceStore.getState().execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])).toBe(true)
+    // An undo is on its way when a background batch that will send nothing is asked for.
+    const undone = useWorkspaceStore.getState().undo()
+    const nothing = useWorkspaceStore.getState().execute('合并', () => null)
+    await Promise.all([undone, nothing])
+    expect(useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)?.name).not.toBe('标题一')
+    // What is left is the selection, and the next undo takes it back.
+    expect(useWorkspaceStore.getState().selectionUndo).toBe(true)
+    await useWorkspaceStore.getState().undo()
+    expect(useSelectionStore.getState().mask).toBeNull()
+  })
+
+  it('lands two additions queued before either is answered, each on the record the other left', async () => {
+    const scene = createNightVeilScene()
+    const local = createLocalWorkspaceSceneClient(scene)
+    setWorkspaceSceneClientForTests({ ...local, execute: async (input) => { await new Promise((resolve) => setTimeout(resolve, 20)); return local.execute(input) } })
+    resetWorkspace(scene)
+    const append = (word: string) => useWorkspaceStore.getState().execute(word, (current) => {
+      const title = current.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!
+      return [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { description: `${title.description}${word}` } }]
+    })
+    const before = scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!.description
+    expect(await Promise.all([append('一'), append('二')])).toEqual([true, true])
+    expect(useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)?.description).toBe(`${before}一二`)
   })
 
   it('enters a Group, edits one child atomically and recomputes the Group bounds', async () => {

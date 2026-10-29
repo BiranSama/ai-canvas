@@ -3,9 +3,14 @@ import { join } from 'node:path'
 import { AppearanceSettingsService } from './appearance/appearance-settings-service'
 import { GenerationRuntime } from './generation/generation-runtime'
 import { registerDesktopIpc } from './ipc/register-desktop-ipc'
+import { subjectSegmentation } from './segmentation/subject-segmentation-electron'
 import { openableFileArguments, queueOpenFiles } from './open-file-requests'
 import { DESKTOP_EVENTS } from '../shared/desktop-api'
 import { createMainWindow, hardenSession } from './window'
+
+// Without a usable graphics card Chromium no longer falls back to software WebGL by itself; the object
+// selection's model needs WebGL, and the window only ever shows the app's own pages.
+app.commandLine.appendSwitch('enable-unsafe-swiftshader')
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock()
 let generationRuntime: Promise<GenerationRuntime> | null = null
@@ -46,7 +51,7 @@ if (!hasSingleInstanceLock) {
     const projectLibraryDirectory = process.env.AI_CANVAS_E2E === undefined
       ? join(app.getPath('documents'), 'AI Canvas')
       : join(userDataDirectory, 'projects')
-    generationRuntime = GenerationRuntime.create(userDataDirectory, { projectLibraryDirectory })
+    generationRuntime = GenerationRuntime.create(userDataDirectory, { projectLibraryDirectory, subject: subjectSegmentation })
     const result = createMainWindow()
     registerDesktopIpc(result.backgroundMaterial, generationRuntime, appearanceSettings)
 

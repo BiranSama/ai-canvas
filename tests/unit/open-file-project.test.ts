@@ -102,9 +102,9 @@ describe('opening a PSD as a project', () => {
         opaqueBackground: true,
         groups: [{ name: '标题组', visible: false }],
         layers: [
-          { name: '背景', left: 0, top: 0, width: 400, height: 200, opacity: 1, visible: true, blendMode: 'normal', groupIndex: null, png },
-          { name: '阴影', left: 40, top: 20, width: 80, height: 40, opacity: 0.5, visible: false, blendMode: 'multiply', groupIndex: 0, png },
-          { name: '光', left: -40, top: 100, width: 100, height: 100, opacity: 0.8, visible: true, blendMode: 'soft-light', groupIndex: 0, png }
+          { name: '背景', left: 0, top: 0, width: 400, height: 200, opacity: 1, visible: true, blendMode: 'normal', groupIndex: null, png, mask: null },
+          { name: '阴影', left: 40, top: 20, width: 80, height: 40, opacity: 0.5, visible: false, blendMode: 'multiply', groupIndex: 0, png, mask: null },
+          { name: '光', left: -40, top: 100, width: 100, height: 100, opacity: 0.8, visible: true, blendMode: 'soft-light', groupIndex: 0, png, mask: { png, enabled: false } }
         ],
         composite: png,
         approximations: ['1 个图层的图层样式（投影、描边等）没有带过来'],
@@ -130,6 +130,10 @@ describe('opening a PSD as a project', () => {
     expect(added[0]).toMatchObject({ semanticRole: 'background', transform: { x: 0, y: 0, width: 1, height: 1 } })
     expect(added[1]).toMatchObject({ opacity: 0.5, visible: false, blendMode: 'multiply', transform: { x: 0.1, y: 0.1, width: 0.2, height: 0.2 } })
     expect(added[2]).toMatchObject({ blendMode: 'soft-light', transform: { x: -0.1, y: 0.5, width: 0.25, height: 0.5 } })
+    // A layer mask comes along as the layer's mask, turned off when it was off in Photoshop.
+    expect(added[2].mask).toEqual({ assetId: expect.any(String), enabled: false })
+    expect(added[2].mask.assetId).not.toBe(added[2].assetId)
+    expect(added[1].mask).toBeUndefined()
     expect(added[3]).toMatchObject({ visible: false, referencePolicy: 'exclude', transform: { x: 0, y: 0, width: 1, height: 1 } })
     const group = commands.find((command: { kind: string }) => command.kind === 'element.group')
     expect(group).toMatchObject({ elementIds: [added[1].id, added[2].id], group: { name: '标题组', visible: false, type: 'group' } })

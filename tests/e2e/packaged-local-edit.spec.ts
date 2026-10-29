@@ -1,8 +1,14 @@
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { enterPackagedWorkspace, packagedTestEnvironment } from './packaged-test-helpers'
+
+/** The AI repaint region tool lives in the AI 标注 slot's menu, opened with a right-click. */
+async function chooseRepaintRegion(page: Page): Promise<void> {
+  await page.getByRole('navigation', { name: '画布工具' }).locator('.tool-slot.is-grouped').last().getByRole('button').dispatchEvent('contextmenu')
+  await page.getByRole('menuitemradio', { name: 'AI 重绘区域' }).click()
+}
 
 const executablePath = process.env.AI_CANVAS_PACKAGED_PATH
 
@@ -24,7 +30,7 @@ test('draws a mask and completes a non-destructive edit in the packaged Windows 
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
     await window.getByTestId('insert-generation-result').click()
-    await window.getByRole('button', { name: '蒙版' }).click()
+    await chooseRepaintRegion(window)
     const stage = await window.getByTestId('canvas-stage').boundingBox()
     if (stage === null) throw new Error('Canvas stage is missing.')
     const centerX = stage.x + stage.width * .5
