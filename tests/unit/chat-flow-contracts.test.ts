@@ -47,6 +47,20 @@ describe('chat flow planning contracts', () => {
     expect(validateChatPlan(plan([generation, place]), framed).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
     expect(validateChatPlan(plan([generation]), req).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
   })
+  it('leaves a scene placeholder as the model wrote it, and keeps a long request within the limit', () => {
+    const req = request()
+    const place = { kind: 'place_generation_result', resultId: 'generated:0', targetElementId: IDS.placeholder }
+    const reshaped = (changes: Record<string, unknown>) => ({ ...req, sceneSummary: { ...req.sceneSummary, elements: req.sceneSummary.elements.map(e => e.id === IDS.placeholder ? { ...e, ...changes } : e) } })
+    // A landscape, and a placeholder filling the canvas, are scenes: placement does not cut them out.
+    expect(validateChatPlan(plan([generation, place]), reshaped({ visualKind: 'landscape' })).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
+    expect(validateChatPlan(plan([generation, place]), reshaped({ transform: { x: 0, y: 0, width: 1, height: 0.9, rotation: 0 } })).tools[0]).toMatchObject({ request: { prompt: '青绿香水瓶' } })
+    // A request already at the limit is cut short to leave room for the ask.
+    const long = { ...generation, request: { ...generation.request, prompt: '瓶'.repeat(8_000) } }
+    const isolated = validateChatPlan(plan([long, place]), req).tools[0]!
+    if (isolated.kind !== 'generation') throw new Error('Expected the generation to stay first.')
+    expect(isolated.request.prompt.length).toBeLessThanOrEqual(8_000)
+    expect(isolated.request.prompt.endsWith(SUBJECT_ISOLATION)).toBe(true)
+  })
   it('resolves only a completed same-plan job, never an unrelated earlier result', () => {
     const activePlan = plan([generation, { kind: 'place_generation_result', resultId: 'generated:0', targetElementId: IDS.placeholder }])
     const req = request()

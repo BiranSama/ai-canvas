@@ -11,6 +11,7 @@ import type { AgentPlan, AgentRequest, AgentRun, AgentToolOutcome, AgentToolPlan
 import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../shared/agent'
 import { ELEMENT_SCHEMA_VERSION, imageElementSchema, type ImageEffects, type LayerMask, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 import { fitSubject, type SubjectFinder, type SubjectFit } from '../edit/subject-fit'
+import { fitsIntoPlace } from '../../shared/subject-place'
 import type { AgentEvent, AgentHarnessSnapshot, AgentMode, AgentTaskDispatch, TaskRelation, TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
@@ -196,8 +197,6 @@ interface WorkflowMetadata {
   readonly retryExecution?: ImageExecutionBinding
 }
 
-/** A subject's place this share of the canvas is a background, and its picture is placed as it came. */
-const BACKGROUND_SHARE = 0.8
 /** How far a picture put in a subject's place moves towards the colours around it (0 none, 1 their average). */
 const SUBJECT_TONE = 0.35
 
@@ -2310,8 +2309,8 @@ export class GenerationRuntime {
     readonly effects: ImageEffects
   } | null> {
     // A placeholder set to keep its background (a photo in a frame, a card) takes the picture as it came.
-    const subjectPlace = (target.type === 'placeholder' && target.transparentBackground) || (target.type === 'image' && target.mask !== null && target.mask !== undefined)
-    if (!subjectPlace || target.transform.width * target.transform.height >= BACKGROUND_SHARE) return null
+    const cutout = (target.type === 'placeholder' && target.transparentBackground) || (target.type === 'image' && target.mask !== null && target.mask !== undefined)
+    if (!fitsIntoPlace({ cutout, transform: target.transform })) return null
     let findSubject: SubjectFinder | null = null
     if (this.#subject !== undefined && !(target.type === 'placeholder' && target.visualKind === 'landscape')) {
       const model = this.#subjectModel(this.#subject)
@@ -2323,10 +2322,12 @@ export class GenerationRuntime {
       ? { assetId: (await this.#importDerivedImage(owner, fit.mask, 'reference', `subject-mask:${resultId}`)).id, enabled: true }
       : null
     const feather = fit.kind === 'feather' ? fit.feather : 0
+    // A shadow someone set on the image it replaces stays.
+    const shadow = target.type === 'image' ? target.effects?.shadow ?? null : null
     // The tone is measured with the picture in place, as much of it as shows.
     const placed = imageElementSchema.parse({
       ...target, type: 'image', assetId: asset.id, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'contain', referenceRole: 'subject',
-      paint: [], mask, effects: { colorMatch: null, feather, shadow: null }
+      paint: [], mask, effects: { colorMatch: null, feather, shadow }
     })
     const measured = await measureToneMatch({ ...scene, elements: scene.elements.map((element) => element.id === target.id ? placed : element) }, placed, async (assetId) => {
       try {
@@ -2335,7 +2336,7 @@ export class GenerationRuntime {
         return null
       }
     }, SUBJECT_TONE).catch(() => null)
-    return { kind: fit.kind, mask, effects: { colorMatch: measured?.colorMatch ?? null, feather, shadow: null } }
+    return { kind: fit.kind, mask, effects: { colorMatch: measured?.colorMatch ?? null, feather, shadow } }
   }
 
   async #enqueueWorkflow(

@@ -24,6 +24,7 @@ import type { PlannerProjectContext } from './context-builder'
 import { normalizeAgentPlanCreativeBriefs } from './creative-brief-normalizer'
 import { agentErrorRecipe, normalizeAgentFailureEnvelope, type AgentFailureEnvelope } from '../../shared/agent-recovery'
 import { availablePlannerToolKinds } from './agent-tool-registry'
+import { asksForLoneSubject, type SubjectPlace } from '../../shared/subject-place'
 
 const MAX_ATTACHMENT_COUNT = 4
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
@@ -314,24 +315,34 @@ function lockGenerationProvider(
 /** What the image model is asked for when its picture is to be cut out and placed in a subject's place. */
 export const SUBJECT_ISOLATION = '画面要求：只画这一个主体，完整入画、不被裁切，四周留一些空白；背景是干净的纯色，不要场景、地面和其他物体。成图会抠出主体放进设计里。'
 
+/** The longest prompt a generation request takes. */
+const GENERATION_PROMPT_LIMIT = 8_000
+
 /**
  * A picture generated to replace a subject placeholder is cut out of its
  * background when it is placed, so the image model is asked for the subject
- * alone on a plain background; a placeholder set to keep its background is
- * left as the model wrote it.
+ * alone on a plain background. Placeholders placement leaves as they come (one
+ * that keeps its background, a landscape, one that fills the canvas) are left
+ * as the model wrote them. The request is cut short to leave room for the ask.
  */
 function isolateSubjectGenerations(tools: readonly AgentPlan['tools'][number][], request: AgentRequest, targets: ReadonlyMap<string, { readonly type: string }>): AgentPlan['tools'][number][] {
-  const cutouts = new Map(request.sceneSummary.elements.map((element) => [element.id, element.type === 'placeholder' && element.cutout !== false]))
+  const places = new Map<string, SubjectPlace>(request.sceneSummary.elements.flatMap((element) => element.type === 'placeholder'
+    ? [[element.id, { cutout: element.cutout !== false, visualKind: element.visualKind, transform: element.transform }] as const] : []))
   for (const tool of tools) {
-    if (tool.kind === 'scene.create_elements') for (const element of tool.elements) if (element.type === 'placeholder') cutouts.set(element.id, element.transparentBackground)
-    if (tool.kind === 'scene_batch') for (const command of tool.commands) if (command.kind === 'element.add' && command.element.type === 'placeholder') cutouts.set(command.element.id, command.element.transparentBackground)
+    const added = tool.kind === 'scene.create_elements' ? tool.elements
+      : tool.kind === 'scene_batch' ? tool.commands.flatMap((command) => command.kind === 'element.add' ? [command.element] : []) : []
+    for (const element of added) {
+      if (element.type === 'placeholder') places.set(element.id, { cutout: element.transparentBackground, visualKind: element.visualKind, transform: element.transform })
+    }
   }
-  const isolatedSources = new Set(tools.flatMap((tool) => (tool.kind === 'place_generation_result' || tool.kind === 'result.place_on_canvas')
-    && tool.resultId.startsWith('generated:') && tool.targetElementId !== undefined
-    && targets.get(tool.targetElementId)?.type === 'placeholder' && cutouts.get(tool.targetElementId) === true
-    ? [Number(tool.resultId.slice('generated:'.length))] : []))
+  const isolatedSources = new Set(tools.flatMap((tool) => {
+    if ((tool.kind !== 'place_generation_result' && tool.kind !== 'result.place_on_canvas') || !tool.resultId.startsWith('generated:') || tool.targetElementId === undefined) return []
+    const place = places.get(tool.targetElementId)
+    return targets.get(tool.targetElementId)?.type === 'placeholder' && place !== undefined && asksForLoneSubject(place) ? [Number(tool.resultId.slice('generated:'.length))] : []
+  }))
+  const room = GENERATION_PROMPT_LIMIT - SUBJECT_ISOLATION.length - 2
   return tools.map((tool, index) => tool.kind === 'generation' && isolatedSources.has(index) && !tool.request.prompt.includes(SUBJECT_ISOLATION)
-    ? { ...tool, request: { ...tool.request, prompt: `${tool.request.prompt}\n\n${SUBJECT_ISOLATION}` } }
+    ? { ...tool, request: { ...tool.request, prompt: `${tool.request.prompt.slice(0, room).trimEnd()}\n\n${SUBJECT_ISOLATION}` } }
     : tool)
 }
 

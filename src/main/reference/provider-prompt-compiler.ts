@@ -17,6 +17,15 @@ function placement(bounds: PromptIrElement['bounds']): string {
 }
 
 const WEIGHT_COPY: Readonly<Record<string, string>> = { hero: '画面主视觉', primary: '醒目', secondary: '次要', whisper: '很轻' }
+/** What an image on the canvas is for, as the person set it: drawn in, or only borrowed from. */
+const ROLE_COPY: Readonly<Record<string, string>> = {
+  general: '照参考图里的样子画进画面',
+  subject: '作为主体，照参考图里的样子画进画面',
+  composition: '参考它的构图和布局，内容不必照搬',
+  style: '只借用它的风格和笔触，不要把它本身画进画面',
+  color: '只借用它的配色，不要把它本身画进画面',
+  material: '只借用它的材质和质感，不要把它本身画进画面'
+}
 const ACCURACY_COPY: Readonly<Record<string, string>> = { strict: '一字不差', balanced: '内容不变，排列可微调', expressive: '可以艺术化处理' }
 
 function describeElement(element: PromptIrElement, promptPackage?: PromptPackage): string {
@@ -44,7 +53,10 @@ function describeElement(element: PromptIrElement, promptPackage?: PromptPackage
   if (element.type === 'light') {
     return `光线：${element.description || element.name}，颜色 ${String(element.attributes.color ?? '')}，从 ${String(element.attributes.direction ?? '')}° 方向照来，强度 ${percentage(element.attributes.intensity)}，柔和度 ${percentage(element.attributes.softness)}；${position}${blend}`
   }
-  if (element.type === 'image') return `图片“${element.name}”（照参考图里的样子画进画面）${element.description ? `：${element.description}` : ''}；${position}${blend}`
+  if (element.type === 'image') {
+    const role = ROLE_COPY[String(element.attributes.referenceRole ?? 'general')] ?? ROLE_COPY.general!
+    return `图片“${element.name}”：${role}${element.description ? `；${element.description}` : ''}；${position}${blend}`
+  }
   if (element.type === 'shape') return `${element.attributes.role === 'placeholder' ? '构图示意的色块' : '图形'}“${element.name}”${element.description ? `：${element.description}` : ''}；${position}${blend}`
   if (element.type === 'sketch') return `构图草图“${element.name}”，轮廓照着画的程度 ${percentage(element.attributes.fidelity)}${element.description ? `；${element.description}` : ''}；${position}${blend}`
   return `“${element.name}”${element.description ? `：${element.description}` : ''}；${position}${blend}`

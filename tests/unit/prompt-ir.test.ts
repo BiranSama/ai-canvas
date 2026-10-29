@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { CommandBus, ELEMENT_SCHEMA_VERSION, sceneSchema, type Scene } from '../../src/domain'
 import { compilePromptIr, elementPresentation, ProviderPromptCompiler } from '../../src/main/reference'
 import { createNightVeilScene, NIGHT_VEIL_IDS } from '../../src/renderer/src/fixtures/night-veil'
+import { makeAllElementTypesScene } from '../fixtures/scene-fixtures'
 
 function sceneWithOcclusion(): Scene {
   const scene = createNightVeilScene()
@@ -169,5 +170,20 @@ describe('Prompt IR and provider prompt compiler', () => {
     expect(compiled.prompt).toContain('滤色')
     expect(compiled.prompt).not.toContain('globalCompositeOperation')
     expect(compiled.prompt).not.toContain('mix-blend-mode')
+  })
+
+  it('tells the image model what each canvas image is for: drawn in, or only borrowed from', () => {
+    const source = makeAllElementTypesScene()
+    const image = source.elements.find((element) => element.type === 'image')
+    if (image?.type !== 'image') throw new Error('Image fixture is missing.')
+    const prompt = (referenceRole: 'subject' | 'style' | 'material') => {
+      const scene = sceneSchema.parse({ ...source, elements: source.elements.map((element) => element.id === image.id ? { ...element, referenceRole } : element) })
+      return new ProviderPromptCompiler().compile(compilePromptIr(scene, '生成完整海报', '2026-08-10T00:00:00.000Z'), 'mock', {
+        textToImage: true, imageReferences: true, maskEditing: true, multipleReferences: true, transparentOutput: false, maxImages: 4, supportedRatios: ['4:5'], supportedFormats: ['png']
+      }).prompt
+    }
+    expect(prompt('subject')).toContain(`图片“${image.name}”：作为主体`)
+    expect(prompt('style')).toContain(`图片“${image.name}”：只借用它的风格和笔触，不要把它本身画进画面`)
+    expect(prompt('material')).toContain('只借用它的材质和质感')
   })
 })

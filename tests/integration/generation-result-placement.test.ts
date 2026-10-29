@@ -146,4 +146,29 @@ describe('AH1 S7 generation result actions', () => {
       await runtime.close()
     }
   }, 30_000)
+
+  it('keeps the shadow set on a cut-out image when a new picture replaces it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ai-canvas-subject-shadow-'))
+    roots.push(root)
+    const runtime = await GenerationRuntime.create(root)
+    const first = await waitForCompleted(runtime, (await runtime.enqueue(request())).id)
+    const fixture = makeAllElementTypesScene().elements.find((element) => element.id === IDS.image)!
+    if (fixture.type !== 'image') throw new Error('The fixture has no image.')
+    const shadow = { color: '#000000', opacity: 0.4, blur: 0.05, offsetX: 0, offsetY: 0.02 }
+    const cutOut = { ...fixture, groupId: null, zIndex: 0, transform: { x: 0.3, y: 0.3, width: 0.4, height: 0.4, rotation: 0 },
+      assetId: first.results[0]!.assetId, mask: { assetId: first.results[0]!.assetId, enabled: true }, effects: { colorMatch: null, feather: 0, shadow } }
+    const laid = await runtime.executeSceneCommands({ expectedSceneRevision: runtime.getWorkspaceBootstrap().scene.revision, batch: {
+      id: randomUUID(), origin: 'user', summary: '抠好的图', commands: [{ kind: 'element.add', element: cutOut }]
+    } })
+    expect(laid.ok).toBe(true)
+    // A different picture, so placing it is a replacement rather than the one already there.
+    const second = await waitForCompleted(runtime, (await runtime.enqueue({ ...request(), prompt: 'A second, warmer object for the same place' })).id)
+    expect(second.results[0]!.assetId).not.toBe(first.results[0]!.assetId)
+    const placed = await runtime.placeGenerationResult({ resultId: second.results[0]!.id, placementId: randomUUID(), origin: 'agent' }, undefined, undefined, IDS.image)
+    expect(placed.fit).toBe('feather')
+    const element = runtime.getWorkspaceBootstrap().scene.elements.find((candidate) => candidate.id === IDS.image)!
+    if (element.type !== 'image') throw new Error('The image was not replaced.')
+    expect(element.effects?.shadow).toEqual(shadow)
+    await runtime.close()
+  }, 30_000)
 })
