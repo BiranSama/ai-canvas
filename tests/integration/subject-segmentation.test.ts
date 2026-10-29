@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -102,6 +102,19 @@ describe('downloading the Select Subject model', () => {
 
     const mirror = await serve(bytes)
     expect(await downloader.download(mirror.url)).toMatchObject({ state: 'ready' })
+  })
+
+  it('fails the download, not the app, when the file cannot be written', async () => {
+    const bytes = Buffer.from(Array.from({ length: 300_000 }, (_, index) => index % 251))
+    const served = await serve(bytes)
+    const directory = await folder()
+    const downloader = new ModelDownloader({ model: modelFor(bytes, served.url), directory, fetch: fetchModel })
+    // A folder where the partial file goes: the write stream fails after it opens.
+    await mkdir(`${downloader.path}.part`)
+    const failed = await downloader.download()
+    expect(failed.state).toBe('failed')
+    expect(failed.error).toContain('下载没有完成')
+    expect(existsSync(downloader.path)).toBe(false)
   })
 
   it('stops when cancelled and says so', async () => {

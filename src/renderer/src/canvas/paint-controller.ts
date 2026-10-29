@@ -1,4 +1,4 @@
-import type { LayerMask, PaintOp, SceneElement } from '../../../domain'
+import type { PaintOp, SceneElement } from '../../../domain'
 import { boxLayerSpace, canvasToLayer, imageLayerSpace, type LayerSpace } from '../../../shared/layer-space'
 import { maskGray, paintClipIds, startsWithBaked } from '../../../shared/paint-ops'
 import { showAppNotice } from '../components/app-notice'
@@ -139,17 +139,18 @@ async function record(target: PaintTarget, op: PaintOp, clip: SelectionClip, sum
     }
     recorded = { ...op, clip: clipId }
   }
-  const current = currentElement(target.element.id) ?? target.element
-  let saved: boolean
-  if (target.onMask) {
-    const mask = current.mask ?? target.element.mask
-    if (mask === null || mask === undefined) { discardPixelLayer(target.element.id); return false }
-    const next: LayerMask = { ...mask, paint: [...mask.paint ?? [], recorded] }
-    saved = await useWorkspaceStore.getState().updateElement(target.element.id, { mask: next }, `${summary}（蒙版）`)
-  } else {
-    const paint = current.type === 'image' ? current.paint ?? [] : []
-    saved = await useWorkspaceStore.getState().updateElement(target.element.id, { paint: [...paint, recorded] }, summary)
-  }
+  const elementId = target.element.id
+  // Appended to the record as it is when the batch runs, so a stroke whose save is still on its way keeps its place.
+  const saved = await useWorkspaceStore.getState().execute(target.onMask ? `${summary}（蒙版）` : summary, (scene) => {
+    const element = scene.elements.find((candidate) => candidate.id === elementId)
+    if (element === undefined || (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape')) return null
+    if (target.onMask) {
+      const mask = element.mask
+      if (mask === null || mask === undefined) return null
+      return [{ kind: 'element.update', elementId, changes: { mask: { ...mask, paint: [...mask.paint ?? [], recorded] } } }]
+    }
+    return [{ kind: 'element.update', elementId, changes: { paint: [...element.type === 'image' ? element.paint ?? [] : [], recorded] } }]
+  })
   if (!saved) discardPixelLayer(target.element.id)
   else void (target.onMask ? bakeMaskIfLong(target.element.id) : bakeIfLong(target.element.id))
   return saved

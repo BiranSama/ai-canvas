@@ -82,6 +82,33 @@ describe('workspace CommandBus projection', () => {
     expect(useSelectionStore.getState().mask).toBeNull()
   })
 
+  it('keeps what can be redone when a batch does not land', async () => {
+    const scene = createNightVeilScene()
+    setWorkspaceSceneClientForTests({ ...createLocalWorkspaceSceneClient(scene), execute: async () => { throw new Error('Main is gone') } })
+    resetWorkspace(scene)
+    setSelectionMask(rectMask(scene.canvas.outputWidth, scene.canvas.outputHeight, { x: 10, y: 10, width: 50, height: 50 }))
+    await useWorkspaceStore.getState().undo()
+    expect(useWorkspaceStore.getState().selectionRedo).toBe(true)
+    expect(await useWorkspaceStore.getState().execute('改名', [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { name: '标题一' } }])).toBe(false)
+    expect(useWorkspaceStore.getState().selectionRedo).toBe(true)
+    await useWorkspaceStore.getState().redo()
+    expect(useSelectionStore.getState().mask).not.toBeNull()
+  })
+
+  it('lands two additions queued before either is answered, each on the record the other left', async () => {
+    const scene = createNightVeilScene()
+    const local = createLocalWorkspaceSceneClient(scene)
+    setWorkspaceSceneClientForTests({ ...local, execute: async (input) => { await new Promise((resolve) => setTimeout(resolve, 20)); return local.execute(input) } })
+    resetWorkspace(scene)
+    const append = (word: string) => useWorkspaceStore.getState().execute(word, (current) => {
+      const title = current.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!
+      return [{ kind: 'element.update', elementId: NIGHT_VEIL_IDS.title, changes: { description: `${title.description}${word}` } }]
+    })
+    const before = scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)!.description
+    expect(await Promise.all([append('一'), append('二')])).toEqual([true, true])
+    expect(useWorkspaceStore.getState().scene.elements.find((element) => element.id === NIGHT_VEIL_IDS.title)?.description).toBe(`${before}一二`)
+  })
+
   it('enters a Group, edits one child atomically and recomputes the Group bounds', async () => {
     const store = useWorkspaceStore.getState()
     store.setSelection([NIGHT_VEIL_IDS.bottle, NIGHT_VEIL_IDS.title])
