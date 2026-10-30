@@ -728,6 +728,46 @@ describe('AH1 S4 persistent agent loop', () => {
     expect(calls).toBe(0)
   })
 
+  it('asks the generation question the ratio question held back, and generates at the chosen ratio', async () => {
+    const generated: AgentToolPlan[] = []
+    const layout: AgentToolPlan = {
+      kind: 'scene_batch',
+      summary: '竖版排版',
+      commands: [{
+        kind: 'scene.set-canvas',
+        canvas: { aspectWidth: 4, aspectHeight: 5, outputWidth: 1024, outputHeight: 1280, backgroundColor: '#FFFFFF', transparent: false, globalStyle: '' }
+      }]
+    }
+    const tool = generationTool()
+    const planner: AgentPlanner = { plan: async () => ({ summary: '排版后出图', response: '已按比例排版并生成。', nextAction: null, tools: [layout, tool] }) }
+    const value = await harness({
+      planner: new DeterministicCreativePlannerAdapter(planner),
+      executeTool: async (call, toolIndex) => {
+        if (call.kind === 'generation') generated.push(call)
+        return { toolIndex, ok: true, batchId: call.kind === 'scene_batch' ? `batch-${toolIndex}` : null, jobId: null, affectedElementIds: [], message: 'done' }
+      }
+    })
+    const turn = await value.start('run-ratio-then-generate', request('给咖啡店做一张宣传画面'), 'collaboration')
+    await value.loop.waitForIdle()
+    const waiting = async () => (await value.loop.snapshot()).items.find((item) => item.turnId === turn.id && item.type === 'decision' && item.status === 'waiting')
+
+    const ratio = await waiting()
+    expect(ratio?.payload).toMatchObject({ proposal: { kind: 'aspect_ratio' } })
+    await value.loop.resolveDecision(turn.id, ratio?.id ?? '', '1:1')
+    await value.loop.waitForIdle()
+
+    const confirmation = await waiting()
+    expect(confirmation?.payload).toMatchObject({ proposal: { kind: 'generation_confirmation' } })
+    expect((await value.loop.snapshot()).turns.find((candidate) => candidate.id === turn.id)).toMatchObject({ status: 'waiting_decision' })
+    expect(generated).toEqual([])
+
+    await value.loop.resolveDecision(turn.id, confirmation?.id ?? '', 'generate')
+    await value.loop.waitForIdle()
+    expect((await value.loop.snapshot()).turns.find((candidate) => candidate.id === turn.id)?.status).toMatch(/^completed/)
+    expect(generated).toHaveLength(1)
+    expect(generated[0]).toMatchObject({ request: { aspectWidth: 1, aspectHeight: 1, outputWidth: 400, outputHeight: 400 } })
+  })
+
   it('stops the turn clock while the person decides', async () => {
     let nowMs = Date.parse('2026-08-22T12:00:00.000+08:00')
     const tool = generationTool()

@@ -473,19 +473,28 @@ export function decisionFor(request: AgentRequest, plan: AgentPlan, generationPo
       defaultOptionId: defaultRatio
     }
   }
-  if (generationPolicy.requiresConfirmation(request, plan)) {
-    return {
-      kind: 'generation_confirmation',
-      title: '要现在生成图片吗？',
-      consequence: '确认后创建受当前 Provider 与费用策略约束的图片任务；保留画布则不会进入队列。',
-      options: [
-        { id: 'generate', label: '开始生成', consequence: '创建图片生成任务' },
-        { id: 'keep_canvas', label: '先保留画布', consequence: '停止本轮，不创建生成任务' }
-      ],
-      defaultOptionId: 'generate'
-    }
-  }
+  if (generationPolicy.requiresConfirmation(request, plan)) return generationConfirmation()
   return null
+}
+
+function generationConfirmation(): AgentDecisionProposal {
+  return {
+    kind: 'generation_confirmation',
+    title: '要现在生成图片吗？',
+    consequence: '确认后创建受当前 Provider 与费用策略约束的图片任务；保留画布则不会进入队列。',
+    options: [
+      { id: 'generate', label: '开始生成', consequence: '创建图片生成任务' },
+      { id: 'keep_canvas', label: '先保留画布', consequence: '停止本轮，不创建生成任务' }
+    ],
+    defaultOptionId: 'generate'
+  }
+}
+
+/** Whether the person has answered the generation question for this plan. */
+function generationAnswered(items: readonly AgentItem[], planItemId: string, barrierOrdinal: number): boolean {
+  return items.some((item) => item.type === 'decision' && item.status === 'completed' && item.ordinal > barrierOrdinal
+    && payload<StoredDecisionPayload>(item).planItemId === planItemId
+    && payload<StoredDecisionPayload>(item).proposal.kind === 'generation_confirmation')
 }
 
 function reviewDecisionFor(tool: AgentToolPlan): AgentDecisionProposal {
@@ -576,17 +585,31 @@ function planGenerationBudget(plan: AgentPlan | null): { readonly jobs: number; 
   }
 }
 
+function sized(aspectWidth: number, aspectHeight: number, longEdge: number): { readonly outputWidth: number; readonly outputHeight: number } {
+  return {
+    outputWidth: aspectWidth >= aspectHeight ? longEdge : Math.round(longEdge * aspectWidth / aspectHeight),
+    outputHeight: aspectWidth >= aspectHeight ? Math.round(longEdge * aspectHeight / aspectWidth) : longEdge
+  }
+}
+
 function resizePlan(plan: AgentPlan, optionId: string): AgentPlan {
   const match = optionId.match(/^(\d{1,3}):(\d{1,3})$/)
   if (match === null) return plan
   const aspectWidth = Number(match[1])
   const aspectHeight = Number(match[2])
-  const longEdge = 1280
-  const outputWidth = aspectWidth >= aspectHeight ? longEdge : Math.round(longEdge * aspectWidth / aspectHeight)
-  const outputHeight = aspectWidth >= aspectHeight ? Math.round(longEdge * aspectHeight / aspectWidth) : longEdge
+  const { outputWidth, outputHeight } = sized(aspectWidth, aspectHeight, 1280)
+  const planned = plan.tools.flatMap((tool) => tool.kind === 'scene_batch'
+    ? tool.commands.flatMap((command) => command.kind === 'scene.set-canvas' ? [command.canvas] : [])
+    : tool.kind === 'scene.set_canvas' ? [tool.canvas] : [])[0]
+  // A picture generated for the whole canvas takes its new shape; one made for a smaller place keeps its own.
+  const forCanvas = (request: { readonly aspectWidth: number; readonly aspectHeight: number }): boolean => planned !== undefined
+    && request.aspectWidth * planned.aspectHeight === request.aspectHeight * planned.aspectWidth
   return {
     ...plan,
-    tools: plan.tools.map((tool) => tool.kind === 'scene_batch' ? {
+    tools: plan.tools.map((tool) => tool.kind === 'generation' && forCanvas(tool.request) ? {
+      ...tool,
+      request: { ...tool.request, aspectWidth, aspectHeight, ...sized(aspectWidth, aspectHeight, Math.max(tool.request.outputWidth, tool.request.outputHeight)) }
+    } : tool.kind === 'scene_batch' ? {
       ...tool,
       commands: tool.commands.map((command) => command.kind !== 'scene.set-canvas' ? command : {
         ...command,
@@ -1438,6 +1461,21 @@ export class PersistentAgentLoop {
           ? explicitlyApprovedGenerationBudget(items, merged.barrierOrdinal)
           : { jobs: 0, images: 0 }
         const currentPlan = activePlan ?? step.plan
+        const questionPlanItemId = activePlanItem?.id ?? planItem.id
+        if (explicitGrantAllowed && isGenerationTool(step.call) && currentPlan !== null
+          && this.#generationPolicy.requiresConfirmation(plannerRequest, currentPlan)
+          && !generationAnswered(items, questionPlanItemId, merged.barrierOrdinal)) {
+          // The plan's first question was about its ratio; the cost question it held back comes now.
+          const proposal = generationConfirmation()
+          const decisionItem = await this.#repository.appendItem(turnId, {
+            type: 'decision', status: 'waiting', payloadVersion: 1,
+            payload: { proposal, planItemId: questionPlanItemId } satisfies StoredDecisionPayload
+          })
+          await this.#repository.transitionTurn(turnId, 'waiting_decision')
+          await this.#projection.onDecisionWaiting?.({ turn, legacyRunId, item: decisionItem, proposal })
+          await this.#publish(turn.threadId)
+          return
+        }
         const directlyAuthorizedGeneration = explicitGrantAllowed && currentPlan !== null
           && !this.#generationPolicy.requiresConfirmation(plannerRequest, currentPlan)
           ? planGenerationBudget(currentPlan)
