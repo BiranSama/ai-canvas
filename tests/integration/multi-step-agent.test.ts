@@ -235,6 +235,25 @@ describe('multi-step engine decisions and corrections', () => {
     expect(observation.scenes.final.elements).toHaveLength(14)
   }, 120_000)
 
+  it('lets a long run of read-only calls finish instead of declaring the turn done after six', async () => {
+    const looking = customCase({ id: 'multi-step-read-01', request: { text: '加个标题，再仔细检查几遍' } })
+    const { observation } = await runScripted(looking, (results) => results === 0
+      ? [call('t1', 'add_text', { content: '晨雾', role: 'title' })]
+      : results < 9
+        ? [call(`i${results}`, 'inspect', { targets: ['E1'] })]
+        : [message('检查过了，标题位置合适。')], 'read-only')
+    expect(observation.turns.at(-1)).toMatchObject({ status: 'completed', modelCalls: 10, toolSteps: 1 })
+  }, 90_000)
+
+  it('stops when the same call fails three times in a row, saying where it is stuck', async () => {
+    const stuck = customCase({ id: 'multi-step-stuck-01', request: { text: '把标题改成白色' } })
+    const { requests, observation } = await runScripted(stuck, () => [call(`u${Math.random()}`.replace('.', ''), 'update', { targets: ['E9'], set: { color: '#FFFFFF' } })], 'stuck')
+    expect(requests).toHaveLength(3)
+    // Nothing was changed, so the honest-completion check leaves the turn for the person to review.
+    expect(observation.turns.at(-1)).toMatchObject({ status: 'needs_user_review', modelCalls: 3 })
+    expect(observation.turns.at(-1)!.replyText).toMatch(/「update」用同样的参数连续 3 次都没成功/)
+  }, 90_000)
+
   it('shows the model a rendered screenshot when it looks', async () => {
     const looking = customCase({ id: 'multi-step-look-01', request: { text: '加个标题，然后看看效果' } })
     const { requests, observation } = await runScripted(looking, (results) => results === 0

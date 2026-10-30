@@ -9,8 +9,8 @@ import {
   STEPWISE_AUTO_BUDGET,
   STEPWISE_COLLABORATION_BUDGET,
   STEPWISE_REVIEW_BUDGET,
+  isTurnGuardCode,
   normalizeAgentTaskInput,
-  scaledAgentBudget,
   isTerminalAgentTurnStatus,
   plannerStepSchema,
   type AgentCompletionAssessment,
@@ -47,6 +47,7 @@ import {
   type DirectiveConflict
 } from './context-builder'
 import type { PlannerAdapter } from './planner-adapter'
+import { turnModelCostCny } from './multi-step/trace'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
 import { createAgentFailureEnvelope } from './agent-failure'
 import { createModelOutboundGate } from './model-outbound-gate'
@@ -143,9 +144,10 @@ export interface PersistentAgentLoopOptions {
   readonly activateGenerationJob?: (jobId: string) => Promise<void>
   readonly projection?: AgentLoopProjection
   readonly generationPolicy?: GenerationPolicy
+  /** The estimated spend in CNY at which a turn pauses; null for none. */
+  readonly turnCostCap?: () => number | null
   readonly budget?: AgentRunBudget
   /** The owner's multiple of the standard per-turn allowance, read as each turn starts. */
-  readonly budgetScale?: () => number
   readonly permissionProfileId?: string
   readonly providerIds?: readonly string[]
   readonly now?: () => string
@@ -638,9 +640,9 @@ export class PersistentAgentLoop {
   readonly #activateGenerationJob: ((jobId: string) => Promise<void>) | null
   readonly #projection: AgentLoopProjection
   readonly #generationPolicy: GenerationPolicy
+  readonly #turnCostCap: () => number | null
   readonly #budget: AgentRunBudget
   readonly #budgetOverride: AgentRunBudget | null
-  readonly #budgetScale: () => number
   readonly #permissionProfileId: string
   readonly #providerIds: readonly string[]
   readonly #now: () => string
@@ -675,8 +677,8 @@ export class PersistentAgentLoop {
     this.#activateGenerationJob = options.activateGenerationJob ?? null
     this.#projection = options.projection ?? {}
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
+    this.#turnCostCap = options.turnCostCap ?? (() => null)
     this.#budgetOverride = options.budget ?? null
-    this.#budgetScale = options.budgetScale ?? (() => 1)
     this.#budget = options.budget ?? (options.planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
     this.#permissionProfileId = options.permissionProfileId ?? ownerFullPermissionProfile().id
     this.#providerIds = [...(options.providerIds ?? ['image-provider'])]
@@ -1331,6 +1333,12 @@ export class PersistentAgentLoop {
         }
         if (control instanceof AgentLoopControlError && control.kind === 'interrupt') return
         const wallTimeExpired = surfacedFailureCode(error, 'AGENT_PLANNING_FAILED') === 'BUDGET_WALL_TIME'
+        // A planner that answers tools itself can reach a guard within its pass; the turn pauses there like at any other guard.
+        const guardCode = surfacedFailureCode(error, 'AGENT_PLANNING_FAILED')
+        if (!wallTimeExpired && isTurnGuardCode(guardCode)) {
+          await this.#terminal(await this.#repository.getTurn(turnId), legacyRunId, 'budget_limited', guardCode, error instanceof Error ? error.message : '本轮到了安全上限。')
+          return
+        }
         const attempt = attemptNumber
         const failedTurnBeforeAccounting = await this.#repository.getTurn(turnId)
         const elapsed = activeTurnElapsedMs(turn, items, Date.parse(this.#now()))
@@ -1910,6 +1918,11 @@ export class PersistentAgentLoop {
     if (turn.modelTurnsUsed >= budget.maxModelTurns) {
       return { code: 'BUDGET_MODEL_TURNS', message: 'Agent turn reached its model-turn budget before the next planning step.' }
     }
+    const costCap = this.#turnCostCap()
+    if (costCap !== null) {
+      const spent = turnModelCostCny(items) + (this.#generationWorkflowRepository?.getTurnUsage(turn.id).reservedCostCny ?? 0)
+      if (spent >= costCap) return { code: 'BUDGET_TURN_COST', message: `本轮估算费用 ¥${spent.toFixed(2)} 到了每轮上限 ¥${costCap.toFixed(2)}。` }
+    }
     if (nextTool === null) return null
     if (turn.toolCallsUsed >= budget.maxToolCalls) {
       return { code: 'BUDGET_TOOL_CALLS', message: 'Agent turn reached its tool-call budget before the next tool.' }
@@ -2071,11 +2084,11 @@ export class PersistentAgentLoop {
 
   async #createGoal(threadId: string, request: AgentRequest, mode: AgentMode): Promise<AgentGoalContract> {
     const stepwise = this.#planner.stepwise === true
-    const budget = this.#budgetOverride ?? scaledAgentBudget(mode === 'auto'
+    const budget = this.#budgetOverride ?? (mode === 'auto'
       ? stepwise ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET
       : mode === 'review'
         ? stepwise ? STEPWISE_REVIEW_BUDGET : DEFAULT_REVIEW_BUDGET
-        : stepwise ? STEPWISE_COLLABORATION_BUDGET : DEFAULT_COLLABORATION_BUDGET, this.#budgetScale())
+        : stepwise ? STEPWISE_COLLABORATION_BUDGET : DEFAULT_COLLABORATION_BUDGET)
     return this.#repository.createGoal(threadId, {
       objective: request.text,
       completionDefinition: ['所需设计与生成操作有可核对回执', '外发、费用与项目写入符合当前 Owner 权限和预算'],

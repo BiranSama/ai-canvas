@@ -12,7 +12,7 @@ import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../share
 import { ELEMENT_SCHEMA_VERSION, imageElementSchema, type ImageEffects, type LayerMask, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 import { fitSubject, type SubjectFinder, type SubjectFit } from '../edit/subject-fit'
 import { fitsIntoPlace } from '../../shared/subject-place'
-import type { AgentEvent, AgentHarnessSnapshot, AgentMode, AgentTaskDispatch, TaskRelation, TurnInputMode } from '../../shared/agent-harness'
+import { STEPWISE_COLLABORATION_BUDGET, type AgentEvent, type AgentHarnessSnapshot, type AgentMode, type AgentTaskDispatch, type TaskRelation, type TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
   CreateProjectDirectiveInput,
@@ -687,9 +687,9 @@ export class GenerationRuntime {
       projectId: project.workspace.metadata.id,
       repository: conversationRepository,
       planner,
-      ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: 40 }),
+      ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: STEPWISE_COLLABORATION_BUDGET.maxToolCalls }),
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
-      budgetScale: () => this.#executionPolicy.agentStepScale,
+      turnCostCap: () => this.#executionPolicy.maxCostCnyPerTurn,
       logger: this.#diagnosticLog,
       activityLedger,
       toolExecutor,

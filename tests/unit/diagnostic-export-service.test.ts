@@ -33,7 +33,7 @@ function source(): DiagnosticExportSourceSnapshot {
     }],
     executionPolicy: {
       approvalMode: 'confirm_each', autoGenerate: false,
-      maxRequestsPerJob: 5, maxImagesPerJob: 4, maxCostCnyPerJob: 3, agentStepScale: 1
+      maxRequestsPerJob: 5, maxImagesPerJob: 4, maxCostCnyPerJob: 3, maxCostCnyPerTurn: 3
     },
     usage: [{
       scopeId: 'private-job-id', providerId: 'image-provider', requests: 1,

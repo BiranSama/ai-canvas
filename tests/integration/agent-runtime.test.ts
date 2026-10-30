@@ -7,6 +7,7 @@ import { ActivityLedgerRepository, AgentHarnessRepository, AgentRuntime, Convers
 import { ProjectWorkspace } from '../../src/main/storage/project-workspace'
 import type { AgentPlan, AgentRequest, AgentRunStatus, SceneSummary } from '../../src/shared/agent'
 import { createNightVeilScene } from '../../src/renderer/src/fixtures/night-veil'
+import { DEFAULT_COLLABORATION_BUDGET } from '../../src/shared/agent-harness'
 
 const roots: string[] = []
 
@@ -79,7 +80,7 @@ async function waitForTool(executed: readonly ExecutedTool[]): Promise<void> {
   }
 }
 
-async function harness(options: { readonly planner?: AgentPlanner; readonly projectDirectory?: string; readonly ids?: () => string; readonly budgetScale?: number } = {}) {
+async function harness(options: { readonly planner?: AgentPlanner; readonly projectDirectory?: string; readonly ids?: () => string } = {}) {
   const root = options.projectDirectory === undefined ? await mkdtemp(join(tmpdir(), 'ai-canvas-agent-')) : null
   if (root !== null) roots.push(root)
   const ids = options.ids ?? idFactory()
@@ -96,7 +97,6 @@ async function harness(options: { readonly planner?: AgentPlanner; readonly proj
     activityLedger: new ActivityLedgerRepository(databasePath, { idFactory: ids }),
     harnessRepository: new AgentHarnessRepository(databasePath, { idFactory: ids }),
     planner: options.planner ?? new DeterministicMockPlanner({ delayMs: 1, idFactory: ids }),
-    ...(options.budgetScale === undefined ? {} : { budgetScale: () => options.budgetScale! }),
     executePersistentTool: async (tool, context) => {
       executed.push({ tool, sourceMessageId: context.sourceMessageId })
       if (tool.kind !== 'scene_batch') {
@@ -182,10 +182,10 @@ describe('agent runtime and shared CommandBus boundary', () => {
     await reopened.workspace.close(true)
   })
 
-  it('gives a run as many tool steps as the owner\'s multiple of the turn allowance allows', async () => {
-    const value = await harness({ budgetScale: 4 })
+  it('gives a run as many tool steps as its turn\'s guard allows', async () => {
+    const value = await harness()
     const started = await value.runtime.start(request(value.bus.getScene(), '做一张 4:5 的香水海报，标题是 NIGHT VEIL。先不要生成图片。'))
-    expect(started.maxSteps).toBe(32)
+    expect(started.maxSteps).toBe(DEFAULT_COLLABORATION_BUDGET.maxToolCalls)
     await waitForStatus(value.runtime, started.id, ['completed'])
     await closeHarness(value)
   })

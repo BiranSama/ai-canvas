@@ -137,24 +137,26 @@ const providerExecutionPolicyFields = {
   maxRequestsPerJob: z.number().int().min(1).max(100),
   maxImagesPerJob: z.number().int().min(1).max(16),
   maxCostCnyPerJob: z.number().min(0).max(10_000),
-  /** How many times the Agent's standard per-turn allowance of model turns, tool calls, canvas writes and time. */
-  agentStepScale: z.union([z.literal(1), z.literal(2), z.literal(4)]).default(1)
+  /** The estimated spend, text model and images at the prices set, at which an Agent turn pauses. */
+  maxCostCnyPerTurn: z.number().min(0.1).max(10_000).default(3)
 } as const
 
 export const providerExecutionPolicySchema = z.object(providerExecutionPolicyFields).strict()
 
-// Product V1 briefly wrote `unlimitedSpend` during development. Read and
-// discard that field so existing local settings migrate to a finite ceiling.
+// Product V1 briefly wrote `unlimitedSpend` during development, and later
+// settings a multiple of the Agent's per-turn steps. Read and discard both:
+// spending keeps a finite ceiling, and the steps are now guards, not a setting.
 const storedProviderExecutionPolicySchema = z.object({
   ...providerExecutionPolicyFields,
-  unlimitedSpend: z.boolean().optional()
-}).transform(({ approvalMode, autoGenerate, maxRequestsPerJob, maxImagesPerJob, maxCostCnyPerJob, agentStepScale }) => providerExecutionPolicySchema.parse({
+  unlimitedSpend: z.boolean().optional(),
+  agentStepScale: z.number().optional()
+}).transform(({ approvalMode, autoGenerate, maxRequestsPerJob, maxImagesPerJob, maxCostCnyPerJob, maxCostCnyPerTurn }) => providerExecutionPolicySchema.parse({
   approvalMode,
   autoGenerate,
   maxRequestsPerJob,
   maxImagesPerJob,
   maxCostCnyPerJob,
-  agentStepScale
+  maxCostCnyPerTurn
 }))
 
 export const DEFAULT_PROVIDER_EXECUTION_POLICY = providerExecutionPolicySchema.parse({

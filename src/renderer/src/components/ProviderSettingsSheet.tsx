@@ -116,8 +116,7 @@ const OPTICAL_QUALITY_LABELS: Record<OpticalQuality, string> = {
 function budgetStatus(snapshot: ProviderSettingsSnapshot): string {
   const policy = snapshot.executionPolicy
   const approval = policy.approvalMode === 'confirm_each' ? '逐次确认' : '本次会话授权'
-  const steps = policy.agentStepScale === 1 ? '标准' : `标准的 ${policy.agentStepScale} 倍`
-  return `每个图片任务最多 ${policy.maxRequestsPerJob} 个网络请求、${policy.maxImagesPerJob} 张图，预约额度 ¥${policy.maxCostCnyPerJob.toFixed(2)}，${approval}。Agent 每轮的模型回合、工具调用、画布修改和时限为${steps}，与图片任务的请求数无关。价格未知时，预约不保证实际人民币扣费上限。`
+  return `每个图片任务最多 ${policy.maxRequestsPerJob} 个网络请求、${policy.maxImagesPerJob} 张图，预约额度 ¥${policy.maxCostCnyPerJob.toFixed(2)}，${approval}。Agent 每一轮估算花到 ¥${policy.maxCostCnyPerTurn.toFixed(2)} 就暂停，可以接着做；估算按文字模型和生图服务里填的单价，没填单价的部分不计入。价格未知时，预约不保证实际人民币扣费上限。`
 }
 
 export function ProviderSettingsSheet({
@@ -561,11 +560,11 @@ export function ProviderSettingsSheet({
                   const approvalMode = event.currentTarget.value as ProviderExecutionPolicy['approvalMode']
                   setPolicyDraft((current) => current === null ? null : { ...current, approvalMode })
                 }}><option value="confirm_each">逐次确认</option><option value="session">本次会话授权</option></select>
-                <label className="provider-agent-steps" title="每轮的模型回合、工具调用、画布修改和时限一起放宽；图片张数和费用仍按上面的上限。">Agent 每轮步数
-                  <select aria-label="Agent 每轮步数" value={policyDraft.agentStepScale} onChange={(event) => {
-                    const agentStepScale = Number(event.currentTarget.value) as ProviderExecutionPolicy['agentStepScale']
-                    setPolicyDraft((current) => current === null ? null : { ...current, agentStepScale })
-                  }}><option value={1}>标准</option><option value={2}>2 倍</option><option value={4}>4 倍</option></select>
+                <label className="provider-agent-steps" title="按文字模型和生图服务里填的单价估算；到了就暂停，可以接着做。">每轮费用上限（元）
+                  <input aria-label="Agent 每轮费用上限" type="number" min={0.1} max={10000} step={0.5} value={policyDraft.maxCostCnyPerTurn} onChange={(event) => {
+                    const value = Number(event.currentTarget.value)
+                    setPolicyDraft((current) => current === null ? null : { ...current, maxCostCnyPerTurn: value })
+                  }} />
                 </label>
                 <button type="button" disabled={busy !== null} onClick={() => void saveExecutionPolicy()}>保存执行边界</button>
               </div>

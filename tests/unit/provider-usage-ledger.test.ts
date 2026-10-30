@@ -19,7 +19,7 @@ describe('Product provider usage ledger', () => {
       ...structuredClone(DEFAULT_PROVIDER_CONFIG),
       executionPolicy: {
         approvalMode: 'session', autoGenerate: true,
-        maxRequestsPerJob: 3, maxImagesPerJob: 2, maxCostCnyPerJob: 3, agentStepScale: 1
+        maxRequestsPerJob: 3, maxImagesPerJob: 2, maxCostCnyPerJob: 3, maxCostCnyPerTurn: 3
       }
     }
     const source = { read: async () => structuredClone(config) }

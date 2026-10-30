@@ -54,7 +54,7 @@ export interface MultiStepPlannerOptions {
   readonly layerMask?: AgentToolContext['layerMask']
   readonly bakeImage?: AgentToolContext['bakeImage']
   readonly newId?: () => string
-  /** Model calls one pass may make while it answers read-only tools itself. */
+  /** Model calls one pass may make while it answers read-only tools itself; by default only the turn's guard bounds them. */
   readonly maxModelCallsPerPass?: number
   /** Estimated input above which earlier steps are replaced by a checkpoint. */
   readonly checkpointTokens?: number
@@ -227,7 +227,21 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         return finish({ kind: 'tool', call: step.plan, toolIndex: 0, plan: oneToolPlan(step.plan, description) }, { callId: call.callId, name: call.name }, modelTurns)
       }
 
-      if (modelTurns >= callLimit) {
+      const stuck = repeatedFailure([...assistants, ...pass.assistants], results)
+      if (stuck !== null) {
+        return finish({
+          kind: 'complete',
+          assessment: {
+            status: 'completed_with_notes',
+            summary: `「${stuck.name}」用同样的参数连续 ${REPEATED_FAILURE_LIMIT} 次都没成功，先停在这里：${stuck.reason}。做好的部分都保留；可以换个说法，或者告诉我怎么调整。`,
+            notes: ['同一步连续失败，已停止重试。'],
+            nextAction: null
+          }
+        }, null, modelTurns)
+      }
+      if (modelTurns >= callLimit.calls) {
+        // The loop pauses the turn at its guard, so the person can carry on from here.
+        if (callLimit.guard) throw Object.assign(new Error('这一轮的模型调用到了安全上限，先停在这里；做好的部分都保留，可以接着做。'), { code: 'BUDGET_MODEL_TURNS' })
         return finish({
           kind: 'complete',
           assessment: {
@@ -345,9 +359,11 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     return settled
   }
 
-  #modelCallLimit(used: number, budget: AgentRunBudget | undefined): number {
-    const perPass = this.#options.maxModelCallsPerPass ?? 6
-    return budget === undefined ? perPass : Math.max(1, Math.min(perPass, budget.maxModelTurns - used))
+  /** The calls this pass may make, and whether the turn's guard is what bounds them. */
+  #modelCallLimit(used: number, budget: AgentRunBudget | undefined): { readonly calls: number; readonly guard: boolean } {
+    const perPass = this.#options.maxModelCallsPerPass ?? Number.POSITIVE_INFINITY
+    const left = budget === undefined ? Number.POSITIVE_INFINITY : Math.max(1, budget.maxModelTurns - used)
+    return left <= perPass ? { calls: left, guard: budget !== undefined } : { calls: perPass, guard: false }
   }
 
   #cacheScreenshots(callId: string, images: readonly LlmImage[]): void {
@@ -463,6 +479,20 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       ? model.http.postEventStream(live, model.protocol.createTurnStreamAccumulator())
       : model.protocol.parseTurnResponse(await model.http.postLlmJson(live))
   }
+}
+
+/** The same call failing this many times in a row ends the turn instead of another try. */
+const REPEATED_FAILURE_LIMIT = 3
+
+/** The call the model keeps repeating although it fails each time, or null. */
+function repeatedFailure(steps: readonly AssistantStep[], results: ReadonlyMap<string, LlmToolResult>): { readonly name: string; readonly reason: string } | null {
+  const recent = steps.flatMap((step) => turnToolCalls(step)).slice(-REPEATED_FAILURE_LIMIT)
+  if (recent.length < REPEATED_FAILURE_LIMIT) return null
+  const [first] = recent
+  if (recent.some((call) => call.name !== first!.name || call.argumentsText !== first!.argumentsText || results.get(call.callId)?.isError !== true)) return null
+  const text = results.get(recent.at(-1)!.callId)?.content.find((part) => part.type === 'text')?.text ?? ''
+  const line = text.split('\n', 1)[0]!.trim()
+  return { name: first!.name, reason: line === '' ? '没有说明原因' : line.slice(0, 160) }
 }
 
 /** A finished generation job names its new images, so the model can view or place them. */

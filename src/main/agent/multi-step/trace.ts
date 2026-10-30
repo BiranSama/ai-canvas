@@ -132,6 +132,11 @@ export function sumUsage(entries: readonly LlmUsage[]): LlmUsage {
   }), { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningTokens: null })
 }
 
+/** The estimated cost of a turn's model calls that could be priced; calls without a price count as nothing. */
+export function turnModelCostCny(items: readonly AgentItem[]): number {
+  return items.reduce((total, item) => total + (traceOf(item)?.costCny ?? 0), 0)
+}
+
 /** Token usage and estimated cost of every model call of a multi-step turn, or null when it made none. */
 export function turnModelUsage(items: readonly AgentItem[]): TurnModelUsage | null {
   const passes = items.flatMap((item) => {
