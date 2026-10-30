@@ -175,6 +175,11 @@ export const plannerStepSchema = z.discriminatedUnion('kind', [
     kind: z.literal('complete'),
     assessment: agentCompletionAssessmentSchema,
     trace: plannerTraceSchema
+  }),
+  /** A pass that stopped to keep what it has done: its trace is stored, the guards are checked, and planning goes on. */
+  z.object({
+    kind: z.literal('progress'),
+    trace: plannerTraceSchema
   })
 ])
 

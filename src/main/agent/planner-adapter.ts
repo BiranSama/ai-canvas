@@ -74,6 +74,8 @@ export interface PlannerInput {
   readonly nextToolIndex: number
   /** The turn's budget, for planners that make several model calls in one pass. */
   readonly budget?: AgentRunBudget
+  /** What the turn may still spend before its cost cap, in CNY; null when it has no cap. */
+  readonly costLeftCny?: number | null
 }
 
 export interface PlannerStepResult {

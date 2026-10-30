@@ -54,11 +54,20 @@ export interface MultiStepPlannerOptions {
   readonly layerMask?: AgentToolContext['layerMask']
   readonly bakeImage?: AgentToolContext['bakeImage']
   readonly newId?: () => string
-  /** Model calls one pass may make while it answers read-only tools itself; by default only the turn's guard bounds them. */
+  /** Model calls one pass may make while it answers read-only tools itself before it stores its progress. */
   readonly maxModelCallsPerPass?: number
   /** Estimated input above which earlier steps are replaced by a checkpoint. */
   readonly checkpointTokens?: number
 }
+
+/**
+ * A pass answering read-only tools itself makes this many model calls at
+ * most before it hands its progress to the loop: what it did is stored, the
+ * turn's guards and cost cap are checked, and the next pass carries on. It
+ * also keeps a pass's stored record within the trace's bounds.
+ */
+const MODEL_CALLS_PER_PASS = 8
+const MAX_PASS_RESULTS = 48
 
 /** A cost reservation per model call; the ledger settles against it. */
 const MODEL_CALL_COST_CEILING_CNY = 0.25
@@ -250,18 +259,12 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           }
         }, null, modelTurns)
       }
-      if (modelTurns >= callLimit.calls) {
-        // The loop pauses the turn at its guard, so the person can carry on from here.
-        if (callLimit.guard) throw Object.assign(new Error('这一轮的模型调用到了安全上限，先停在这里；做好的部分都保留，可以接着做。'), { code: 'BUDGET_MODEL_TURNS' })
-        return finish({
-          kind: 'complete',
-          assessment: {
-            status: 'completed_with_notes',
-            summary: '这一轮可用的步数已经用完，先停在这里。你可以看看当前效果，再告诉我接下来怎么调整。',
-            notes: ['本轮模型调用次数达到上限。'],
-            nextAction: '继续调整'
-          }
-        }, null, modelTurns)
+      // A pass that has made its share of calls, or spent what the turn has left, hands back what it has;
+      // the loop stores it, checks the turn's guards and cost cap, and asks again.
+      const spentInPass = pass.costCny ?? 0
+      if (modelTurns > 0 && (modelTurns >= callLimit || pass.results.length >= MAX_PASS_RESULTS
+        || (input.costLeftCny != null && spentInPass >= input.costLeftCny))) {
+        return finish({ kind: 'progress' }, null, modelTurns)
       }
       const system = multiStepSystemPrompt(this.#options.manuals ?? null)
       const tools = [...llmToolDefinitions(availableAgentTools(toolContext))]
@@ -374,11 +377,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     return settled
   }
 
-  /** The calls this pass may make, and whether the turn's guard is what bounds them. */
-  #modelCallLimit(used: number, budget: AgentRunBudget | undefined): { readonly calls: number; readonly guard: boolean } {
-    const perPass = this.#options.maxModelCallsPerPass ?? Number.POSITIVE_INFINITY
-    const left = budget === undefined ? Number.POSITIVE_INFINITY : Math.max(1, budget.maxModelTurns - used)
-    return left <= perPass ? { calls: left, guard: budget !== undefined } : { calls: perPass, guard: false }
+  /** The calls this pass may make before it hands back to the loop. */
+  #modelCallLimit(used: number, budget: AgentRunBudget | undefined): number {
+    const perPass = this.#options.maxModelCallsPerPass ?? MODEL_CALLS_PER_PASS
+    return budget === undefined ? perPass : Math.max(1, Math.min(perPass, budget.maxModelTurns - used))
   }
 
   #cacheScreenshots(callId: string, images: readonly LlmImage[]): void {

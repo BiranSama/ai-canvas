@@ -9,7 +9,6 @@ import {
   STEPWISE_AUTO_BUDGET,
   STEPWISE_COLLABORATION_BUDGET,
   STEPWISE_REVIEW_BUDGET,
-  isTurnGuardCode,
   normalizeAgentTaskInput,
   isTerminalAgentTurnStatus,
   plannerStepSchema,
@@ -1283,7 +1282,8 @@ export class PersistentAgentLoop {
             stepIndex: stepCount,
             activePlan,
             nextToolIndex: results.length,
-            budget: turnBudget
+            budget: turnBudget,
+            costLeftCny: this.#turnCostLeftCny(turn.id, items)
           }, controller.signal, {
             attempt: attemptNumber,
             requestCorrelationId,
@@ -1336,12 +1336,6 @@ export class PersistentAgentLoop {
         }
         if (control instanceof AgentLoopControlError && control.kind === 'interrupt') return
         const wallTimeExpired = surfacedFailureCode(error, 'AGENT_PLANNING_FAILED') === 'BUDGET_WALL_TIME'
-        // A planner that answers tools itself can reach a guard within its pass; the turn pauses there like at any other guard.
-        const guardCode = surfacedFailureCode(error, 'AGENT_PLANNING_FAILED')
-        if (!wallTimeExpired && isTurnGuardCode(guardCode)) {
-          await this.#terminal(await this.#repository.getTurn(turnId), legacyRunId, 'budget_limited', guardCode, error instanceof Error ? error.message : '本轮到了安全上限。')
-          return
-        }
         const attempt = attemptNumber
         const failedTurnBeforeAccounting = await this.#repository.getTurn(turnId)
         const elapsed = activeTurnElapsedMs(turn, items, Date.parse(this.#now()))
@@ -1527,6 +1521,12 @@ export class PersistentAgentLoop {
           await this.#publish(turn.threadId)
           return
         }
+      }
+      if (step.kind === 'progress') {
+        // The pass is stored with its plan item; the guards and cost cap are checked again before the next one.
+        await this.#repository.transitionTurn(turnId, 'running')
+        await this.#publish(turn.threadId)
+        continue
       }
       if (step.kind === 'message') {
         await this.#repository.appendItem(turnId, {
@@ -1921,10 +1921,9 @@ export class PersistentAgentLoop {
     if (turn.modelTurnsUsed >= budget.maxModelTurns) {
       return { code: 'BUDGET_MODEL_TURNS', message: 'Agent turn reached its model-turn budget before the next planning step.' }
     }
-    const costCap = this.#turnCostCap()
-    if (costCap !== null) {
-      const spent = turnModelCostCny(items) + this.#turnImageCostCny(turn.id)
-      if (spent >= costCap) return { code: 'BUDGET_TURN_COST', message: `本轮估算费用 ¥${spent.toFixed(2)} 到了每轮上限 ¥${costCap.toFixed(2)}。` }
+    const costLeft = this.#turnCostLeftCny(turn.id, items)
+    if (costLeft !== null && costLeft <= 0) {
+      return { code: 'BUDGET_TURN_COST', message: `本轮估算费用到了每轮上限 ¥${this.#turnCostCap()!.toFixed(2)}。` }
     }
     if (nextTool === null) return null
     if (turn.toolCallsUsed >= budget.maxToolCalls) {
@@ -1946,6 +1945,12 @@ export class PersistentAgentLoop {
       }
     }
     return null
+  }
+
+  /** What the turn may still spend before its cost cap: priced model calls and reserved images count; null without a cap. */
+  #turnCostLeftCny(turnId: string, items: readonly AgentItem[]): number | null {
+    const cap = this.#turnCostCap()
+    return cap === null ? null : cap - turnModelCostCny(items) - this.#turnImageCostCny(turnId)
   }
 
   /** The turn's reserved images at their services' prices; images from a service without a price count as nothing. */

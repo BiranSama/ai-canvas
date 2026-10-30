@@ -631,6 +631,33 @@ describe('AH1 S4 persistent agent loop', () => {
     expect((await value.loop.snapshot()).turns.find((turn) => turn.id === first.id)).toMatchObject({ status: 'budget_limited', errorCode: 'BUDGET_SCENE_WRITES', sceneWriteBatchesUsed: 4 })
   })
 
+  it('stores a pass that hands back its progress and checks the guards before planning on', async () => {
+    const trace = (costCny: number) => ({ version: 1, promptVersion: 'test', refs: {}, assistants: [], results: [], emitted: null, usage: [], brief: null, checkpoint: null, modelCalls: 8, costCny })
+    for (const [spent, expected] of [[0.1, { status: 'completed', calls: 1 }], [0.6, { status: 'budget_limited', errorCode: 'BUDGET_TURN_COST', calls: 0 }]] as const) {
+      let calls = 0
+      const value = await harness({
+        planner: new ScriptedPlannerAdapter([
+          { kind: 'progress', trace: trace(spent) },
+          { kind: 'tool', call: sceneTool('看完后改一批'), toolIndex: 0, plan: null },
+          { kind: 'complete', assessment: { status: 'completed', summary: '改好了', notes: [], nextAction: null } }
+        ]),
+        turnCostCap: 0.5,
+        executeTool: async (tool, toolIndex) => {
+          calls += 1
+          return { toolIndex, ok: true, batchId: `batch-${toolIndex}`, jobId: null, affectedElementIds: [], message: tool.kind }
+        }
+      })
+      const turn = await value.start(`run-progress-${spent}`, request('先看看再改'), 'collaboration')
+      await value.loop.waitForIdle()
+      const snapshot = await value.loop.snapshot()
+      const { calls: expectedCalls, ...status } = expected
+      expect(snapshot.turns.find((candidate) => candidate.id === turn.id)).toMatchObject(status)
+      expect(calls).toBe(expectedCalls)
+      // The progress pass is kept as a plan item, so its usage counts toward the turn.
+      expect(snapshot.items.filter((item) => item.turnId === turn.id && item.type === 'plan' && (item.payload as { step?: { kind?: string } }).step?.kind === 'progress')).toHaveLength(1)
+    }
+  })
+
   it('pauses a turn whose estimated spend reaches the per-turn cap, before the next step', async () => {
     let calls = 0
     const value = await harness({

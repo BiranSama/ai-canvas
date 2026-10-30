@@ -37,8 +37,8 @@ export const modelTraceSchema = z.object({
     parts: z.array(llmAssistantPartSchema).max(256),
     native: llmNativeReplaySchema.nullable()
   })).max(16),
-  /** Tool results that became known during this pass. Images are not stored. */
-  results: z.array(llmToolResultSchema).max(64),
+  /** Tool results that became known during this pass. Images are not stored. A pass hands back well before this. */
+  results: z.array(llmToolResultSchema).max(256),
   /** The call this pass handed to the loop (a tool run or a question), if any. */
   emitted: z.object({ callId: z.string().min(1).max(256), name: z.string().min(1).max(128) }).nullable(),
   usage: z.array(usageSchema).max(16),
