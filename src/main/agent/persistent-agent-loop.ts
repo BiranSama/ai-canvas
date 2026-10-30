@@ -146,8 +146,9 @@ export interface PersistentAgentLoopOptions {
   readonly generationPolicy?: GenerationPolicy
   /** The estimated spend in CNY at which a turn pauses; null for none. */
   readonly turnCostCap?: () => number | null
+  /** What one image from an image service costs, for that estimate; null when no price is set. */
+  readonly imagePriceCny?: (providerId: string) => number | null
   readonly budget?: AgentRunBudget
-  /** The owner's multiple of the standard per-turn allowance, read as each turn starts. */
   readonly permissionProfileId?: string
   readonly providerIds?: readonly string[]
   readonly now?: () => string
@@ -641,6 +642,7 @@ export class PersistentAgentLoop {
   readonly #projection: AgentLoopProjection
   readonly #generationPolicy: GenerationPolicy
   readonly #turnCostCap: () => number | null
+  readonly #imagePriceCny: (providerId: string) => number | null
   readonly #budget: AgentRunBudget
   readonly #budgetOverride: AgentRunBudget | null
   readonly #permissionProfileId: string
@@ -678,6 +680,7 @@ export class PersistentAgentLoop {
     this.#projection = options.projection ?? {}
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
     this.#turnCostCap = options.turnCostCap ?? (() => null)
+    this.#imagePriceCny = options.imagePriceCny ?? (() => null)
     this.#budgetOverride = options.budget ?? null
     this.#budget = options.budget ?? (options.planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
     this.#permissionProfileId = options.permissionProfileId ?? ownerFullPermissionProfile().id
@@ -1920,7 +1923,7 @@ export class PersistentAgentLoop {
     }
     const costCap = this.#turnCostCap()
     if (costCap !== null) {
-      const spent = turnModelCostCny(items) + (this.#generationWorkflowRepository?.getTurnUsage(turn.id).reservedCostCny ?? 0)
+      const spent = turnModelCostCny(items) + this.#turnImageCostCny(turn.id)
       if (spent >= costCap) return { code: 'BUDGET_TURN_COST', message: `本轮估算费用 ¥${spent.toFixed(2)} 到了每轮上限 ¥${costCap.toFixed(2)}。` }
     }
     if (nextTool === null) return null
@@ -1943,6 +1946,12 @@ export class PersistentAgentLoop {
       }
     }
     return null
+  }
+
+  /** The turn's reserved images at their services' prices; images from a service without a price count as nothing. */
+  #turnImageCostCny(turnId: string): number {
+    return (this.#generationWorkflowRepository?.getTurnImagesByProvider(turnId) ?? [])
+      .reduce((total, entry) => total + entry.images * (this.#imagePriceCny(entry.providerId) ?? 0), 0)
   }
 
   async #complete(

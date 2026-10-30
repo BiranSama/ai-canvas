@@ -251,6 +251,8 @@ it('counts requested images independently of per-request allowance and keeps usa
   await expect(value.coordinator.create(await value.input(2))).rejects.toMatchObject({ code: 'BUDGET_GENERATED_IMAGES' })
   await value.coordinator.create(await value.input(1))
   expect(value.workflows.getTurnUsage(value.scope.turnId)).toMatchObject({ jobs: 2, images: 3 })
+  // The per-turn cost cap prices them per image service; the cancelled job's images were reserved too.
+  expect(value.workflows.getTurnImagesByProvider(value.scope.turnId)).toEqual([{ providerId: 'mock', images: 3 }])
   expect(value.creates).toHaveLength(2)
 })
 

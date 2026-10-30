@@ -687,6 +687,7 @@ export class GenerationRuntime {
       ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: STEPWISE_COLLABORATION_BUDGET.maxToolCalls }),
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
       turnCostCap: () => this.#executionPolicy.maxCostCnyPerTurn,
+      imagePriceCny: (providerId) => this.#configuredImages.get(providerId)?.pricePerImageCny ?? null,
       logger: this.#diagnosticLog,
       activityLedger,
       toolExecutor,

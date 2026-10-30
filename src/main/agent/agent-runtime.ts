@@ -57,6 +57,8 @@ export interface AgentRuntimeOptions {
   readonly maxSteps?: number
   /** The estimated spend in CNY at which a turn pauses; null for none. */
   readonly turnCostCap?: () => number | null
+  /** What one image from an image service costs, for that estimate; null when no price is set. */
+  readonly imagePriceCny?: (providerId: string) => number | null
   readonly now?: () => string
   readonly logger?: DiagnosticLogger
   readonly activityLedger?: ActivityLedgerRepository
@@ -160,6 +162,7 @@ export class AgentRuntime {
       ...(options.activateGenerationJob === undefined ? {} : { activateGenerationJob: options.activateGenerationJob }),
       generationPolicy: this.#generationPolicy,
       ...(options.turnCostCap === undefined ? {} : { turnCostCap: options.turnCostCap }),
+      ...(options.imagePriceCny === undefined ? {} : { imagePriceCny: options.imagePriceCny }),
       now: this.#now,
       projection: this.#persistentProjection()
     })
