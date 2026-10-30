@@ -1,7 +1,7 @@
 import type { EvalAgentEngine, EvalCaseContext, EvalEngineDescriptor, EvalObservation } from './engine'
 import { runRuntimeCase } from './runtime-driver'
 
-/** Today's engine: one text-model call per turn returns the whole plan. */
+/** One text-model call per turn returns the whole plan; the app uses it only until a text model is set up. */
 export const PLAN_ONCE_ENGINE: EvalEngineDescriptor = {
   id: 'plan-once',
   version: 1,
@@ -12,7 +12,8 @@ export class PlanOnceEvalEngine implements EvalAgentEngine {
   readonly descriptor = PLAN_ONCE_ENGINE
 
   runCase(context: EvalCaseContext): Promise<EvalObservation> {
-    return runRuntimeCase(context, this.descriptor)
+    // The app picks multi-step once a text model is set up, as an eval's always is.
+    return runRuntimeCase(context, this.descriptor, { runtimeOptions: { agentEngine: 'plan-once' } })
   }
 }
 
