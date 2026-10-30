@@ -90,7 +90,9 @@ export const llmTurnInputSchema = z.object({
   tools: z.array(llmToolDefinitionSchema).max(64),
   /** Forcing a specific tool is rejected by most providers while thinking. */
   toolChoice: z.enum(['auto', 'none']).default('auto'),
-  maxOutputTokens: z.number().int().min(256).max(131_072)
+  maxOutputTokens: z.number().int().min(256).max(131_072),
+  /** Names a conversation whose requests share a prefix, for providers that route caching by it. */
+  cacheKey: z.string().min(1).max(64).optional()
 }).strict()
 export type LlmTurnInput = z.input<typeof llmTurnInputSchema>
 export type ParsedLlmTurnInput = z.output<typeof llmTurnInputSchema>

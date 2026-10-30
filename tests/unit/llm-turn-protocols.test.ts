@@ -234,6 +234,19 @@ describe('Responses turns', () => {
     expect(request.body).not.toHaveProperty('temperature')
   })
 
+  it('sends the conversation\'s cache key only to vendors that route caching by it', () => {
+    const input = turnInput([{ role: 'user', parts: [{ type: 'text', text: '做海报' }] }], { cacheKey: 'ai-canvas-thread-1' })
+    expect(openai().buildTurnRequest(input, false).body).toMatchObject({ prompt_cache_key: 'ai-canvas-thread-1' })
+    expect(new ChatCompletionsTurnProtocol({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.5', dialect: dialect('openai') }).buildTurnRequest(input, false).body)
+      .toMatchObject({ prompt_cache_key: 'ai-canvas-thread-1' })
+    // Other vendors may reject a field they do not know.
+    const ark = new ResponsesTurnProtocol({ baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seed-2-1-turbo-260628', dialect: dialect('ark') })
+    expect(ark.buildTurnRequest(input, false).body).not.toHaveProperty('prompt_cache_key')
+    const deepseek = new ChatCompletionsTurnProtocol({ baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4.1-flash', dialect: dialect('deepseek') })
+    expect(deepseek.buildTurnRequest(input, false).body).not.toHaveProperty('prompt_cache_key')
+    expect(openai().buildTurnRequest(turnInput([{ role: 'user', parts: [{ type: 'text', text: '做海报' }] }]), false).body).not.toHaveProperty('prompt_cache_key')
+  })
+
   it('switches Ark thinking on with its own field', () => {
     const ark = new ResponsesTurnProtocol({ baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-seed-2-1-turbo-260628', dialect: dialect('ark') })
     const body = ark.buildTurnRequest(turnInput([{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }]), false).body

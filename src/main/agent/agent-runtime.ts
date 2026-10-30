@@ -46,7 +46,7 @@ import type { ActivityLedgerRepository } from './activity-ledger-repository'
 import { RedactedLogger, redactSensitive, type DiagnosticLogger } from '../security/redacted-logger'
 import type { AgentToolExecutorShadow } from './agent-tool-executor-shadow'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
-import { turnModelUsage } from './multi-step/trace'
+import { turnModelUsage } from '../../shared/model-usage'
 
 export interface AgentRuntimeOptions {
   readonly projectId: string

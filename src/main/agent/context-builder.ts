@@ -16,6 +16,17 @@ import type { ContextManifestEntryInput, CreateContextCompactionInput, CreateCon
 const DEFAULT_TEXT_BUDGET = 64_000
 const DEFAULT_INLINE_ELEMENTS = 20
 export const RECENT_CONVERSATION_ITEM_LIMIT = 10
+
+/**
+ * Where the recent conversation starts among `count` messages. The window
+ * grows from 10 to 19 messages and then drops the oldest 10 at once, rather
+ * than sliding by one each turn, so what the model is sent starts the same
+ * way for several turns and providers can serve it from their cache. The
+ * messages before the start go into the earlier summary.
+ */
+export function recentConversationStart(count: number): number {
+  return Math.max(0, Math.floor((count - RECENT_CONVERSATION_ITEM_LIMIT) / RECENT_CONVERSATION_ITEM_LIMIT) * RECENT_CONVERSATION_ITEM_LIMIT)
+}
 const ABSOLUTE_PATH_PATTERNS = [
   /\b[A-Za-z]:\\(?:[^\s"'<>|]+\\)*[^\s"'<>|]*/g,
   /\\\\[^\s"'<>|]+\\[^\s"'<>|]+(?:\\[^\s"'<>|]+)*/g,
@@ -306,9 +317,9 @@ function conversationText(item: AgentItem, items: readonly AgentItem[]): string 
 }
 
 function recentConversation(items: readonly AgentItem[]): readonly unknown[] {
-  return items
-    .filter(isConversationItem)
-    .slice(-RECENT_CONVERSATION_ITEM_LIMIT)
+  const messages = items.filter(isConversationItem)
+  return messages
+    .slice(recentConversationStart(messages.length))
     .map((item) => ({
       itemId: item.id,
       type: item.type === 'user_message' ? 'user_message' : 'assistant_message',

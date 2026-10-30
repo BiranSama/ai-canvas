@@ -2349,6 +2349,15 @@ select:focus-visible {
 .settings-section-summary { width: min(590px, 100%); margin: 8px auto; }
 .settings-section-summary h2 { margin: 8px 0 8px; font-size: 22px; font-weight: 600; letter-spacing: -.035em; }
 .settings-section-summary > p { max-width: 560px; margin: 0 0 22px; color: var(--muted-slate); font-size: 11px; line-height: 1.75; }
+.usage-totals { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 1px; overflow: hidden; margin-bottom: 14px; border: 1px solid var(--hairline); border-radius: 15px; background: var(--hairline); }
+.usage-totals > span { display: grid; gap: 3px; padding: 11px 12px; background: rgba(255,255,255,.55); }
+.usage-totals small { color: var(--muted-slate); font-size: 9px; }
+.usage-totals strong { font-size: 13px; font-weight: 620; font-variant-numeric: tabular-nums; }
+.usage-table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 10px; font-variant-numeric: tabular-nums; }
+.usage-table th { padding: 6px 6px; color: var(--muted-slate); font-weight: 560; text-align: left; border-bottom: 1px solid var(--hairline); }
+.usage-table td { padding: 7px 6px; border-bottom: 1px solid var(--hairline); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.usage-table th:nth-child(2), .usage-table td:nth-child(2) { width: 34%; }
+.usage-table .usage-local { color: var(--muted-slate); }
 .profile-summary-list { overflow: hidden; border: 1px solid var(--hairline); border-radius: 15px; background: rgba(255,255,255,.18); }
 .profile-summary-list > div { display: flex; min-height: 52px; align-items: center; justify-content: space-between; padding: 0 14px; border-bottom: 1px solid var(--hairline); }
 .profile-summary-list > div:last-child { border-bottom: 0; }

@@ -1,4 +1,4 @@
-import { AlertCircle, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Layers3, Palette, Pencil, Server, ShieldCheck, Trash2, X } from 'lucide-react'
+import { AlertCircle, BarChart3, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Layers3, Palette, Pencil, Server, ShieldCheck, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useModalScope } from '../interaction/use-modal-scope'
 import type {
@@ -34,6 +34,7 @@ import {
 import { useCreationSessionStore } from '../store/creation-session-store'
 import { applyAppearanceSnapshot, defaultAppearanceSnapshot } from '../appearance/apply-appearance'
 import { AgentContextSettings } from './AgentContextSettings'
+import { UsageSettings } from './UsageSettings'
 
 type ProviderDrafts = Partial<Record<ConfigurableProviderId, ProviderPublicConfig>>
 type DiagnosticDisplayResult = DiagnosticExportResult | {
@@ -136,7 +137,7 @@ export function ProviderSettingsSheet({
   const [removingImageService, setRemovingImageService] = useState<string | null>(null)
   const [busy, setBusy] = useState<ConfigurableProviderId | null>(null)
   const [expandedProvider, setExpandedProvider] = useState<ConfigurableProviderId | null>(initialProviderId)
-  const [section, setSection] = useState<'providers' | 'agent' | 'profiles' | 'projects' | 'appearance' | 'privacy'>('providers')
+  const [section, setSection] = useState<'providers' | 'agent' | 'usage' | 'profiles' | 'projects' | 'appearance' | 'privacy'>('providers')
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
   const [status, setStatus] = useState('正在读取本地授权与预算状态…')
   const [libraryBusy, setLibraryBusy] = useState(false)
@@ -414,6 +415,7 @@ export function ProviderSettingsSheet({
           <nav className="settings-navigation" aria-label="设置分类">
             <button type="button" className={section === 'providers' ? 'is-active' : ''} onClick={() => setSection('providers')}><Server size={15} />供应商</button>
             <button type="button" className={section === 'agent' ? 'is-active' : ''} onClick={() => setSection('agent')}><BrainCircuit size={15} />Agent 上下文</button>
+            <button type="button" className={section === 'usage' ? 'is-active' : ''} onClick={() => setSection('usage')}><BarChart3 size={15} />用量</button>
             <button type="button" className={section === 'profiles' ? 'is-active' : ''} onClick={() => setSection('profiles')}><Layers3 size={15} />生成档位</button>
             <button type="button" className={section === 'projects' ? 'is-active' : ''} onClick={() => setSection('projects')}><FolderOpen size={15} />项目与存储</button>
             <button type="button" className={section === 'appearance' ? 'is-active' : ''} onClick={() => setSection('appearance')}><Palette size={15} />外观</button>
@@ -421,7 +423,8 @@ export function ProviderSettingsSheet({
           </nav>
           <div className="provider-settings-list">
           {section === 'agent' && <AgentContextSettings onStatus={setStatus} />}
-          {section !== 'providers' && section !== 'agent' && (
+          {section === 'usage' && <UsageSettings />}
+          {section !== 'providers' && section !== 'agent' && section !== 'usage' && (
             <section className="settings-section-summary">
               {section === 'profiles' && <>
                 <span className="settings-kicker">生成档位与预算</span>

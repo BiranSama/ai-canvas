@@ -117,7 +117,8 @@ export class ResponsesTurnProtocol implements LlmTurnProtocol {
         ...(dialect.thinking === 'ark-thinking' ? { thinking: { type: 'enabled' } } : {}),
         ...(Object.keys(reasoning).length === 0 ? {} : { reasoning }),
         ...(dialect.includeEncryptedReasoning ? { include: ['reasoning.encrypted_content'] } : {}),
-        max_output_tokens: input.maxOutputTokens
+        max_output_tokens: input.maxOutputTokens,
+        ...(this.dialect.promptCacheKey && input.cacheKey !== undefined ? { prompt_cache_key: input.cacheKey } : {})
       }
     }
   }

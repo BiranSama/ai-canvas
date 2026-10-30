@@ -62,7 +62,13 @@ export interface MultiStepPlannerOptions {
 
 /** A cost reservation per model call; the ledger settles against it. */
 const MODEL_CALL_COST_CEILING_CNY = 0.25
-const MAX_CACHED_SCREENSHOT_CALLS = 2
+/**
+ * Screenshots a turn keeps to send again on each later step. Dropping one
+ * changes the transcript from that step on, so nothing the provider cached
+ * after it can be reused; they are kept until the turn ends or is
+ * checkpointed, with this many calls as a bound on memory.
+ */
+const MAX_TURN_SCREENSHOT_CALLS = 16
 
 interface PendingReport {
   readonly sceneBefore: Scene
@@ -108,6 +114,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
   readonly #options: MultiStepPlannerOptions
   readonly #reports = new Map<string, PendingReport>()
   readonly #screenshots = new Map<string, readonly LlmImage[]>()
+  #screenshotTurnId: string | null = null
   /** Asset IDs of attached images, for the outbound ledger. */
   readonly #imageIds = new WeakMap<LlmImage, string>()
 
@@ -120,6 +127,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     const resumed = this.#resumeApprovedCall(items)
     if (resumed !== null) return { step: resumed, modelTurns: 0 }
 
+    if (this.#screenshotTurnId !== input.turn.id) {
+      this.#screenshots.clear()
+      this.#screenshotTurnId = input.turn.id
+    }
     const scene = this.#options.scene()
     const traces = items.flatMap((item) => {
       const trace = traceOf(item)
@@ -273,12 +284,16 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         }
         opening = await this.#opening(checkpoint.text, input, model)
         messages = [opening]
+        // The steps the checkpoint replaced are no longer sent, nor their screenshots.
+        this.#screenshots.clear()
       }
       const turn = await this.#callModel(model, {
         system,
         messages,
         tools,
-        maxOutputTokens: model.maxOutputTokens
+        maxOutputTokens: model.maxOutputTokens,
+        // One conversation's requests share their start; vendors that route by key serve them from one cache.
+        cacheKey: `ai-canvas-${input.turn.threadId}`
       }, signal, context, modelTurns, screenshots === 'allowed')
       modelTurns += 1
       pass.calls += 1
@@ -368,7 +383,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
 
   #cacheScreenshots(callId: string, images: readonly LlmImage[]): void {
     this.#screenshots.set(callId, images)
-    while (this.#screenshots.size > MAX_CACHED_SCREENSHOT_CALLS) this.#screenshots.delete(this.#screenshots.keys().next().value!)
+    while (this.#screenshots.size > MAX_TURN_SCREENSHOT_CALLS) this.#screenshots.delete(this.#screenshots.keys().next().value!)
   }
 
   #briefText(

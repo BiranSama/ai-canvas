@@ -41,7 +41,7 @@ import type { AgentHarnessRepository } from './agent-harness-repository'
 import {
   ContextBuilder,
   ContextCompactor,
-  RECENT_CONVERSATION_ITEM_LIMIT,
+  recentConversationStart,
   contextSourceHash,
   isConversationItem,
   type DirectiveConflict
@@ -2138,10 +2138,11 @@ export class PersistentAgentLoop {
       ? allExisting
       : allExisting.filter((compaction) => compaction.summary.startsWith(taskMarker))
     const completedMessages = items.filter(isConversationItem)
-    if (completedMessages.length <= RECENT_CONVERSATION_ITEM_LIMIT) return existing.slice(0, 1)
+    const recentStart = recentConversationStart(completedMessages.length)
+    if (recentStart === 0) return existing.slice(0, 1)
 
     const compactableMessageIds = new Set(
-      completedMessages.slice(0, -RECENT_CONVERSATION_ITEM_LIMIT).map((item) => item.id)
+      completedMessages.slice(0, recentStart).map((item) => item.id)
     )
     const compactableTurnIds = new Set(
       completedMessages.filter((item) => compactableMessageIds.has(item.id)).map((item) => item.turnId)

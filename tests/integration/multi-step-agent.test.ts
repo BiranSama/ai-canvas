@@ -254,6 +254,24 @@ describe('multi-step engine decisions and corrections', () => {
     expect(observation.turns.at(-1)!.replyText).toMatch(/「update」用同样的参数连续 3 次都没成功/)
   }, 90_000)
 
+  it('sends every screenshot of the turn again on later steps, so the transcript only grows', async () => {
+    const looking = customCase({ id: 'multi-step-look-03', request: { text: '加个标题，多看几眼再定' } })
+    // Looks between canvas changes: each change ends a pass, so earlier screenshots come back from the turn's store.
+    const steps: Item[][] = [
+      [call('l0', 'look', {})],
+      [call('t1', 'add_text', { content: '晨雾', role: 'title' })],
+      [call('l1', 'look', {})],
+      [call('s1', 'add_shape', { shape: 'rectangle', box: [10, 80, 80, 6] })],
+      [call('l2', 'look', {})],
+      [message('看了三遍，标题和色条的位置都合适。')]
+    ]
+    const { requests } = await runScripted(looking, (results) => steps[results]!, 'look-three')
+    const images = (request: Item): number => (request.input as Item[]).flatMap((item) => item.type === 'message' && Array.isArray(item.content)
+      ? (item.content as Item[]).filter((part) => part.type === 'input_image')
+      : []).length
+    expect(requests.map(images)).toEqual([0, 1, 1, 2, 2, 3])
+  }, 90_000)
+
   it('shows the model a rendered screenshot when it looks', async () => {
     const looking = customCase({ id: 'multi-step-look-01', request: { text: '加个标题，然后看看效果' } })
     const { requests, observation } = await runScripted(looking, (results) => results === 0

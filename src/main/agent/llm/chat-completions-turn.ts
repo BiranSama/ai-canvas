@@ -138,7 +138,8 @@ export class ChatCompletionsTurnProtocol implements LlmTurnProtocol {
         }),
         ...thinking,
         ...(dialect.effortField === null || this.#effort === null ? {} : { [dialect.effortField]: this.#effort }),
-        [dialect.maxTokensField]: input.maxOutputTokens
+        [dialect.maxTokensField]: input.maxOutputTokens,
+        ...(this.dialect.promptCacheKey && input.cacheKey !== undefined ? { prompt_cache_key: input.cacheKey } : {})
       }
     }
   }

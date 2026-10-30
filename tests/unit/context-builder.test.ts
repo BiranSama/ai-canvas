@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ContextBuilder, ContextCompactor, OutboundPolicyGuard, compilePlannerContext, plannerProjectContext, sanitizeContextValue } from '../../src/main/agent/context-builder'
+import { ContextBuilder, ContextCompactor, OutboundPolicyGuard, compilePlannerContext, plannerProjectContext, recentConversationStart, sanitizeContextValue } from '../../src/main/agent/context-builder'
 import { agentRequestSchema } from '../../src/shared/agent'
 import { agentEventSchema, agentGoalContractSchema, agentItemSchema, agentTurnSchema } from '../../src/shared/agent-harness'
 import {
@@ -437,5 +437,15 @@ describe('AH1 S5 outbound policy and compaction', () => {
     expect(summary).toContain('budget_limited')
     expect(summary).toContain('item.failed=1')
     expect(Buffer.byteLength(summary, 'utf8')).toBeLessThanOrEqual(24_000)
+  })
+})
+
+describe('recent conversation window', () => {
+  it('grows to 19 messages and then drops the oldest ten at once, so its start stays put for several turns', () => {
+    expect([0, 9, 10, 19, 20, 29, 30, 45].map(recentConversationStart)).toEqual([0, 0, 0, 0, 10, 10, 20, 30])
+    // Between drops each new message only adds to the end of what was sent before.
+    let moves = 0
+    for (let count = 1; count < 60; count += 1) if (recentConversationStart(count + 1) !== recentConversationStart(count)) moves += 1
+    expect(moves).toBe(5)
   })
 })

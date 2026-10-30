@@ -81,10 +81,14 @@ const planJsonSchema = (() => {
   return generated
 })()
 
-function systemPrompt(imageProviderId: string, imageModel: string, maxImages: number, imageGenerationAvailable: boolean): string {
-  const imageBoundary = imageGenerationAvailable
-    ? `所有生图工具的 providerId 固定为 ${imageProviderId}，model 固定为 ${imageModel}，count 为 1 至 ${maxImages}。`
-    : '当前没有可用的图片模型：不要创建 generation、canvas_generation 或 canvas_edit；照常理解需求，用画布工具修改结构化画布。'
+/** The image service of this request, sent with the request so the system prompt stays the same and providers can cache it. */
+function imageServiceLine(imageProviderId: string, imageModel: string, maxImages: number, imageGenerationAvailable: boolean): string {
+  return imageGenerationAvailable
+    ? `生成服务：所有生图工具的 providerId 固定为 ${imageProviderId}，model 固定为 ${imageModel}，count 为 1 至 ${maxImages}。`
+    : '生成服务：当前没有可用的图片模型。不要创建 generation、canvas_generation 或 canvas_edit；照常理解需求，用画布工具修改结构化画布。'
+}
+
+function systemPrompt(): string {
   return `你是 AI Canvas 里的设计搭档。用户用一句话说想要的作品或修改，你把它变成画布上可编辑的设计。你的唯一输出是一次 submitAgentPlan 函数调用。
 
 ## 先读懂用户
@@ -114,7 +118,7 @@ function systemPrompt(imageProviderId: string, imageModel: string, maxImages: nu
 - 给生图模型写 prompt：用完整的句子写清主体、材质、构图和视角、光线方向、色调和风格。要排在画面上的文字不要写进 prompt，文字用文字元素；不想要的东西写进 negativePrompt。
 - 为主体占位生成图片时，prompt 只写这一个主体，不写整张海报的场景；放回时会自动抠出主体、调色融进画面。
 - 生成后要放进画布：在同一计划里追加 place_generation_result 或 result.place_on_canvas，resultId="generated:N"（N 是前面生图工具在 tools 中从 0 开始的序号，该次生图 count=1）。已有结果从 generationResults 选真实 resultId。替换已有图片或占位必须带 targetElementId，保留它的布局和身份；不要先删占位，不要为未知结果猜 UUID。用户已要求「生成后替换」时，不要再要求确认结果，也不要只生图就结束。
-- ${imageBoundary}
+- 生图工具的 providerId、model 和张数按用户消息里「生成服务」一行填写；那一行说没有可用的图片模型时，不要创建任何生图工具。
 - 图片服务返回的成图是一个 Image 元素；不要说它已经自动拆层，除非模型明确返回了可核对的分层结果。
 
 ## 规则、记忆和创作简报
@@ -497,8 +501,8 @@ export class ArkAgentPlanner implements AgentPlanner {
     ): Promise<void> => {
       try { await context?.observe?.(event, delivery) } catch { /* observability cannot change Provider semantics */ }
     }
-    const systemContent = systemPrompt(this.#imageProviderId, this.#imageModel, this.#maxImages, this.#imageGenerationAvailable)
-    const userContent = `请为下面的 AI Canvas 状态提交结构化计划：\n${boundedSceneContext(request)}${projectContextSection(context?.projectContext)}${recoveryInstruction(recovery)}`
+    const systemContent = systemPrompt()
+    const userContent = `请为下面的 AI Canvas 状态提交结构化计划：\n${imageServiceLine(this.#imageProviderId, this.#imageModel, this.#maxImages, this.#imageGenerationAvailable)}\n${boundedSceneContext(request)}${projectContextSection(context?.projectContext)}${recoveryInstruction(recovery)}`
     const outbound = context?.outbound === undefined || context.outbound === null
       ? null
       : await context.outbound.authorize({

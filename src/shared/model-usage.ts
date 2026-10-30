@@ -36,19 +36,71 @@ export interface TurnModelUsage extends ModelTokenUsage {
   readonly estimatedCostCny: number | null
 }
 
-function tokenCount(value: number): string {
+/** A token count the way people read it: 900, 12.3K, 1.50M. */
+export function tokenCount(value: number): string {
   if (value < 1_000) return String(value)
   return value < 1_000_000 ? `${(value / 1_000).toFixed(1)}K` : `${(value / 1_000_000).toFixed(2)}M`
+}
+
+/** The share of input served from the provider's cache, as a whole percentage. */
+export function cacheHitPercent(usage: ModelTokenUsage): number {
+  return usage.inputTokens === 0 ? 0 : Math.round(Math.min(usage.cachedInputTokens, usage.inputTokens) / usage.inputTokens * 100)
 }
 
 export function formatTurnModelUsage(usage: TurnModelUsage): string {
   const parts = [
     `文字模型 ${usage.calls} 次`,
-    `输入 ${tokenCount(usage.inputTokens)}${usage.cachedInputTokens > 0 ? `（缓存命中 ${tokenCount(usage.cachedInputTokens)}）` : ''}`,
+    `输入 ${tokenCount(usage.inputTokens)}${usage.cachedInputTokens > 0 ? `（缓存命中 ${tokenCount(usage.cachedInputTokens)}，${cacheHitPercent(usage)}%）` : ''}`,
     `输出 ${tokenCount(usage.outputTokens)}`
   ]
   if (usage.estimatedCostCny !== null) {
     parts.push(`估算 ${usage.estimatedCostCny > 0 && usage.estimatedCostCny < 0.01 ? '<¥0.01' : `¥${usage.estimatedCostCny.toFixed(2)}`}`)
   }
   return parts.join(' · ')
+}
+
+const recordedUsageSchema = z.object({
+  inputTokens: z.number().nonnegative(),
+  cachedInputTokens: z.number().nonnegative(),
+  outputTokens: z.number().nonnegative()
+})
+
+/** What a model-calling planner records on each plan item it writes: the calls of that pass and their usage. */
+const recordedPassSchema = z.object({
+  usage: z.array(recordedUsageSchema).default([]),
+  modelCalls: z.number().int().nonnegative().default(0),
+  costCny: z.number().nonnegative().nullable().default(null)
+})
+
+interface RecordedItem {
+  readonly type: string
+  readonly payload: unknown
+}
+
+function recordedPass(item: RecordedItem): z.infer<typeof recordedPassSchema> | null {
+  if (item.type !== 'plan') return null
+  const trace = (item.payload as { readonly step?: { readonly trace?: unknown } } | null)?.step?.trace
+  if (trace === undefined || trace === null) return null
+  const parsed = recordedPassSchema.safeParse(trace)
+  return parsed.success ? parsed.data : null
+}
+
+/** Token usage and estimated cost of every model call recorded on a turn's items, or null when it made none. */
+export function turnModelUsage(items: readonly RecordedItem[]): TurnModelUsage | null {
+  const passes = items.flatMap((item) => {
+    const pass = recordedPass(item)
+    // Passes written before calls were counted still list their usage.
+    const calls = pass === null ? 0 : Math.max(pass.modelCalls, pass.usage.length)
+    return pass === null || calls === 0 ? [] : [{ pass, calls }]
+  })
+  if (passes.length === 0) return null
+  const usage = passes.flatMap(({ pass }) => pass.usage)
+  const costs = passes.map(({ pass }) => pass.costCny)
+  return {
+    calls: passes.reduce((total, { calls }) => total + calls, 0),
+    inputTokens: usage.reduce((total, entry) => total + entry.inputTokens, 0),
+    cachedInputTokens: usage.reduce((total, entry) => total + entry.cachedInputTokens, 0),
+    outputTokens: usage.reduce((total, entry) => total + entry.outputTokens, 0),
+    estimatedCostCny: costs.every((cost): cost is number => cost !== null) ? Number(costs.reduce((total, cost) => total + cost, 0).toFixed(6)) : null
+  }
 }
