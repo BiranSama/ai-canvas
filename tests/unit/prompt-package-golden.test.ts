@@ -33,7 +33,10 @@ describe('Prompt Package deterministic golden', () => {
     })
     const first = compile()
     expect(compile()).toEqual(first)
-    expect(hash(first)).toBe('e2bac758898f2cf63740639050c12498ebbf72c07fd6cd16ef8cfddb70f1df17')
+    expect(hash(first)).toBe('294e72bf56b6d152ce97ee8b130b3f6b0518b48dbd7634f2d191118362be3995')
+    // The brief names its mood again as its style; the image model reads each once.
+    expect(created.scene.creativeContext?.brief.mood.length).toBeGreaterThan(0)
+    expect(new Set(first.styleBible).size).toBe(first.styleBible.length)
     expect(first).toMatchObject({
       sceneIntent: { purpose: '用于海报的可编辑视觉方向探索', originalRequirement: fixture.request },
       compositionContract: expect.arrayContaining([expect.stringContaining('4:5')]),

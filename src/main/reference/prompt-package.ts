@@ -85,13 +85,13 @@ export function compilePromptPackage(
       occludedBy: ir.occlusions.filter((item) => item.behindElementId === element.id).map((item) => item.frontElementId),
       protected: ir.protectedElementIds.includes(element.id)
     })),
-    styleBible: [
+    styleBible: [...new Set([
       ...(brief?.mood ?? []),
       ...(currentBrief?.style ?? []),
       ...(brief?.palette.map((color) => `色彩 ${color}`) ?? []),
       ...((brief?.lighting ?? []).map((light) => `光影：${light.description}，${light.color}，方向 ${light.direction}°，强度 ${Math.round(light.intensity * 100)}%`)),
       ...(ir.canvas.globalStyle ? [ir.canvas.globalStyle] : [])
-    ],
+    ])],
     textContract: ir.elements.flatMap((element) => element.type === 'text' ? [{
       elementId: element.id,
       content: String(element.attributes.content ?? ''),

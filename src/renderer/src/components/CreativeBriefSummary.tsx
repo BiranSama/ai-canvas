@@ -35,7 +35,8 @@ export function CreativeBriefSummary({ brief, onRevise }: CreativeBriefSummaryPr
         return counts
       }, {})).map(([source, count]) => `${SOURCE_COPY[source as keyof typeof SOURCE_COPY]} ${count}`)
     : []
-  const detail = [...brief.mood, ...styles].slice(0, 4)
+  // Briefs often repeat a mood word as a style; each shows once.
+  const detail = [...new Set([...brief.mood, ...styles].map((value) => value.trim()))].slice(0, 4)
 
   return (
     <details ref={detailsRef} className="creative-brief-summary">
