@@ -3,6 +3,7 @@ import { agentCompletionAssessmentSchema, type AgentCompletionAssessment } from 
 import { completionFactsSchema } from '../../shared/design-capability'
 import { creativeDesignContractSchema } from '../../domain'
 import { atomicAspectCriterion, CompletionAssessor, designAssessmentNotes } from './design-capability'
+import { withReplyNote } from '../../shared/reply-suggestions'
 
 const readKinds = new Set(['scene.get_summary', 'scene.get_elements'])
 const requestedWork = /(?:^|[。！？\n])\s*(?:(?:请|请帮我|帮我|麻烦|现在|我想|希望)\s*)?(?:创建|生成|制作|画一|添加|删除|修改|调整|移动|替换|导出|撤销|重做|把[^。！？\n]{1,100}(?:改成|改为|删掉|移到|替换))/u
@@ -82,10 +83,11 @@ export function assessHonestCompletion(input: {
   const priorLabels = proposed.design === undefined ? [] : [...proposed.design.requirements, ...proposed.design.structure].map((entry) => `${entry.label}：`)
   const currentNotes = design === null ? [] : designAssessmentNotes(design)
   return agentCompletionAssessmentSchema.parse({ status: design === null ? proposed.status : design.design.total < 32 ? 'completed_with_notes' : 'completed',
-    summary: design === null || input.remainingWorkDeclined === true ? proposed.summary : '本轮操作已执行，结构检查通过；视觉效果仍待你复核。', nextAction: proposed.nextAction,
-    ...(needsReview ? { status: 'needs_user_review', summary: unverifiedMust.length
-      ? `本轮操作已结束；${unverifiedMust.length} 项必需要求等待复核：${unverifiedMust.map((item) => item.label.replace(/^必须：/u, '')).join('；')}`.slice(0, 4000)
-      : '本轮操作已结束；仍有检查未通过，请核对当前作品。' } : {}),
+    // The reply is the planner's own words about the work; what the checks found is in the facts, folded under it.
+    summary: proposed.summary, nextAction: proposed.nextAction,
+    ...(needsReview ? { status: 'needs_user_review', summary: withReplyNote(proposed.summary, unverifiedMust.length
+      ? `还有 ${unverifiedMust.length} 项要求没能自动核对，请你看一下：${unverifiedMust.map((item) => item.label.replace(/^必须：/u, '')).join('；')}。`
+      : '有一项检查没通过，请看一下当前作品。').slice(0, 4000) } : {}),
     notes: [...new Set([...proposed.notes.filter((note) => !priorLabels.some((label) => note.startsWith(label))), ...currentNotes])].slice(0, 100),
     ...(design === null ? {} : { design }), facts
   })

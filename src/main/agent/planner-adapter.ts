@@ -5,6 +5,7 @@ import type { ContextManifest } from '../../shared/agent-context'
 import type { AgentPlanner, AgentPlannerAttemptContext } from './planner'
 import { buildLocalRefineTool, CompletionAssessor, designAssessmentNotes } from './design-capability'
 import { plannerProjectContext } from './context-builder'
+import { withReplyNote } from '../../shared/reply-suggestions'
 
 function itemPayload(item: AgentItem | undefined): Record<string, unknown> | null {
   return item !== undefined && typeof item.payload === 'object' && item.payload !== null ? item.payload as Record<string, unknown> : null
@@ -242,8 +243,8 @@ export class DeterministicCreativePlannerAdapter implements PlannerAdapter {
           assessment: {
             status: 'needs_user_review',
             summary: (design.unverifiedMust?.length ?? 0) > 0
-              ? `已完成本轮操作；${design.unverifiedMust!.length} 项必需要求尚待复核：${design.unverifiedMust!.map((item) => item.label.replace(/^必须：/u, '')).join('；')}`.slice(0, 4000)
-              : '本轮操作已结束；结构检查仍有待处理项，请检查当前作品。',
+              ? withReplyNote(plan.response, `还有 ${design.unverifiedMust!.length} 项要求没能自动核对，请你看一下：${design.unverifiedMust!.map((item) => item.label.replace(/^必须：/u, '')).join('；')}。`).slice(0, 4000)
+              : withReplyNote(plan.response, '版式还有地方没过检查，请看一下当前作品。').slice(0, 4000),
             notes: designAssessmentNotes(design),
             nextAction: '请查看画布与方向说明，选择继续调整、接受当前草图或改变设计方向。',
             design
