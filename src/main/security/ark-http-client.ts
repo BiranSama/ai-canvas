@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import type { G2UsageLedger } from './g2-usage-ledger'
 import type { ProviderUsageReservation } from './provider-usage-ledger'
-import type { ConfigurableProviderId } from '../../shared/provider-settings'
+import { MAX_REQUEST_TIMEOUT_MS, type ConfigurableProviderId } from '../../shared/provider-settings'
 import {
   MAX_LLM_RESPONSE_BYTES,
   SseDecoder,
@@ -263,7 +263,7 @@ export class ArkHttpClient {
       images: request.expectedImages,
       costCeilingCny: request.costCeilingCny
     })
-    const timeoutSignal = AbortSignal.timeout(Math.max(1_000, Math.min(300_000, request.timeoutMs)))
+    const timeoutSignal = AbortSignal.timeout(Math.max(1_000, Math.min(MAX_REQUEST_TIMEOUT_MS, request.timeoutMs)))
     const signal = AbortSignal.any([request.signal, timeoutSignal])
     let response: Response
     try {
@@ -396,7 +396,7 @@ export class ArkHttpClient {
     const totalTimer = setTimeout(() => {
       timeoutCode = request.totalTimeoutCode ?? 'PROVIDER_TOTAL_TIMEOUT'
       transportController.abort(timeoutCode)
-    }, Math.max(1, Math.min(300_000, request.timeoutMs) - (Date.now() - startedAt)))
+    }, Math.max(1, Math.min(MAX_REQUEST_TIMEOUT_MS, request.timeoutMs) - (Date.now() - startedAt)))
     const callerDeadlineExpired = (): boolean => typeof request.signal.reason === 'object'
       && request.signal.reason !== null && request.signal.reason.code === 'BUDGET_WALL_TIME'
     const onCallerAbort = (): void => {
@@ -665,7 +665,7 @@ export class ArkHttpClient {
     for (const file of request.files) {
       form.append(file.field, new Blob([new Uint8Array(file.bytes)], { type: file.mimeType }), file.name)
     }
-    const timeoutSignal = AbortSignal.timeout(Math.max(1_000, Math.min(300_000, request.timeoutMs)))
+    const timeoutSignal = AbortSignal.timeout(Math.max(1_000, Math.min(MAX_REQUEST_TIMEOUT_MS, request.timeoutMs)))
     const signal = AbortSignal.any([request.signal, timeoutSignal])
     let response: Response
     try {

@@ -657,7 +657,7 @@ export function ProviderSettingsSheet({
                     const maxOutputTokens = Number(event.currentTarget.value)
                     updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, maxOutputTokens } : current)
                   }} /></label>}
-                  <label><span>{draft.kind === 'image' ? '图片任务总时限（秒）' : '单次请求上限（秒）'}</span><input aria-label={`${prefix} 超时`} type="number" min={1} max={300} step={1} value={draft.timeoutMs / 1000} onChange={(event) => {
+                  <label><span>{draft.kind === 'image' ? '图片任务总时限（秒）' : '单次请求上限（秒）'}</span><input aria-label={`${prefix} 超时`} type="number" min={1} max={900} step={1} value={draft.timeoutMs / 1000} onChange={(event) => {
                     const value = Number(event.currentTarget.value) * 1000
                     updateDraft(provider.id, (current) => ({ ...current, timeoutMs: value }))
                   }} /></label>
@@ -684,8 +684,8 @@ export function ProviderSettingsSheet({
                     </select></label>
                     {([
                       ['connectTimeoutMs', '连接上限（秒）', 60_000],
-                      ['firstEventTimeoutMs', '首个响应上限（秒）', 120_000],
-                      ['idleTimeoutMs', '响应空闲上限（秒）', 180_000]
+                      ['firstEventTimeoutMs', '首个响应上限（秒）', 600_000],
+                      ['idleTimeoutMs', '响应空闲上限（秒）', 600_000]
                     ] as const).map(([field, label, max]) => <label key={field}>
                       <span>{label}</span>
                       <input

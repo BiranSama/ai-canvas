@@ -32,15 +32,27 @@ export const llmTransportModeSchema = z.enum(['auto', 'stream', 'buffered'])
 export const llmTransportSettingsSchema = z.object({
   mode: llmTransportModeSchema,
   connectTimeoutMs: z.number().int().min(1_000).max(60_000),
-  firstEventTimeoutMs: z.number().int().min(1_000).max(120_000),
-  idleTimeoutMs: z.number().int().min(1_000).max(180_000)
+  firstEventTimeoutMs: z.number().int().min(1_000).max(600_000),
+  idleTimeoutMs: z.number().int().min(1_000).max(600_000)
 }).strict()
 
+/**
+ * A thinking model can be silent for well over a minute before its first
+ * token, and one call of a long turn can take minutes; only a connection
+ * that never opens is given up on quickly.
+ */
 export const DEFAULT_LLM_TRANSPORT_TIMEOUTS = Object.freeze({
   connectTimeoutMs: 20_000,
-  firstEventTimeoutMs: 45_000,
-  idleTimeoutMs: 60_000
+  firstEventTimeoutMs: 120_000,
+  idleTimeoutMs: 120_000
 })
+
+/** The longest a single text-model or image request may be given. */
+export const MAX_REQUEST_TIMEOUT_MS = 900_000
+
+/** A whole text-model request, and a whole image request: some image services take minutes per picture. */
+export const DEFAULT_LLM_TIMEOUT_MS = 300_000
+export const DEFAULT_IMAGE_TIMEOUT_MS = 300_000
 
 export const imageProtocolSchema = z.enum([
   'ark-seedream',
@@ -66,7 +78,7 @@ const providerPublicFieldsSchema = z.object({
   label: z.string().trim().min(1).max(80),
   baseUrl: endpointSchema,
   defaultModel: z.string().trim().max(160),
-  timeoutMs: z.number().int().min(1_000).max(300_000),
+  timeoutMs: z.number().int().min(1_000).max(MAX_REQUEST_TIMEOUT_MS),
   concurrency: z.number().int().min(1).max(8)
 })
 
@@ -204,17 +216,25 @@ const providerListSchema = z.tuple([llmProviderConfigSchema, imageProviderConfig
   if (new Set(images.map((image) => image.id)).size !== images.length) context.addIssue({ code: 'custom', message: 'Image service ids must be unique.' })
 })
 
-const providerConfigFileV6Schema = z.object({
-  version: z.literal(6),
+const currentProviderConfigFields = {
   providers: providerListSchema,
   /** The image service the agent and quick generation use unless another is chosen. */
   defaultImageProviderId: imageProviderIdSchema,
   executionPolicy: storedProviderExecutionPolicySchema
-}).superRefine((file, context) => {
+}
+
+function defaultImageIsSaved(file: { readonly providers: readonly ProviderPublicConfig[]; readonly defaultImageProviderId: string }, context: z.RefinementCtx): void {
   if (!file.providers.slice(1).some((provider) => provider.id === file.defaultImageProviderId)) {
     context.addIssue({ code: 'custom', path: ['defaultImageProviderId'], message: 'The default image service must be one of the saved services.' })
   }
-})
+}
+
+const providerConfigFileV6Schema = z.object({ version: z.literal(6), ...currentProviderConfigFields }).superRefine(defaultImageIsSaved)
+
+/** Version 7 has the same shape; its time limits are at least the ones above. */
+const providerConfigFileV7Schema = z.object({ version: z.literal(7), ...currentProviderConfigFields }).superRefine(defaultImageIsSaved)
+
+export const PROVIDER_CONFIG_VERSION = 7
 
 export function inferLlmProtocol(baseUrl: string): z.infer<typeof llmProtocolSchema> {
   if (baseUrl === '') return 'openai-responses'
@@ -283,13 +303,39 @@ function asV6(
   return { version: 6, providers, defaultImageProviderId: PRIMARY_IMAGE_PROVIDER_ID, executionPolicy }
 }
 
+/**
+ * Settings saved before version 7 gave up on a thinking model after 30 to 45
+ * seconds of silence and on an image after two minutes; they are raised to
+ * the new defaults, and longer ones are kept.
+ */
+function asV7(file: z.infer<typeof providerConfigFileV6Schema>): z.infer<typeof providerConfigFileV7Schema> {
+  const [llm, ...images] = file.providers
+  return {
+    ...file,
+    version: 7,
+    providers: [
+      llmProviderConfigSchema.parse({
+        ...llm,
+        timeoutMs: Math.max(llm.timeoutMs, DEFAULT_LLM_TIMEOUT_MS),
+        transport: {
+          ...llm.transport,
+          firstEventTimeoutMs: Math.max(llm.transport.firstEventTimeoutMs, DEFAULT_LLM_TRANSPORT_TIMEOUTS.firstEventTimeoutMs),
+          idleTimeoutMs: Math.max(llm.transport.idleTimeoutMs, DEFAULT_LLM_TRANSPORT_TIMEOUTS.idleTimeoutMs)
+        }
+      }),
+      ...images.map((image) => ({ ...image, timeoutMs: Math.max(image.timeoutMs, DEFAULT_IMAGE_TIMEOUT_MS) }))
+    ] as z.infer<typeof providerListSchema>
+  }
+}
+
 export const providerConfigFileSchema = z.union([
-  providerConfigFileV6Schema,
-  providerConfigFileV5Schema.transform((value) => asV6(value.providers, value.executionPolicy)),
-  providerConfigFileV4Schema.transform((value) => asV6(migrateV4Providers(value.providers), value.executionPolicy)),
-  providerConfigFileV3Schema.transform((value) => asV6(migrateV3Providers(value.providers), value.executionPolicy)),
-  providerConfigFileV2Schema.transform((value) => asV6(migrateLegacyProviders(value.providers), value.executionPolicy)),
-  providerConfigFileV1Schema.transform((value) => asV6(migrateLegacyProviders(value.providers), DEFAULT_PROVIDER_EXECUTION_POLICY))
+  providerConfigFileV7Schema,
+  providerConfigFileV6Schema.transform(asV7),
+  providerConfigFileV5Schema.transform((value) => asV7(asV6(value.providers, value.executionPolicy))),
+  providerConfigFileV4Schema.transform((value) => asV7(asV6(migrateV4Providers(value.providers), value.executionPolicy))),
+  providerConfigFileV3Schema.transform((value) => asV7(asV6(migrateV3Providers(value.providers), value.executionPolicy))),
+  providerConfigFileV2Schema.transform((value) => asV7(asV6(migrateLegacyProviders(value.providers), value.executionPolicy))),
+  providerConfigFileV1Schema.transform((value) => asV7(asV6(migrateLegacyProviders(value.providers), DEFAULT_PROVIDER_EXECUTION_POLICY)))
 ])
 
 export const providerSettingSchema = z.union([
@@ -425,7 +471,7 @@ export function resolveImageEndpoint(
 }
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
-  version: 6,
+  version: 7,
   providers: [
     {
       id: 'openai-compatible-llm',
@@ -437,13 +483,8 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
       reasoningEffort: 'auto',
       imageDetail: 'auto',
       maxOutputTokens: 4_096,
-      timeoutMs: 30_000,
-      transport: {
-        mode: 'auto',
-        connectTimeoutMs: 20_000,
-        firstEventTimeoutMs: 30_000,
-        idleTimeoutMs: 30_000
-      },
+      timeoutMs: DEFAULT_LLM_TIMEOUT_MS,
+      transport: { mode: 'auto', ...DEFAULT_LLM_TRANSPORT_TIMEOUTS },
       concurrency: 1,
       capabilities: { streaming: true, toolCalling: true, vision: true },
       pricing: null
@@ -455,7 +496,7 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
       defaultModel: 'doubao-seedream-5-0-260128',
       protocol: 'ark-seedream',
-      timeoutMs: 120_000,
+      timeoutMs: DEFAULT_IMAGE_TIMEOUT_MS,
       concurrency: 1,
       capabilities: {
         textToImage: true,
@@ -492,7 +533,7 @@ export function newImageProviderConfig(id: string): ImageProviderConfig {
     baseUrl: '',
     defaultModel: '',
     protocol: 'unconfigured',
-    timeoutMs: 120_000,
+    timeoutMs: DEFAULT_IMAGE_TIMEOUT_MS,
     concurrency: 1,
     capabilities: { textToImage: true, imageReferences: false, maskEditing: false, multipleReferences: false, transparentOutput: false }
   })

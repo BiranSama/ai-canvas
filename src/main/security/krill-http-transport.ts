@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { PRIMARY_IMAGE_PROVIDER_ID } from '../../shared/provider-settings'
+import { MAX_REQUEST_TIMEOUT_MS, PRIMARY_IMAGE_PROVIDER_ID } from '../../shared/provider-settings'
 import type {
   KrillGetRequest,
   KrillImageDownload,
@@ -177,7 +177,7 @@ export class KrillHttpTransport implements KrillTransport {
     this.#secrets = options.secrets
     this.#authorization = options.authorization
     this.#fetcher = options.fetcher ?? fetch
-    this.#timeoutMs = Math.max(1_000, Math.min(300_000, options.timeoutMs ?? 30_000))
+    this.#timeoutMs = Math.max(1_000, Math.min(MAX_REQUEST_TIMEOUT_MS, options.timeoutMs ?? 30_000))
     this.#approvedBase = normalizedBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL)
     this.#submissionCostCeilingCny = options.submissionCostCeilingCny === undefined
       ? null
