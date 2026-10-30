@@ -84,6 +84,7 @@ export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onR
           <small>创作流</small>
           <strong>{flow.headline}</strong>
           <span className={`execution-status state-${flow.state}`}>{flow.statusLabel}</span>
+          {!expanded && <small className="execution-elapsed">{compactDuration(flow.elapsedMs)}</small>}
         </span>
         <span className="execution-flow-actions">
           {flow.canCancel && showCancel && <button type="button" className="execution-stop" aria-label="停止当前操作" onClick={onCancel}><Square size={12} />停止</button>}
@@ -97,7 +98,10 @@ export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onR
           </button>
         </span>
       </header>
-      <p className="execution-flow-summary">{flow.summary}</p>
+      {/* Folded, the flow is one line; a pause, a failure or a wait says in words what happened and what can be done. */}
+      {(expanded || flow.state !== 'running') && <p className="execution-flow-summary">{flow.summary}</p>}
+      <div className="execution-stall-announcement" aria-live="polite">{stallAnnouncement}</div>
+      {expanded && <>
       <div className="execution-flow-live-facts" aria-label="当前执行事实">
         <span><small>总等待</small><strong>{compactDuration(flow.elapsedMs)}</strong></span>
         <span><small>最近真实进展</small><strong>{flow.lastProgressAgeMs < 1_000 ? '刚刚' : `${compactDuration(flow.lastProgressAgeMs)}前`}</strong></span>
@@ -106,7 +110,6 @@ export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onR
       </div>
       <p className="execution-time-policy">{flow.timeLimitMs == null ? '旧任务未记录可核对的整轮时限。'
         : `本轮总时限 ${formatTimeLimit(flow.timeLimitMs)}；等你做决定的时间不计入，生成图片的时间计入。修改配置或重启不会延长本轮。`}</p>
-      <div className="execution-stall-announcement" aria-live="polite">{stallAnnouncement}</div>
       {flow.hiddenStageCount > 0 && <p className="execution-hidden-note">此前还有 {flow.hiddenStageCount} 个已记录阶段</p>}
       <ol className="agent-execution-stages">
         {flow.stages.map((stage) => <StageNode key={stage.id} stage={stage} />)}
@@ -115,6 +118,7 @@ export function AgentExecutionFlowView({ flow, expanded, onToggle, onCancel, onR
         <span>{flow.totalStageCount} 个真实阶段</span>
         <small>{flow.stallLevel === 'terminal' ? '没有自动重新提交' : '只显示已发生的动作'}</small>
       </footer>
+      </>}
     </section>
   )
 }
