@@ -43,7 +43,6 @@ import {
   generationRetrySchema,
   placeGenerationResultInputSchema,
   providerConnectionTestSchema,
-  agentEngineSetSchema,
   providerSecretDeleteSchema,
   providerImageIdSchema,
   providerConfigSetSchema,
@@ -236,9 +235,6 @@ export function registerDesktopIpc(
     return (await generationRuntime).validateProviderConnection(providerConnectionTestSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.agentEngineGet, async () => (await generationRuntime).getAgentEngine())
-  ipcMain.handle(DESKTOP_CHANNELS.agentEngineSet, async (_event, input: unknown) => {
-    return (await generationRuntime).setAgentEngine(agentEngineSetSchema.parse(input))
-  })
   ipcMain.handle(DESKTOP_CHANNELS.providerConfigSet, async (_event, input: unknown) => {
     return (await generationRuntime).setProviderConfig(providerConfigSetSchema.parse(input))
   })

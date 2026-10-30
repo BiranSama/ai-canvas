@@ -9,7 +9,7 @@ import type {
   OpticalQuality
 } from '../../../shared/appearance-settings'
 import type { RuntimeInfo } from '../../../shared/desktop-api'
-import type { AgentEngine, AgentEngineSetting } from '../../../shared/agent-engine'
+import type { AgentEngineSetting } from '../../../shared/agent-engine'
 import type { DiagnosticExportResult } from '../../../shared/diagnostics'
 import type { GenerationProfileSnapshot } from '../../../shared/generation'
 import type { LlmPricing } from '../../../shared/model-usage'
@@ -182,16 +182,6 @@ export function ProviderSettingsSheet({
     void window.desktop.listGenerationProfiles().then(setProfileSnapshot).catch(() => undefined)
     if (desktop.getAgentEngine !== undefined) void desktop.getAgentEngine().then(setAgentEngine).catch(() => undefined)
   }, [onClose])
-
-  const chooseAgentEngine = async (engine: AgentEngine): Promise<void> => {
-    try {
-      const value = await window.desktop.setAgentEngine(engine)
-      setAgentEngine(value)
-      setStatus(value.selected === value.active ? 'Agent 引擎设置未变化。' : 'Agent 引擎已保存，重新打开项目后生效。')
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : '未能保存 Agent 引擎设置。')
-    }
-  }
 
   const updateAppearance = async (changes: Partial<AppearanceSettingsUpdate>): Promise<void> => {
     if (appearanceBusy) return
@@ -822,16 +812,12 @@ export function ProviderSettingsSheet({
                           : `${connectionResult.failure.detail} ${connectionResult.failure.nextAction}（本次已提交 ${connectionResult.requestsUsed} 个请求）`}</small>
                       </span>
                     </div>}
-                    {agentEngine !== null && <div className="provider-engine-setting">
-                      <span><strong>Agent 引擎（开发者）</strong><small>{agentEngine.forcedByEnvironment
-                        ? '已由环境变量 AI_CANVAS_AGENT_ENGINE 指定。'
-                        : agentEngine.selected === agentEngine.active
-                          ? `当前项目使用${agentEngine.active === 'multi-step' ? '多步工具' : '一次规划'}。多步工具会多次调用文字模型，先用「验证多步调用」确认服务支持。`
-                          : '已保存，重新打开项目后生效。'}</small></span>
-                      <select aria-label="Agent 引擎" value={agentEngine.selected} disabled={agentEngine.forcedByEnvironment || busy !== null} onChange={(event) => void chooseAgentEngine(event.currentTarget.value as AgentEngine)}>
-                        <option value="plan-once">一次规划（默认）</option>
-                        <option value="multi-step">多步工具（实验）</option>
-                      </select>
+                    {agentEngine !== null && <div className="provider-engine-setting" data-testid="agent-engine-status">
+                      <span><strong>对话 Agent</strong><small>{agentEngine.forcedByEnvironment
+                        ? `已由环境变量 AI_CANVAS_AGENT_ENGINE 指定为${agentEngine.active === 'multi-step' ? '多步' : '一次规划'}。`
+                        : agentEngine.active === 'multi-step'
+                          ? '一步一步做，每步都能看画面再决定下一步。'
+                          : '还没有可用的文字模型，先用本地规划排版。保存文字模型和 Key 后，重新打开项目即可让 Agent 看着画面一步步做。'}</small></span>
                     </div>}
                   </div>
                 })()}
