@@ -4,7 +4,8 @@ import { GENERIC_DIALECT } from '../../src/main/agent/llm/dialects'
 import { ResponsesTurnProtocol } from '../../src/main/agent/llm/responses-turn'
 import { checkpointText, estimateRequestTokens, estimateTextTokens } from '../../src/main/agent/multi-step/context-budget'
 import { MultiStepPlannerAdapter, type MultiStepPlannerOptions } from '../../src/main/agent/multi-step/multi-step-planner'
-import { turnModelUsage, type ModelTrace } from '../../src/main/agent/multi-step/trace'
+import type { ModelTrace } from '../../src/main/agent/multi-step/trace'
+import { turnModelUsage } from '../../src/shared/model-usage'
 import type { PlannerInput } from '../../src/main/agent/planner-adapter'
 import { agentRequestSchema } from '../../src/shared/agent'
 import type { LlmPricing } from '../../src/shared/model-usage'
@@ -18,7 +19,14 @@ function uuid(value: number): string {
   return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`
 }
 
-function planner(requests: Item[], options: Partial<MultiStepPlannerOptions> = {}, pricing: LlmPricing | null = null): MultiStepPlannerAdapter {
+const REPLY = [{ type: 'message', content: [{ type: 'output_text', text: '好了。' }] }]
+
+/** A model that keeps looking at the title, one inspect call per response. */
+function inspecting(count: number): unknown[] {
+  return [{ type: 'function_call', id: `fc_${count}`, call_id: `i${count}`, name: 'inspect', arguments: '{"targets":["E1"]}', status: 'completed' }]
+}
+
+function planner(requests: Item[], options: Partial<MultiStepPlannerOptions> = {}, pricing: LlmPricing | null = null, reply: (count: number) => unknown[] = () => REPLY): MultiStepPlannerAdapter {
   const scene = createScene({ id: uuid(2), projectId: PROJECT, now: NOW })
   return new MultiStepPlannerAdapter({
     scene: () => scene,
@@ -29,7 +37,7 @@ function planner(requests: Item[], options: Partial<MultiStepPlannerOptions> = {
         postLlmJson: async (request) => {
           requests.push(request.body as Item)
           return {
-            id: `r${requests.length}`, status: 'completed', output: [{ type: 'message', content: [{ type: 'output_text', text: '好了。' }] }],
+            id: `r${requests.length}`, status: 'completed', output: reply(requests.length),
             usage: { input_tokens: 10_000, input_tokens_details: { cached_tokens: 4_000 }, output_tokens: 1_000 }
           }
         },
@@ -167,5 +175,30 @@ describe('multi-step context', () => {
     // A pass that made no call, such as one resuming an approved step, changes nothing.
     expect(turnModelUsage([planItem(1, priced), planItem(2, {})])).toMatchObject({ calls: 1, estimatedCostCny: 0.022 })
     expect(turnModelUsage([])).toBeNull()
+  })
+
+  it('hands a long run of read-only calls back to the loop, with its calls and usage kept, so the guards are checked', async () => {
+    const signal = new AbortController().signal
+    const requests: Item[] = []
+    const result = await planner(requests, {}, null, inspecting).next(input([]), signal)
+    expect(result.step.kind).toBe('progress')
+    expect(result.modelTurns).toBe(8)
+    const trace = result.step.trace as ModelTrace
+    expect(trace).toMatchObject({ modelCalls: 8 })
+    expect(trace.usage).toHaveLength(8)
+    expect(trace.assistants).toHaveLength(8)
+    // The stored record is a valid trace, so the next pass carries on from it.
+    expect(turnModelUsage([planItem(1, trace)])).toMatchObject({ calls: 8 })
+  })
+
+  it('stops a pass once its estimated spend reaches what the turn has left before its cost cap', async () => {
+    const signal = new AbortController().signal
+    const requests: Item[] = []
+    // Each call is estimated at ¥0.022; the turn has ¥0.03 left.
+    const result = await planner(requests, {}, { inputPerMillionCny: 2, cachedInputPerMillionCny: 0.5, outputPerMillionCny: 8 }, inspecting)
+      .next({ ...input([]), costLeftCny: 0.03 }, signal)
+    expect(result.step.kind).toBe('progress')
+    expect(requests).toHaveLength(2)
+    expect(result.step.trace).toMatchObject({ modelCalls: 2, costCny: 0.044 })
   })
 })

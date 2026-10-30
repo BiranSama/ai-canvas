@@ -35,10 +35,11 @@ test('uses seconds in settings, reads back the saved policy, and shows the persi
     await page.getByRole('group', { name: 'Agent 模式', exact: true }).getByRole('button', { name: '审阅', exact: true }).click()
     await page.getByLabel('对话输入').fill('调整画布为一张安静的封面，先不要生成图片')
     await page.getByRole('button', { name: '发送要求', exact: true }).click()
-    await expect(page.locator('.execution-time-policy').last()).toContainText('本轮总时限 5 分钟')
+    // The turn's time is a guard against a run going astray, far above what a picture takes.
+    await expect(page.locator('.execution-time-policy').last()).toContainText('本轮总时限 30 分钟')
     await expect(page.locator('.execution-time-policy').last()).toContainText('等你做决定的时间不计入')
     const harness = await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getAgentHarnessSnapshot())
-    expect(harness.turns[0]?.timeLimitMs).toBe(300_000)
+    expect(harness.turns[0]?.timeLimitMs).toBe(30 * 60_000)
     await page.screenshot({ path: test.info().outputPath('turn-limit-main-readback.png') })
     expect(await app.evaluate(() => (globalThis as typeof globalThis & { __timeNetwork: number }).__timeNetwork)).toBe(0)
     await writeFile(test.info().outputPath('saved-time-policy.json'), JSON.stringify({ imageTimeoutMs: saved.providers.find((provider) => provider.kind === 'image')?.timeoutMs,

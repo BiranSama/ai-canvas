@@ -281,7 +281,9 @@ describe('AH1 S5 persistent agent context integration', () => {
     const thread = (await activeLoop.snapshot()).thread
     const compactions = await activeContext.listCompactions(thread.id)
     const latest = compactions[0]
-    expect(compactions.length).toBeGreaterThanOrEqual(40)
+    // The earlier summary is rewritten only when the recent window drops its oldest ten messages, not every turn.
+    expect(compactions.length).toBeGreaterThanOrEqual(9)
+    expect(compactions.length).toBeLessThanOrEqual(12)
     expect(new Set(compactions.map((entry) => entry.sourceHash)).size).toBe(compactions.length)
     expect(latest?.summary).toContain('第 1 轮：保留银蓝色月亮和纤细标题')
     expect(Buffer.byteLength(latest?.summary ?? '', 'utf8')).toBeLessThanOrEqual(24_000)

@@ -1,4 +1,4 @@
-import type { AgentEvent, AgentHarnessSnapshot, AgentItem, AgentItemStatus, AgentRunBudget, AgentTurn, AgentTurnStatus } from '../../../shared/agent-harness'
+import { isTurnGuardCode, type AgentEvent, type AgentHarnessSnapshot, type AgentItem, type AgentItemStatus, type AgentRunBudget, type AgentTurn, type AgentTurnStatus, type TurnGuardCode } from '../../../shared/agent-harness'
 import type { AgentActivity, AgentActivityState } from '../../../shared/agent'
 import { completionFactsSchema } from '../../../shared/design-capability'
 import { activeTurnElapsedMs } from '../../../shared/execution-timing'
@@ -56,15 +56,13 @@ export interface AgentExecutionFlow {
   readonly canContinue?: boolean
 }
 
-/** The per-turn step limits, what each counts, and the turn's use of it. */
-const STEP_LIMITS = {
-  BUDGET_SCENE_WRITES: { label: '画布修改', unit: '批', used: (turn: AgentTurn) => turn.sceneWriteBatchesUsed, limit: (budget: AgentRunBudget) => budget.maxSceneWriteBatches },
-  BUDGET_TOOL_CALLS: { label: '工具调用', unit: '次', used: (turn: AgentTurn) => turn.toolCallsUsed, limit: (budget: AgentRunBudget) => budget.maxToolCalls },
-  BUDGET_MODEL_TURNS: { label: '模型回合', unit: '轮', used: (turn: AgentTurn) => turn.modelTurnsUsed, limit: (budget: AgentRunBudget) => budget.maxModelTurns }
-} as const
-
-function isStepLimit(code: string | null): code is keyof typeof STEP_LIMITS {
-  return code !== null && code in STEP_LIMITS
+/** The guards a turn pauses at, what each counts, and the turn's use of it; null when there is nothing to count. */
+const TURN_GUARDS: Record<TurnGuardCode, { readonly label: string; readonly count: ((turn: AgentTurn, budget: AgentRunBudget | null) => string) | null }> = {
+  BUDGET_SCENE_WRITES: { label: '画布修改', count: (turn, budget) => `${turn.sceneWriteBatchesUsed}${budget === null ? '' : `/${budget.maxSceneWriteBatches}`} 批` },
+  BUDGET_TOOL_CALLS: { label: '工具调用', count: (turn, budget) => `${turn.toolCallsUsed}${budget === null ? '' : `/${budget.maxToolCalls}`} 次` },
+  BUDGET_MODEL_TURNS: { label: '模型调用', count: (turn, budget) => `${turn.modelTurnsUsed}${budget === null ? '' : `/${budget.maxModelTurns}`} 次` },
+  BUDGET_WALL_TIME: { label: '用时', count: null },
+  BUDGET_TURN_COST: { label: '估算费用', count: null }
 }
 
 /**
@@ -72,7 +70,7 @@ function isStepLimit(code: string | null): code is keyof typeof STEP_LIMITS {
  * waiting to be accepted or dropped is not one, so it is decided first.
  */
 function canContinue(turn: AgentTurn): boolean {
-  return turn.status === 'budget_limited' && isStepLimit(turn.errorCode) && turn.taskRelation !== 'temporary_try'
+  return turn.status === 'budget_limited' && isTurnGuardCode(turn.errorCode) && turn.taskRelation !== 'temporary_try'
 }
 
 interface ProjectionOptions {
@@ -568,17 +566,17 @@ function flowCopy(
   latestProvider: AgentProviderAttemptEventV1 | null,
   budget: AgentRunBudget | null
 ): Pick<AgentExecutionFlow, 'headline' | 'summary' | 'statusLabel'> {
-  if (isStepLimit(turn.errorCode)) {
-    const limit = STEP_LIMITS[turn.errorCode]
-    const count = budget === null ? `${limit.used(turn)} ${limit.unit}` : `${limit.used(turn)}/${limit.limit(budget)} ${limit.unit}`
-    const next = canContinue(turn) ? '点「接着做」会开始新的一轮继续' : '先决定接受或放弃这个临时方向'
+  if (isTurnGuardCode(turn.errorCode)) {
+    const guard = TURN_GUARDS[turn.errorCode]
+    const used = guard.count === null ? '' : `（${guard.count(turn, budget)}）`
+    const next = canContinue(turn) ? '点「接着做」会开始新的一轮，从这里继续' : '先决定接受或放弃这个临时方向'
     return {
-      headline: `本轮${limit.label}次数已用完`, statusLabel: '已停止',
-      summary: `这一轮的${limit.label}已用 ${count}，做好的部分都保留。${next}；常做大改动的话，可以在 设置 → 执行策略 把「Agent 每轮步数」调大。`
+      headline: `本轮${guard.label}到了上限，先暂停`, statusLabel: '已暂停',
+      summary: turn.errorCode === 'BUDGET_TURN_COST'
+        ? `这一轮的估算费用到了设置里的每轮上限，做好的部分都保留。${next}；上限可以在 设置 → 执行策略 里调整。`
+        : `这一轮的${guard.label}到了安全上限${used}，做好的部分都保留。${next}。`
     }
   }
-  if (turn.errorCode === 'BUDGET_WALL_TIME') return { headline: '本轮时限已到', statusLabel: '已停止',
-    summary: '后续操作已停止，已完成的作品保留。已提交图片继续受原任务时限约束，可在生成页查看或停止。' }
   if (turn.errorCode === 'TURN_TIME_UNVERIFIED') return { headline: '原任务时限待核对', statusLabel: '已停止', summary: '旧任务没有可核对的时限，未补一段新的执行时间。现有作品仍可查看。' }
   if (timeout) {
     return {

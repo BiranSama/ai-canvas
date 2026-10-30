@@ -11,6 +11,7 @@ import {
 import {
   adaptLegacyTurnInputMode,
   agentTaskInputSchema,
+  DEFAULT_COLLABORATION_BUDGET,
   type AgentEvent,
   type AgentHarnessSnapshot,
   type AgentMode,
@@ -45,7 +46,7 @@ import type { ActivityLedgerRepository } from './activity-ledger-repository'
 import { RedactedLogger, redactSensitive, type DiagnosticLogger } from '../security/redacted-logger'
 import type { AgentToolExecutorShadow } from './agent-tool-executor-shadow'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
-import { turnModelUsage } from './multi-step/trace'
+import { turnModelUsage } from '../../shared/model-usage'
 
 export interface AgentRuntimeOptions {
   readonly projectId: string
@@ -53,8 +54,11 @@ export interface AgentRuntimeOptions {
   readonly planner: AgentPlanner
   readonly generationPolicy?: GenerationPolicy
   /** The owner's multiple of the standard per-turn allowance. */
-  readonly budgetScale?: () => number
   readonly maxSteps?: number
+  /** The estimated spend in CNY at which a turn pauses; null for none. */
+  readonly turnCostCap?: () => number | null
+  /** What one image from an image service costs, for that estimate; null when no price is set. */
+  readonly imagePriceCny?: (providerId: string) => number | null
   readonly now?: () => string
   readonly logger?: DiagnosticLogger
   readonly activityLedger?: ActivityLedgerRepository
@@ -125,7 +129,6 @@ export class AgentRuntime {
   readonly #repository: ConversationRepository
   readonly #generationPolicy: GenerationPolicy
   readonly #maxSteps: number
-  readonly #budgetScale: () => number
   readonly #now: () => string
   readonly #logger: DiagnosticLogger
   readonly #activityLedger: ActivityLedgerRepository | null
@@ -138,8 +141,7 @@ export class AgentRuntime {
     this.#projectId = options.projectId
     this.#repository = options.repository
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
-    this.#maxSteps = Math.max(1, Math.floor(options.maxSteps ?? 8))
-    this.#budgetScale = options.budgetScale ?? (() => 1)
+    this.#maxSteps = Math.max(1, Math.floor(options.maxSteps ?? DEFAULT_COLLABORATION_BUDGET.maxToolCalls))
     this.#now = options.now ?? (() => new Date().toISOString())
     this.#logger = options.logger ?? new RedactedLogger()
     this.#activityLedger = options.activityLedger ?? null
@@ -159,15 +161,16 @@ export class AgentRuntime {
       ...(options.loadGenerationJob === undefined ? {} : { loadGenerationJob: options.loadGenerationJob }),
       ...(options.activateGenerationJob === undefined ? {} : { activateGenerationJob: options.activateGenerationJob }),
       generationPolicy: this.#generationPolicy,
-      ...(options.budgetScale === undefined ? {} : { budgetScale: options.budgetScale }),
+      ...(options.turnCostCap === undefined ? {} : { turnCostCap: options.turnCostCap }),
+      ...(options.imagePriceCny === undefined ? {} : { imagePriceCny: options.imagePriceCny }),
       now: this.#now,
       projection: this.#persistentProjection()
     })
   }
 
-  /** A run's tool steps grow with the owner's multiple of the per-turn allowance, so the larger allowance is not cut short here. */
+  /** A run takes as many tool steps as its turn's guard allows, so the guard is what stops it. */
   #runStepLimit(): number {
-    return this.#maxSteps * this.#budgetScale()
+    return this.#maxSteps
   }
 
   async initialize(): Promise<number> {

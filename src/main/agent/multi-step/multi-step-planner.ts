@@ -54,15 +54,30 @@ export interface MultiStepPlannerOptions {
   readonly layerMask?: AgentToolContext['layerMask']
   readonly bakeImage?: AgentToolContext['bakeImage']
   readonly newId?: () => string
-  /** Model calls one pass may make while it answers read-only tools itself. */
+  /** Model calls one pass may make while it answers read-only tools itself before it stores its progress. */
   readonly maxModelCallsPerPass?: number
   /** Estimated input above which earlier steps are replaced by a checkpoint. */
   readonly checkpointTokens?: number
 }
 
+/**
+ * A pass answering read-only tools itself makes this many model calls at
+ * most before it hands its progress to the loop: what it did is stored, the
+ * turn's guards and cost cap are checked, and the next pass carries on. It
+ * also keeps a pass's stored record within the trace's bounds.
+ */
+const MODEL_CALLS_PER_PASS = 8
+const MAX_PASS_RESULTS = 48
+
 /** A cost reservation per model call; the ledger settles against it. */
 const MODEL_CALL_COST_CEILING_CNY = 0.25
-const MAX_CACHED_SCREENSHOT_CALLS = 2
+/**
+ * Screenshots a turn keeps to send again on each later step. Dropping one
+ * changes the transcript from that step on, so nothing the provider cached
+ * after it can be reused; they are kept until the turn ends or is
+ * checkpointed, with this many calls as a bound on memory.
+ */
+const MAX_TURN_SCREENSHOT_CALLS = 16
 
 interface PendingReport {
   readonly sceneBefore: Scene
@@ -108,6 +123,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
   readonly #options: MultiStepPlannerOptions
   readonly #reports = new Map<string, PendingReport>()
   readonly #screenshots = new Map<string, readonly LlmImage[]>()
+  #screenshotTurnId: string | null = null
   /** Asset IDs of attached images, for the outbound ledger. */
   readonly #imageIds = new WeakMap<LlmImage, string>()
 
@@ -120,6 +136,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     const resumed = this.#resumeApprovedCall(items)
     if (resumed !== null) return { step: resumed, modelTurns: 0 }
 
+    if (this.#screenshotTurnId !== input.turn.id) {
+      this.#screenshots.clear()
+      this.#screenshotTurnId = input.turn.id
+    }
     const scene = this.#options.scene()
     const traces = items.flatMap((item) => {
       const trace = traceOf(item)
@@ -227,16 +247,24 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         return finish({ kind: 'tool', call: step.plan, toolIndex: 0, plan: oneToolPlan(step.plan, description) }, { callId: call.callId, name: call.name }, modelTurns)
       }
 
-      if (modelTurns >= callLimit) {
+      const stuck = repeatedFailure([...assistants, ...pass.assistants], results)
+      if (stuck !== null) {
         return finish({
           kind: 'complete',
           assessment: {
             status: 'completed_with_notes',
-            summary: '这一轮可用的步数已经用完，先停在这里。你可以看看当前效果，再告诉我接下来怎么调整。',
-            notes: ['本轮模型调用次数达到上限。'],
-            nextAction: '继续调整'
+            summary: `「${stuck.name}」用同样的参数连续 ${REPEATED_FAILURE_LIMIT} 次都没成功，先停在这里：${stuck.reason}。做好的部分都保留；可以换个说法，或者告诉我怎么调整。`,
+            notes: ['同一步连续失败，已停止重试。'],
+            nextAction: null
           }
         }, null, modelTurns)
+      }
+      // A pass that has made its share of calls, or spent what the turn has left, hands back what it has;
+      // the loop stores it, checks the turn's guards and cost cap, and asks again.
+      const spentInPass = pass.costCny ?? 0
+      if (modelTurns > 0 && (modelTurns >= callLimit || pass.results.length >= MAX_PASS_RESULTS
+        || (input.costLeftCny != null && spentInPass >= input.costLeftCny))) {
+        return finish({ kind: 'progress' }, null, modelTurns)
       }
       const system = multiStepSystemPrompt(this.#options.manuals ?? null)
       const tools = [...llmToolDefinitions(availableAgentTools(toolContext))]
@@ -259,12 +287,16 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         }
         opening = await this.#opening(checkpoint.text, input, model)
         messages = [opening]
+        // The steps the checkpoint replaced are no longer sent, nor their screenshots.
+        this.#screenshots.clear()
       }
       const turn = await this.#callModel(model, {
         system,
         messages,
         tools,
-        maxOutputTokens: model.maxOutputTokens
+        maxOutputTokens: model.maxOutputTokens,
+        // One conversation's requests share their start; vendors that route by key serve them from one cache.
+        cacheKey: `ai-canvas-${input.turn.threadId}`
       }, signal, context, modelTurns, screenshots === 'allowed')
       modelTurns += 1
       pass.calls += 1
@@ -345,14 +377,15 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     return settled
   }
 
+  /** The calls this pass may make before it hands back to the loop. */
   #modelCallLimit(used: number, budget: AgentRunBudget | undefined): number {
-    const perPass = this.#options.maxModelCallsPerPass ?? 6
+    const perPass = this.#options.maxModelCallsPerPass ?? MODEL_CALLS_PER_PASS
     return budget === undefined ? perPass : Math.max(1, Math.min(perPass, budget.maxModelTurns - used))
   }
 
   #cacheScreenshots(callId: string, images: readonly LlmImage[]): void {
     this.#screenshots.set(callId, images)
-    while (this.#screenshots.size > MAX_CACHED_SCREENSHOT_CALLS) this.#screenshots.delete(this.#screenshots.keys().next().value!)
+    while (this.#screenshots.size > MAX_TURN_SCREENSHOT_CALLS) this.#screenshots.delete(this.#screenshots.keys().next().value!)
   }
 
   #briefText(
@@ -463,6 +496,20 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       ? model.http.postEventStream(live, model.protocol.createTurnStreamAccumulator())
       : model.protocol.parseTurnResponse(await model.http.postLlmJson(live))
   }
+}
+
+/** The same call failing this many times in a row ends the turn instead of another try. */
+const REPEATED_FAILURE_LIMIT = 3
+
+/** The call the model keeps repeating although it fails each time, or null. */
+function repeatedFailure(steps: readonly AssistantStep[], results: ReadonlyMap<string, LlmToolResult>): { readonly name: string; readonly reason: string } | null {
+  const recent = steps.flatMap((step) => turnToolCalls(step)).slice(-REPEATED_FAILURE_LIMIT)
+  if (recent.length < REPEATED_FAILURE_LIMIT) return null
+  const [first] = recent
+  if (recent.some((call) => call.name !== first!.name || call.argumentsText !== first!.argumentsText || results.get(call.callId)?.isError !== true)) return null
+  const text = results.get(recent.at(-1)!.callId)?.content.find((part) => part.type === 'text')?.text ?? ''
+  const line = text.split('\n', 1)[0]!.trim()
+  return { name: first!.name, reason: line === '' ? '没有说明原因' : line.slice(0, 160) }
 }
 
 /** A finished generation job names its new images, so the model can view or place them. */

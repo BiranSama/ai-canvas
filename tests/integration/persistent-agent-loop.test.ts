@@ -95,7 +95,7 @@ async function harness(options: {
     context: AgentLoopToolContext
   ) => Promise<AgentToolOutcome>
   readonly budget?: typeof DEFAULT_AUTO_BUDGET
-  readonly budgetScale?: number
+  readonly turnCostCap?: number
   readonly withContext?: boolean
   readonly now?: () => string
 }) {
@@ -120,7 +120,7 @@ async function harness(options: {
     ...(contextRepository === null ? {} : { contextRepository }),
     planner: options.planner,
     ...(options.budget === undefined ? {} : { budget: options.budget }),
-    ...(options.budgetScale === undefined ? {} : { budgetScale: () => options.budgetScale! }),
+    ...(options.turnCostCap === undefined ? {} : { turnCostCap: () => options.turnCostCap! }),
     now: options.now ?? (() => '2026-08-22T12:00:01.000+08:00'),
     loadRequest: async (runId) => {
       const value = requests.get(runId)
@@ -618,16 +618,67 @@ describe('AH1 S4 persistent agent loop', () => {
     })
   })
 
-  it('stops a Collaboration turn at its canvas-write allowance, and the owner\'s multiple raises it', async () => {
+  it('pauses a turn at a guard with the work done so far kept', async () => {
+    // The guards are far above what a picture takes; a small one stands in for them here.
+    expect(DEFAULT_COLLABORATION_BUDGET).toMatchObject({ maxModelTurns: 16, maxToolCalls: 40, maxSceneWriteBatches: 20, maxWallTimeMs: 30 * 60_000 })
     const steps = [1, 2, 3, 4, 5].map((step) => ({ kind: 'tool' as const, call: sceneTool(`step-${step}`), toolIndex: step - 1, plan: null }))
-    for (const [budgetScale, written, status] of [[undefined, 4, 'budget_limited'], [2, 5, 'completed_with_notes']] as const) {
-      const value = await harness({ planner: new ScriptedPlannerAdapter(steps), ...(budgetScale === undefined ? {} : { budgetScale }) })
-      await value.start(`run-steps-${budgetScale ?? 1}`, request('分五批改画布'), 'collaboration')
+    const value = await harness({
+      planner: new ScriptedPlannerAdapter([...steps.slice(0, 4), steps[4]!, { kind: 'complete', assessment: { status: 'completed', summary: '五批都改好了', notes: [], nextAction: null } }]),
+      budget: { ...DEFAULT_COLLABORATION_BUDGET, maxSceneWriteBatches: 4 }
+    })
+    const first = await value.start('run-steps', request('分五批改画布'), 'collaboration')
+    await value.loop.waitForIdle()
+    expect((await value.loop.snapshot()).turns.find((turn) => turn.id === first.id)).toMatchObject({ status: 'budget_limited', errorCode: 'BUDGET_SCENE_WRITES', sceneWriteBatchesUsed: 4 })
+  })
+
+  it('stores a pass that hands back its progress and checks the guards before planning on', async () => {
+    const trace = (costCny: number) => ({ version: 1, promptVersion: 'test', refs: {}, assistants: [], results: [], emitted: null, usage: [], brief: null, checkpoint: null, modelCalls: 8, costCny })
+    for (const [spent, expected] of [[0.1, { status: 'completed', calls: 1 }], [0.6, { status: 'budget_limited', errorCode: 'BUDGET_TURN_COST', calls: 0 }]] as const) {
+      let calls = 0
+      const value = await harness({
+        planner: new ScriptedPlannerAdapter([
+          { kind: 'progress', trace: trace(spent) },
+          { kind: 'tool', call: sceneTool('看完后改一批'), toolIndex: 0, plan: null },
+          { kind: 'complete', assessment: { status: 'completed', summary: '改好了', notes: [], nextAction: null } }
+        ]),
+        turnCostCap: 0.5,
+        executeTool: async (tool, toolIndex) => {
+          calls += 1
+          return { toolIndex, ok: true, batchId: `batch-${toolIndex}`, jobId: null, affectedElementIds: [], message: tool.kind }
+        }
+      })
+      const turn = await value.start(`run-progress-${spent}`, request('先看看再改'), 'collaboration')
       await value.loop.waitForIdle()
       const snapshot = await value.loop.snapshot()
-      expect(snapshot.activeGoal?.budget.maxSceneWriteBatches).toBe(DEFAULT_COLLABORATION_BUDGET.maxSceneWriteBatches * (budgetScale ?? 1))
-      expect(snapshot.turns[0]).toMatchObject({ status, sceneWriteBatchesUsed: written, ...(status === 'budget_limited' ? { errorCode: 'BUDGET_SCENE_WRITES' } : {}) })
+      const { calls: expectedCalls, ...status } = expected
+      expect(snapshot.turns.find((candidate) => candidate.id === turn.id)).toMatchObject(status)
+      expect(calls).toBe(expectedCalls)
+      // The progress pass is kept as a plan item, so its usage counts toward the turn.
+      expect(snapshot.items.filter((item) => item.turnId === turn.id && item.type === 'plan' && (item.payload as { step?: { kind?: string } }).step?.kind === 'progress')).toHaveLength(1)
     }
+  })
+
+  it('pauses a turn whose estimated spend reaches the per-turn cap, before the next step', async () => {
+    let calls = 0
+    const value = await harness({
+      planner: new ScriptedPlannerAdapter([
+        // The first step's model calls are estimated at ¥0.60, over the ¥0.50 cap.
+        { kind: 'tool', call: sceneTool('第一批'), toolIndex: 0, plan: null, trace: {
+          version: 1, promptVersion: 'test', refs: {}, assistants: [], results: [], emitted: null, usage: [],
+          brief: null, checkpoint: null, modelCalls: 2, costCny: 0.6
+        } },
+        { kind: 'tool', call: sceneTool('不应执行'), toolIndex: 1, plan: null }
+      ]),
+      turnCostCap: 0.5,
+      executeTool: async (tool, toolIndex) => {
+        calls += 1
+        return { toolIndex, ok: true, batchId: `batch-${toolIndex}`, jobId: null, affectedElementIds: [], message: tool.kind }
+      }
+    })
+    const turn = await value.start('run-cost', request('改一下画布'), 'collaboration')
+    await value.loop.waitForIdle()
+    expect(calls).toBe(1)
+    expect((await value.loop.snapshot()).turns.find((candidate) => candidate.id === turn.id)).toMatchObject({ status: 'budget_limited', errorCode: 'BUDGET_TURN_COST' })
   })
 
   it('makes Review mode a real per-step write gate with the Review budget', async () => {

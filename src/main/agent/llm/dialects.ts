@@ -48,6 +48,8 @@ export interface LlmDialect {
   readonly anthropic: AnthropicDialect
   /** Earlier steps must be sent back unchanged, so old screenshots cannot be dropped. */
   readonly appendOnlyHistory: boolean
+  /** Takes a `prompt_cache_key` that routes requests sharing a prefix to the same cache. */
+  readonly promptCacheKey: boolean
 }
 
 const GENERIC_CHAT: ChatDialect = {
@@ -78,7 +80,9 @@ export const GENERIC_DIALECT: LlmDialect = {
   chat: GENERIC_CHAT,
   responses: GENERIC_RESPONSES,
   anthropic: COMPATIBLE_ANTHROPIC,
-  appendOnlyHistory: false
+  appendOnlyHistory: false,
+
+  promptCacheKey: false
 }
 
 export const LLM_DIALECTS: readonly LlmDialect[] = [
@@ -95,7 +99,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
       toolResultImages: 'inline'
     },
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: true
   },
   {
     id: 'anthropic',
@@ -104,7 +110,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
     chat: { ...GENERIC_CHAT, effortField: null },
     responses: GENERIC_RESPONSES,
     anthropic: { thinking: 'adaptive', promptCaching: true, toolResultImages: 'inline' },
-    appendOnlyHistory: true
+    appendOnlyHistory: true,
+
+    promptCacheKey: false
   },
   {
     id: 'deepseek',
@@ -113,7 +121,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
     chat: { thinking: 'thinking-type', effortField: 'reasoning_effort', maxTokensField: 'max_tokens', streamUsage: true },
     responses: { ...GENERIC_RESPONSES, replayReasoning: 'all', toolResultImages: 'inline' },
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: false
   },
   {
     id: 'ark',
@@ -128,7 +138,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
       toolResultImages: 'user-message'
     },
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: false
   },
   {
     id: 'xai',
@@ -143,7 +155,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
       toolResultImages: 'user-message'
     },
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: false
   },
   {
     id: 'gemini',
@@ -152,7 +166,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
     chat: { ...GENERIC_CHAT, streamUsage: true },
     responses: GENERIC_RESPONSES,
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: false
   },
   {
     id: 'qwen',
@@ -161,7 +177,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
     chat: { thinking: 'enable-thinking', effortField: null, maxTokensField: 'max_tokens', streamUsage: true },
     responses: GENERIC_RESPONSES,
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: false
   },
   {
     id: 'kimi',
@@ -170,7 +188,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
     chat: { thinking: 'model-default', effortField: null, maxTokensField: 'max_tokens', streamUsage: true },
     responses: GENERIC_RESPONSES,
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: false
   },
   {
     id: 'glm',
@@ -179,7 +199,9 @@ export const LLM_DIALECTS: readonly LlmDialect[] = [
     chat: { thinking: 'thinking-type', effortField: null, maxTokensField: 'max_tokens', streamUsage: true },
     responses: GENERIC_RESPONSES,
     anthropic: COMPATIBLE_ANTHROPIC,
-    appendOnlyHistory: false
+    appendOnlyHistory: false,
+
+    promptCacheKey: false
   }
 ]
 

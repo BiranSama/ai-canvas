@@ -235,6 +235,43 @@ describe('multi-step engine decisions and corrections', () => {
     expect(observation.scenes.final.elements).toHaveLength(14)
   }, 120_000)
 
+  it('lets a long run of read-only calls finish instead of declaring the turn done after six', async () => {
+    const looking = customCase({ id: 'multi-step-read-01', request: { text: '加个标题，再仔细检查几遍' } })
+    const { observation } = await runScripted(looking, (results) => results === 0
+      ? [call('t1', 'add_text', { content: '晨雾', role: 'title' })]
+      : results < 9
+        ? [call(`i${results}`, 'inspect', { targets: ['E1'] })]
+        : [message('检查过了，标题位置合适。')], 'read-only')
+    expect(observation.turns.at(-1)).toMatchObject({ status: 'completed', modelCalls: 10, toolSteps: 1 })
+  }, 90_000)
+
+  it('stops when the same call fails three times in a row, saying where it is stuck', async () => {
+    const stuck = customCase({ id: 'multi-step-stuck-01', request: { text: '把标题改成白色' } })
+    const { requests, observation } = await runScripted(stuck, () => [call(`u${Math.random()}`.replace('.', ''), 'update', { targets: ['E9'], set: { color: '#FFFFFF' } })], 'stuck')
+    expect(requests).toHaveLength(3)
+    // Nothing was changed, so the honest-completion check leaves the turn for the person to review.
+    expect(observation.turns.at(-1)).toMatchObject({ status: 'needs_user_review', modelCalls: 3 })
+    expect(observation.turns.at(-1)!.replyText).toMatch(/「update」用同样的参数连续 3 次都没成功/)
+  }, 90_000)
+
+  it('sends every screenshot of the turn again on later steps, so the transcript only grows', async () => {
+    const looking = customCase({ id: 'multi-step-look-03', request: { text: '加个标题，多看几眼再定' } })
+    // Looks between canvas changes: each change ends a pass, so earlier screenshots come back from the turn's store.
+    const steps: Item[][] = [
+      [call('l0', 'look', {})],
+      [call('t1', 'add_text', { content: '晨雾', role: 'title' })],
+      [call('l1', 'look', {})],
+      [call('s1', 'add_shape', { shape: 'rectangle', box: [10, 80, 80, 6] })],
+      [call('l2', 'look', {})],
+      [message('看了三遍，标题和色条的位置都合适。')]
+    ]
+    const { requests } = await runScripted(looking, (results) => steps[results]!, 'look-three')
+    const images = (request: Item): number => (request.input as Item[]).flatMap((item) => item.type === 'message' && Array.isArray(item.content)
+      ? (item.content as Item[]).filter((part) => part.type === 'input_image')
+      : []).length
+    expect(requests.map(images)).toEqual([0, 1, 1, 2, 2, 3])
+  }, 90_000)
+
   it('shows the model a rendered screenshot when it looks', async () => {
     const looking = customCase({ id: 'multi-step-look-01', request: { text: '加个标题，然后看看效果' } })
     const { requests, observation } = await runScripted(looking, (results) => results === 0

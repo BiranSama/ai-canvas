@@ -1,4 +1,4 @@
-import { AlertCircle, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Layers3, Palette, Pencil, Server, ShieldCheck, Trash2, X } from 'lucide-react'
+import { AlertCircle, BarChart3, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Layers3, Palette, Pencil, Server, ShieldCheck, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useModalScope } from '../interaction/use-modal-scope'
 import type {
@@ -9,7 +9,7 @@ import type {
   OpticalQuality
 } from '../../../shared/appearance-settings'
 import type { RuntimeInfo } from '../../../shared/desktop-api'
-import type { AgentEngine, AgentEngineSetting } from '../../../shared/agent-engine'
+import type { AgentEngineSetting } from '../../../shared/agent-engine'
 import type { DiagnosticExportResult } from '../../../shared/diagnostics'
 import type { GenerationProfileSnapshot } from '../../../shared/generation'
 import type { LlmPricing } from '../../../shared/model-usage'
@@ -34,6 +34,7 @@ import {
 import { useCreationSessionStore } from '../store/creation-session-store'
 import { applyAppearanceSnapshot, defaultAppearanceSnapshot } from '../appearance/apply-appearance'
 import { AgentContextSettings } from './AgentContextSettings'
+import { UsageSettings } from './UsageSettings'
 
 type ProviderDrafts = Partial<Record<ConfigurableProviderId, ProviderPublicConfig>>
 type DiagnosticDisplayResult = DiagnosticExportResult | {
@@ -116,8 +117,7 @@ const OPTICAL_QUALITY_LABELS: Record<OpticalQuality, string> = {
 function budgetStatus(snapshot: ProviderSettingsSnapshot): string {
   const policy = snapshot.executionPolicy
   const approval = policy.approvalMode === 'confirm_each' ? '逐次确认' : '本次会话授权'
-  const steps = policy.agentStepScale === 1 ? '标准' : `标准的 ${policy.agentStepScale} 倍`
-  return `每个图片任务最多 ${policy.maxRequestsPerJob} 个网络请求、${policy.maxImagesPerJob} 张图，预约额度 ¥${policy.maxCostCnyPerJob.toFixed(2)}，${approval}。Agent 每轮的模型回合、工具调用、画布修改和时限为${steps}，与图片任务的请求数无关。价格未知时，预约不保证实际人民币扣费上限。`
+  return `每个图片任务最多 ${policy.maxRequestsPerJob} 个网络请求、${policy.maxImagesPerJob} 张图，预约额度 ¥${policy.maxCostCnyPerJob.toFixed(2)}，${approval}。Agent 每一轮估算花到 ¥${policy.maxCostCnyPerTurn.toFixed(2)} 就暂停，可以接着做；估算按文字模型和生图服务里填的单价，没填单价的部分不计入。价格未知时，预约不保证实际人民币扣费上限。`
 }
 
 export function ProviderSettingsSheet({
@@ -137,7 +137,7 @@ export function ProviderSettingsSheet({
   const [removingImageService, setRemovingImageService] = useState<string | null>(null)
   const [busy, setBusy] = useState<ConfigurableProviderId | null>(null)
   const [expandedProvider, setExpandedProvider] = useState<ConfigurableProviderId | null>(initialProviderId)
-  const [section, setSection] = useState<'providers' | 'agent' | 'profiles' | 'projects' | 'appearance' | 'privacy'>('providers')
+  const [section, setSection] = useState<'providers' | 'agent' | 'usage' | 'profiles' | 'projects' | 'appearance' | 'privacy'>('providers')
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
   const [status, setStatus] = useState('正在读取本地授权与预算状态…')
   const [libraryBusy, setLibraryBusy] = useState(false)
@@ -183,16 +183,6 @@ export function ProviderSettingsSheet({
     void window.desktop.listGenerationProfiles().then(setProfileSnapshot).catch(() => undefined)
     if (desktop.getAgentEngine !== undefined) void desktop.getAgentEngine().then(setAgentEngine).catch(() => undefined)
   }, [onClose])
-
-  const chooseAgentEngine = async (engine: AgentEngine): Promise<void> => {
-    try {
-      const value = await window.desktop.setAgentEngine(engine)
-      setAgentEngine(value)
-      setStatus(value.selected === value.active ? 'Agent 引擎设置未变化。' : 'Agent 引擎已保存，重新打开项目后生效。')
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : '未能保存 Agent 引擎设置。')
-    }
-  }
 
   const updateAppearance = async (changes: Partial<AppearanceSettingsUpdate>): Promise<void> => {
     if (appearanceBusy) return
@@ -425,6 +415,7 @@ export function ProviderSettingsSheet({
           <nav className="settings-navigation" aria-label="设置分类">
             <button type="button" className={section === 'providers' ? 'is-active' : ''} onClick={() => setSection('providers')}><Server size={15} />供应商</button>
             <button type="button" className={section === 'agent' ? 'is-active' : ''} onClick={() => setSection('agent')}><BrainCircuit size={15} />Agent 上下文</button>
+            <button type="button" className={section === 'usage' ? 'is-active' : ''} onClick={() => setSection('usage')}><BarChart3 size={15} />用量</button>
             <button type="button" className={section === 'profiles' ? 'is-active' : ''} onClick={() => setSection('profiles')}><Layers3 size={15} />生成档位</button>
             <button type="button" className={section === 'projects' ? 'is-active' : ''} onClick={() => setSection('projects')}><FolderOpen size={15} />项目与存储</button>
             <button type="button" className={section === 'appearance' ? 'is-active' : ''} onClick={() => setSection('appearance')}><Palette size={15} />外观</button>
@@ -432,7 +423,8 @@ export function ProviderSettingsSheet({
           </nav>
           <div className="provider-settings-list">
           {section === 'agent' && <AgentContextSettings onStatus={setStatus} />}
-          {section !== 'providers' && section !== 'agent' && (
+          {section === 'usage' && <UsageSettings />}
+          {section !== 'providers' && section !== 'agent' && section !== 'usage' && (
             <section className="settings-section-summary">
               {section === 'profiles' && <>
                 <span className="settings-kicker">生成档位与预算</span>
@@ -561,11 +553,11 @@ export function ProviderSettingsSheet({
                   const approvalMode = event.currentTarget.value as ProviderExecutionPolicy['approvalMode']
                   setPolicyDraft((current) => current === null ? null : { ...current, approvalMode })
                 }}><option value="confirm_each">逐次确认</option><option value="session">本次会话授权</option></select>
-                <label className="provider-agent-steps" title="每轮的模型回合、工具调用、画布修改和时限一起放宽；图片张数和费用仍按上面的上限。">Agent 每轮步数
-                  <select aria-label="Agent 每轮步数" value={policyDraft.agentStepScale} onChange={(event) => {
-                    const agentStepScale = Number(event.currentTarget.value) as ProviderExecutionPolicy['agentStepScale']
-                    setPolicyDraft((current) => current === null ? null : { ...current, agentStepScale })
-                  }}><option value={1}>标准</option><option value={2}>2 倍</option><option value={4}>4 倍</option></select>
+                <label className="provider-agent-steps" title="按文字模型和生图服务里填的单价估算；到了就暂停，可以接着做。">每轮费用上限（元）
+                  <input aria-label="Agent 每轮费用上限" type="number" min={0.1} max={10000} step={0.5} value={policyDraft.maxCostCnyPerTurn} onChange={(event) => {
+                    const value = Number(event.currentTarget.value)
+                    setPolicyDraft((current) => current === null ? null : { ...current, maxCostCnyPerTurn: value })
+                  }} />
                 </label>
                 <button type="button" disabled={busy !== null} onClick={() => void saveExecutionPolicy()}>保存执行边界</button>
               </div>
@@ -658,7 +650,7 @@ export function ProviderSettingsSheet({
                     const maxOutputTokens = Number(event.currentTarget.value)
                     updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, maxOutputTokens } : current)
                   }} /></label>}
-                  <label><span>{draft.kind === 'image' ? '图片任务总时限（秒）' : '单次请求上限（秒）'}</span><input aria-label={`${prefix} 超时`} type="number" min={1} max={300} step={1} value={draft.timeoutMs / 1000} onChange={(event) => {
+                  <label><span>{draft.kind === 'image' ? '图片任务总时限（秒）' : '单次请求上限（秒）'}</span><input aria-label={`${prefix} 超时`} type="number" min={1} max={900} step={1} value={draft.timeoutMs / 1000} onChange={(event) => {
                     const value = Number(event.currentTarget.value) * 1000
                     updateDraft(provider.id, (current) => ({ ...current, timeoutMs: value }))
                   }} /></label>
@@ -685,8 +677,8 @@ export function ProviderSettingsSheet({
                     </select></label>
                     {([
                       ['connectTimeoutMs', '连接上限（秒）', 60_000],
-                      ['firstEventTimeoutMs', '首个响应上限（秒）', 120_000],
-                      ['idleTimeoutMs', '响应空闲上限（秒）', 180_000]
+                      ['firstEventTimeoutMs', '首个响应上限（秒）', 600_000],
+                      ['idleTimeoutMs', '响应空闲上限（秒）', 600_000]
                     ] as const).map(([field, label, max]) => <label key={field}>
                       <span>{label}</span>
                       <input
@@ -823,16 +815,12 @@ export function ProviderSettingsSheet({
                           : `${connectionResult.failure.detail} ${connectionResult.failure.nextAction}（本次已提交 ${connectionResult.requestsUsed} 个请求）`}</small>
                       </span>
                     </div>}
-                    {agentEngine !== null && <div className="provider-engine-setting">
-                      <span><strong>Agent 引擎（开发者）</strong><small>{agentEngine.forcedByEnvironment
-                        ? '已由环境变量 AI_CANVAS_AGENT_ENGINE 指定。'
-                        : agentEngine.selected === agentEngine.active
-                          ? `当前项目使用${agentEngine.active === 'multi-step' ? '多步工具' : '一次规划'}。多步工具会多次调用文字模型，先用「验证多步调用」确认服务支持。`
-                          : '已保存，重新打开项目后生效。'}</small></span>
-                      <select aria-label="Agent 引擎" value={agentEngine.selected} disabled={agentEngine.forcedByEnvironment || busy !== null} onChange={(event) => void chooseAgentEngine(event.currentTarget.value as AgentEngine)}>
-                        <option value="plan-once">一次规划（默认）</option>
-                        <option value="multi-step">多步工具（实验）</option>
-                      </select>
+                    {agentEngine !== null && <div className="provider-engine-setting" data-testid="agent-engine-status">
+                      <span><strong>对话 Agent</strong><small>{agentEngine.forcedByEnvironment
+                        ? `已由环境变量 AI_CANVAS_AGENT_ENGINE 指定为${agentEngine.active === 'multi-step' ? '多步' : '一次规划'}。`
+                        : agentEngine.active === 'multi-step'
+                          ? '一步一步做，每步都能看画面再决定下一步。'
+                          : '还没有可用的文字模型，先用本地规划排版。保存文字模型和 Key 后，重新打开项目即可让 Agent 看着画面一步步做。'}</small></span>
                     </div>}
                   </div>
                 })()}

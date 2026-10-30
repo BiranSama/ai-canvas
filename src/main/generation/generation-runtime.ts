@@ -12,7 +12,7 @@ import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../share
 import { ELEMENT_SCHEMA_VERSION, imageElementSchema, type ImageEffects, type LayerMask, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 import { fitSubject, type SubjectFinder, type SubjectFit } from '../edit/subject-fit'
 import { fitsIntoPlace } from '../../shared/subject-place'
-import type { AgentEvent, AgentHarnessSnapshot, AgentMode, AgentTaskDispatch, TaskRelation, TurnInputMode } from '../../shared/agent-harness'
+import { STEPWISE_COLLABORATION_BUDGET, type AgentEvent, type AgentHarnessSnapshot, type AgentMode, type AgentTaskDispatch, type TaskRelation, type TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
   CreateProjectDirectiveInput,
@@ -79,7 +79,6 @@ import type { AgentLoopToolContext } from '../agent'
 import { createMultiStepPlannerAdapter, environmentAgentEngine } from '../agent/multi-step/runtime-adapter'
 import type { SubjectSegmentation } from '../segmentation/subject-segmentation'
 import { imageBytes } from '../storage/image-file'
-import { AgentEngineSettingStore } from '../agent/multi-step/engine-setting-store'
 import type { AgentEngine, AgentEngineSetting } from '../../shared/agent-engine'
 import { projectWorkContextSchema, type ProjectWorkContext } from '../../shared/project-work-context'
 import { blendModeCommandViolation, compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../agent/atomic-scene-tools'
@@ -334,10 +333,9 @@ export class GenerationRuntime {
   readonly #providerSettings: ProviderSettingsService
   readonly #providerConfig: FileProviderConfigStore
   readonly #secrets: ProviderSecretVault
-  /** Forced by the environment or a runtime option; otherwise the stored choice applies. */
+  /** Forced by the environment or a runtime option; otherwise the configured text model decides. */
   readonly #forcedAgentEngine: AgentEngine | null
   #subject: GenerationRuntimeOptions['subject'] | undefined
-  readonly #agentEngineSetting: AgentEngineSettingStore
   #activeAgentEngine: AgentEngine = 'plan-once'
   readonly #executionBindings: ImageExecutionBindings
   readonly #providerUsage: ProviderUsageLedger
@@ -382,7 +380,6 @@ export class GenerationRuntime {
     forcedAgentEngine: AgentEngine | null
   ) {
     this.#forcedAgentEngine = forcedAgentEngine
-    this.#agentEngineSetting = new AgentEngineSettingStore(join(userDataDirectory, 'state', 'agent-engine.json'))
     this.#userDataDirectory = userDataDirectory
     this.#projectLibraryDirectory = projectLibraryDirectory
     this.#librarySettings = new LibrarySettingsStore(
@@ -671,7 +668,7 @@ export class GenerationRuntime {
         imageGenerationAvailable
       })
     })
-    this.#activeAgentEngine = this.#forcedAgentEngine ?? await this.#agentEngineSetting.get()
+    this.#activeAgentEngine = this.#forcedAgentEngine ?? (await this.#textModelReady() ? 'multi-step' : 'plan-once')
     const multiStep = this.#activeAgentEngine === 'multi-step'
       ? createMultiStepPlannerAdapter({
           secrets: this.#secrets,
@@ -687,9 +684,10 @@ export class GenerationRuntime {
       projectId: project.workspace.metadata.id,
       repository: conversationRepository,
       planner,
-      ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: 40 }),
+      ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: STEPWISE_COLLABORATION_BUDGET.maxToolCalls }),
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
-      budgetScale: () => this.#executionPolicy.agentStepScale,
+      turnCostCap: () => this.#executionPolicy.maxCostCnyPerTurn,
+      imagePriceCny: (providerId) => this.#configuredImages.get(providerId)?.pricePerImageCny ?? null,
       logger: this.#diagnosticLog,
       activityLedger,
       toolExecutor,
@@ -1423,18 +1421,19 @@ export class GenerationRuntime {
     return this.#providerSettings.snapshot()
   }
 
-  async getAgentEngine(): Promise<AgentEngineSetting> {
-    return {
-      selected: this.#forcedAgentEngine ?? await this.#agentEngineSetting.get(),
-      active: this.#activeAgentEngine,
-      forcedByEnvironment: this.#forcedAgentEngine !== null
-    }
+  /** The engine the open project's conversation runs on. */
+  getAgentEngine(): AgentEngineSetting {
+    return { active: this.#activeAgentEngine, forcedByEnvironment: this.#forcedAgentEngine !== null }
   }
 
-  /** Stored for the next project open; a running turn keeps the engine it started with. */
-  async setAgentEngine(engine: AgentEngine): Promise<AgentEngineSetting> {
-    await this.#agentEngineSetting.set(engine)
-    return this.getAgentEngine()
+  /**
+   * The conversation looks at the canvas and works step by step once a text
+   * model that calls tools is set up; until then the local planner lays out
+   * drafts without any model. Decided when a project opens.
+   */
+  async #textModelReady(): Promise<boolean> {
+    const llm = (await this.#providerConfig.read()).providers[0]
+    return llm.baseUrl !== '' && llm.defaultModel !== '' && llm.capabilities.toolCalling && await this.#secrets.has('openai-compatible-llm')
   }
 
   validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {

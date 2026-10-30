@@ -1,6 +1,5 @@
 import { z } from 'zod'
 import type { AgentItem } from '../../../shared/agent-harness'
-import type { TurnModelUsage } from '../../../shared/model-usage'
 import {
   llmAssistantPartSchema,
   llmNativeReplaySchema,
@@ -10,8 +9,7 @@ import {
   type LlmImage,
   type LlmNativeReplay,
   type LlmToolResult,
-  type LlmTranscriptMessage,
-  type LlmUsage
+  type LlmTranscriptMessage
 } from '../llm/transcript'
 
 export const MAX_STORED_BRIEF_CHARS = 100_000
@@ -39,8 +37,8 @@ export const modelTraceSchema = z.object({
     parts: z.array(llmAssistantPartSchema).max(256),
     native: llmNativeReplaySchema.nullable()
   })).max(16),
-  /** Tool results that became known during this pass. Images are not stored. */
-  results: z.array(llmToolResultSchema).max(64),
+  /** Tool results that became known during this pass. Images are not stored. A pass hands back well before this. */
+  results: z.array(llmToolResultSchema).max(256),
   /** The call this pass handed to the loop (a tool run or a question), if any. */
   emitted: z.object({ callId: z.string().min(1).max(256), name: z.string().min(1).max(128) }).nullable(),
   usage: z.array(usageSchema).max(16),
@@ -122,32 +120,7 @@ export function transcriptFrom(input: {
   return messages
 }
 
-export function sumUsage(entries: readonly LlmUsage[]): LlmUsage {
-  return entries.reduce<LlmUsage>((total, entry) => ({
-    inputTokens: total.inputTokens + entry.inputTokens,
-    cachedInputTokens: total.cachedInputTokens + entry.cachedInputTokens,
-    cacheWriteInputTokens: total.cacheWriteInputTokens + entry.cacheWriteInputTokens,
-    outputTokens: total.outputTokens + entry.outputTokens,
-    reasoningTokens: total.reasoningTokens === null && entry.reasoningTokens === null ? null : (total.reasoningTokens ?? 0) + (entry.reasoningTokens ?? 0)
-  }), { inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningTokens: null })
-}
-
-/** Token usage and estimated cost of every model call of a multi-step turn, or null when it made none. */
-export function turnModelUsage(items: readonly AgentItem[]): TurnModelUsage | null {
-  const passes = items.flatMap((item) => {
-    const trace = traceOf(item)
-    // Traces written before calls were counted still list their usage.
-    const calls = trace === null ? 0 : Math.max(trace.modelCalls, trace.usage.length)
-    return trace === null || calls === 0 ? [] : [{ trace, calls }]
-  })
-  if (passes.length === 0) return null
-  const usage = sumUsage(passes.flatMap(({ trace }) => trace.usage))
-  const costs = passes.map(({ trace }) => trace.costCny)
-  return {
-    calls: passes.reduce((total, pass) => total + pass.calls, 0),
-    inputTokens: usage.inputTokens,
-    cachedInputTokens: usage.cachedInputTokens,
-    outputTokens: usage.outputTokens,
-    estimatedCostCny: costs.every((cost): cost is number => cost !== null) ? Number(costs.reduce((total, cost) => total + cost, 0).toFixed(6)) : null
-  }
+/** The estimated cost of a turn's model calls that could be priced; calls without a price count as nothing. */
+export function turnModelCostCny(items: readonly AgentItem[]): number {
+  return items.reduce((total, item) => total + (traceOf(item)?.costCny ?? 0), 0)
 }

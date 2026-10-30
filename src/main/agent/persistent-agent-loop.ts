@@ -10,7 +10,6 @@ import {
   STEPWISE_COLLABORATION_BUDGET,
   STEPWISE_REVIEW_BUDGET,
   normalizeAgentTaskInput,
-  scaledAgentBudget,
   isTerminalAgentTurnStatus,
   plannerStepSchema,
   type AgentCompletionAssessment,
@@ -41,12 +40,13 @@ import type { AgentHarnessRepository } from './agent-harness-repository'
 import {
   ContextBuilder,
   ContextCompactor,
-  RECENT_CONVERSATION_ITEM_LIMIT,
+  recentConversationStart,
   contextSourceHash,
   isConversationItem,
   type DirectiveConflict
 } from './context-builder'
 import type { PlannerAdapter } from './planner-adapter'
+import { turnModelCostCny } from './multi-step/trace'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
 import { createAgentFailureEnvelope } from './agent-failure'
 import { createModelOutboundGate } from './model-outbound-gate'
@@ -143,9 +143,11 @@ export interface PersistentAgentLoopOptions {
   readonly activateGenerationJob?: (jobId: string) => Promise<void>
   readonly projection?: AgentLoopProjection
   readonly generationPolicy?: GenerationPolicy
+  /** The estimated spend in CNY at which a turn pauses; null for none. */
+  readonly turnCostCap?: () => number | null
+  /** What one image from an image service costs, for that estimate; null when no price is set. */
+  readonly imagePriceCny?: (providerId: string) => number | null
   readonly budget?: AgentRunBudget
-  /** The owner's multiple of the standard per-turn allowance, read as each turn starts. */
-  readonly budgetScale?: () => number
   readonly permissionProfileId?: string
   readonly providerIds?: readonly string[]
   readonly now?: () => string
@@ -638,9 +640,10 @@ export class PersistentAgentLoop {
   readonly #activateGenerationJob: ((jobId: string) => Promise<void>) | null
   readonly #projection: AgentLoopProjection
   readonly #generationPolicy: GenerationPolicy
+  readonly #turnCostCap: () => number | null
+  readonly #imagePriceCny: (providerId: string) => number | null
   readonly #budget: AgentRunBudget
   readonly #budgetOverride: AgentRunBudget | null
-  readonly #budgetScale: () => number
   readonly #permissionProfileId: string
   readonly #providerIds: readonly string[]
   readonly #now: () => string
@@ -675,8 +678,9 @@ export class PersistentAgentLoop {
     this.#activateGenerationJob = options.activateGenerationJob ?? null
     this.#projection = options.projection ?? {}
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
+    this.#turnCostCap = options.turnCostCap ?? (() => null)
+    this.#imagePriceCny = options.imagePriceCny ?? (() => null)
     this.#budgetOverride = options.budget ?? null
-    this.#budgetScale = options.budgetScale ?? (() => 1)
     this.#budget = options.budget ?? (options.planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
     this.#permissionProfileId = options.permissionProfileId ?? ownerFullPermissionProfile().id
     this.#providerIds = [...(options.providerIds ?? ['image-provider'])]
@@ -1278,7 +1282,8 @@ export class PersistentAgentLoop {
             stepIndex: stepCount,
             activePlan,
             nextToolIndex: results.length,
-            budget: turnBudget
+            budget: turnBudget,
+            costLeftCny: this.#turnCostLeftCny(turn.id, items)
           }, controller.signal, {
             attempt: attemptNumber,
             requestCorrelationId,
@@ -1516,6 +1521,12 @@ export class PersistentAgentLoop {
           await this.#publish(turn.threadId)
           return
         }
+      }
+      if (step.kind === 'progress') {
+        // The pass is stored with its plan item; the guards and cost cap are checked again before the next one.
+        await this.#repository.transitionTurn(turnId, 'running')
+        await this.#publish(turn.threadId)
+        continue
       }
       if (step.kind === 'message') {
         await this.#repository.appendItem(turnId, {
@@ -1910,6 +1921,10 @@ export class PersistentAgentLoop {
     if (turn.modelTurnsUsed >= budget.maxModelTurns) {
       return { code: 'BUDGET_MODEL_TURNS', message: 'Agent turn reached its model-turn budget before the next planning step.' }
     }
+    const costLeft = this.#turnCostLeftCny(turn.id, items)
+    if (costLeft !== null && costLeft <= 0) {
+      return { code: 'BUDGET_TURN_COST', message: `本轮估算费用到了每轮上限 ¥${this.#turnCostCap()!.toFixed(2)}。` }
+    }
     if (nextTool === null) return null
     if (turn.toolCallsUsed >= budget.maxToolCalls) {
       return { code: 'BUDGET_TOOL_CALLS', message: 'Agent turn reached its tool-call budget before the next tool.' }
@@ -1930,6 +1945,18 @@ export class PersistentAgentLoop {
       }
     }
     return null
+  }
+
+  /** What the turn may still spend before its cost cap: priced model calls and reserved images count; null without a cap. */
+  #turnCostLeftCny(turnId: string, items: readonly AgentItem[]): number | null {
+    const cap = this.#turnCostCap()
+    return cap === null ? null : cap - turnModelCostCny(items) - this.#turnImageCostCny(turnId)
+  }
+
+  /** The turn's reserved images at their services' prices; images from a service without a price count as nothing. */
+  #turnImageCostCny(turnId: string): number {
+    return (this.#generationWorkflowRepository?.getTurnImagesByProvider(turnId) ?? [])
+      .reduce((total, entry) => total + entry.images * (this.#imagePriceCny(entry.providerId) ?? 0), 0)
   }
 
   async #complete(
@@ -2071,11 +2098,11 @@ export class PersistentAgentLoop {
 
   async #createGoal(threadId: string, request: AgentRequest, mode: AgentMode): Promise<AgentGoalContract> {
     const stepwise = this.#planner.stepwise === true
-    const budget = this.#budgetOverride ?? scaledAgentBudget(mode === 'auto'
+    const budget = this.#budgetOverride ?? (mode === 'auto'
       ? stepwise ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET
       : mode === 'review'
         ? stepwise ? STEPWISE_REVIEW_BUDGET : DEFAULT_REVIEW_BUDGET
-        : stepwise ? STEPWISE_COLLABORATION_BUDGET : DEFAULT_COLLABORATION_BUDGET, this.#budgetScale())
+        : stepwise ? STEPWISE_COLLABORATION_BUDGET : DEFAULT_COLLABORATION_BUDGET)
     return this.#repository.createGoal(threadId, {
       objective: request.text,
       completionDefinition: ['所需设计与生成操作有可核对回执', '外发、费用与项目写入符合当前 Owner 权限和预算'],
@@ -2125,10 +2152,11 @@ export class PersistentAgentLoop {
       ? allExisting
       : allExisting.filter((compaction) => compaction.summary.startsWith(taskMarker))
     const completedMessages = items.filter(isConversationItem)
-    if (completedMessages.length <= RECENT_CONVERSATION_ITEM_LIMIT) return existing.slice(0, 1)
+    const recentStart = recentConversationStart(completedMessages.length)
+    if (recentStart === 0) return existing.slice(0, 1)
 
     const compactableMessageIds = new Set(
-      completedMessages.slice(0, -RECENT_CONVERSATION_ITEM_LIMIT).map((item) => item.id)
+      completedMessages.slice(0, recentStart).map((item) => item.id)
     )
     const compactableTurnIds = new Set(
       completedMessages.filter((item) => compactableMessageIds.has(item.id)).map((item) => item.turnId)

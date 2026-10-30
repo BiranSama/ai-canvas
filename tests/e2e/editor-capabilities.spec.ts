@@ -97,7 +97,8 @@ test('AC-R1-03/04/05 edits geometry, complete text properties and layer actions 
       return { prompt: result.sentPrompt, title }
     })
     expect(compiled.prompt).toContain('AFTER RAIN')
-    expect(compiled.prompt).toContain('当前占位字体和字号不是最终形态')
+    // The type on the canvas is a stand-in; the image model is told to design the lettering itself.
+    expect(compiled.prompt).toContain('参考图里的字体和字号只是占位')
     expect(compiled.prompt).not.toContain('Georgia')
     expect(compiled.prompt).not.toContain('96px')
     expect(compiled.title).toMatchObject({ fontFamily: 'Georgia', fontSize: 96, fontWeight: 700, fill: '#203452', renderStrategy: 'ai-material' })

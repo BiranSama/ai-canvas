@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { actualCostCny, parseGenerationCost, unknownGenerationCost, type GenerationCost } from '../../shared/generation-cost'
 import type { AgentRunBudget } from '../../shared/agent-harness'
-import { assertTurnGenerationReservation, captureTurnGenerationBudget, readTurnGenerationBudget, readTurnGenerationUsage, TurnGenerationBudgetError, type GenerationTurnScope } from './generation-turn-budget'
+import { assertTurnGenerationReservation, captureTurnGenerationBudget, readTurnGenerationBudget, readTurnGenerationUsage, readTurnImagesByProvider, TurnGenerationBudgetError, type GenerationTurnScope } from './generation-turn-budget'
 import { isTerminalAgentTurnStatus, type AgentTurnStatus } from '../../shared/agent-harness'
 import { isTerminalGenerationJobStatus, type GenerationJob } from '../../shared/generation'
 import { promptPackageSchema } from '../../shared/reference'
@@ -160,6 +160,8 @@ export class GenerationWorkflowRepository {
   getTurnBudget(turnId: string): AgentRunBudget | null { return readTurnGenerationBudget(this.#connection, turnId) }
 
   getTurnUsage(turnId: string) { return readTurnGenerationUsage(this.#connection, turnId) }
+
+  getTurnImagesByProvider(turnId: string) { return readTurnImagesByProvider(this.#connection, turnId) }
 
   captureTurnBudget(scope: GenerationTurnScope, proposed: AgentRunBudget, grantItemId: string | null): AgentRunBudget {
     return captureTurnGenerationBudget(this.#connection, scope, proposed, grantItemId, this.#now())

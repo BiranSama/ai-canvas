@@ -60,7 +60,7 @@ it('adds an image service, makes it the default and removes it after a second cl
   expect(screen.queryByText('Grok Imagine')).not.toBeInTheDocument()
 })
 
-it('saves how many steps the Agent may take each turn, apart from the image-task request limit', async () => {
+it('saves the per-turn cost at which the Agent pauses, apart from the image-task limits', async () => {
   const desktop = {
     getProviderSettings: vi.fn(async () => snapshot('image-provider', false)),
     getRuntimeInfo: vi.fn(async () => { throw new Error('not needed') }),
@@ -71,11 +71,11 @@ it('saves how many steps the Agent may take each turn, apart from the image-task
   render(<ProviderSettingsSheet onClose={() => undefined} />)
   await act(async () => undefined)
 
-  const steps = screen.getByRole('combobox', { name: 'Agent 每轮步数' })
-  expect(steps).toHaveValue('1')
-  expect(screen.getAllByText(/与图片任务的请求数无关/).length).toBeGreaterThan(0)
-  fireEvent.change(steps, { target: { value: '4' } })
+  const cap = screen.getByRole('spinbutton', { name: 'Agent 每轮费用上限' })
+  expect(cap).toHaveValue(3)
+  expect(screen.queryByRole('combobox', { name: 'Agent 每轮步数' })).not.toBeInTheDocument()
+  fireEvent.change(cap, { target: { value: '8' } })
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存执行边界' })) })
-  expect(desktop.setProviderExecutionPolicy).toHaveBeenCalledWith(expect.objectContaining({ agentStepScale: 4, maxRequestsPerJob: DEFAULT_PROVIDER_CONFIG.executionPolicy.maxRequestsPerJob }))
-  expect(screen.getAllByText(/标准的 4 倍/).length).toBeGreaterThan(0)
+  expect(desktop.setProviderExecutionPolicy).toHaveBeenCalledWith(expect.objectContaining({ maxCostCnyPerTurn: 8, maxRequestsPerJob: DEFAULT_PROVIDER_CONFIG.executionPolicy.maxRequestsPerJob }))
+  expect(screen.getAllByText(/估算花到 ¥8\.00 就暂停/).length).toBeGreaterThan(0)
 })

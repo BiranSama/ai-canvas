@@ -12,6 +12,7 @@ import {
   MAX_IMAGE_PROVIDERS,
   newImageProviderConfig,
   PRIMARY_IMAGE_PROVIDER_ID,
+  PROVIDER_CONFIG_VERSION,
   providerConfigFileSchema,
   providerPublicConfigSchema,
   providerExecutionPolicySchema,
@@ -63,7 +64,7 @@ export class ProviderSettingsService {
   /** Writes the providers in order, keeping or replacing the default image service. */
   async #writeProviders(current: ProviderConfigFile, providers: readonly ProviderPublicConfig[], defaultImageProviderId = current.defaultImageProviderId): Promise<void> {
     await this.#configStore.write(providerConfigFileSchema.parse({
-      version: 6,
+      version: PROVIDER_CONFIG_VERSION,
       providers,
       defaultImageProviderId,
       executionPolicy: current.executionPolicy
@@ -84,7 +85,7 @@ export class ProviderSettingsService {
     const executionPolicy: ProviderExecutionPolicy = providerExecutionPolicySchema.parse(inputValue)
     return this.#serialize(async () => {
     const current = await this.#configStore.read()
-    await this.#configStore.write({ ...current, version: 6, executionPolicy })
+    await this.#configStore.write({ ...current, version: PROVIDER_CONFIG_VERSION, executionPolicy })
     return this.#snapshot()
     })
   }

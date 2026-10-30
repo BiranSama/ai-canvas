@@ -4,11 +4,9 @@ import { z } from 'zod'
 export const agentEngineSchema = z.enum(['plan-once', 'multi-step'])
 
 export const agentEngineSettingSchema = z.object({
-  /** What the owner chose; applies from the next project open. */
-  selected: agentEngineSchema,
-  /** What the open project runs on now. */
+  /** What the open project runs on: multi-step once a text model is set up, plan-once with the local planner before that. */
   active: agentEngineSchema,
-  /** Set when AI_CANVAS_AGENT_ENGINE overrides the stored choice. */
+  /** Set when AI_CANVAS_AGENT_ENGINE forces the engine. */
   forcedByEnvironment: z.boolean()
 }).strict()
 

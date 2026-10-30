@@ -77,7 +77,7 @@ describe('security redaction and provider settings boundary', () => {
         transparentOutput: false
       }
     })
-    expect(configs.value.version).toBe(6)
+    expect(configs.value.version).toBe(7)
     expect(snapshot.realCallsAuthorized).toBe(true)
     expect(snapshot.providers[1]).toMatchObject({
       label: 'Studio Images',

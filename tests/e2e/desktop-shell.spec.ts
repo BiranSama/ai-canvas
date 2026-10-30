@@ -332,7 +332,6 @@ test('launches the production canvas with native modules isolated in Main', asyn
         'getProviderSettings',
         'validateProviderConnection',
         'getAgentEngine',
-        'setAgentEngine',
         'setProviderConfig',
         'setProviderExecutionPolicy',
         'setProviderSecret',

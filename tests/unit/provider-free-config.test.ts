@@ -24,9 +24,9 @@ function asLegacyV3(baseUrl: string): Record<string, unknown> {
   return value
 }
 
-describe('Provider v6 configuration contracts', () => {
+describe('Provider v7 configuration contracts', () => {
   it('starts with the LLM slot and the primary image slot, both with explicit protocols', () => {
-    expect(DEFAULT_PROVIDER_CONFIG.version).toBe(6)
+    expect(DEFAULT_PROVIDER_CONFIG.version).toBe(7)
     expect(DEFAULT_PROVIDER_CONFIG.providers).toHaveLength(2)
     expect(DEFAULT_PROVIDER_CONFIG.providers[0]).toMatchObject({
       kind: 'llm',
@@ -34,10 +34,11 @@ describe('Provider v6 configuration contracts', () => {
       reasoningEffort: 'auto',
       imageDetail: 'auto',
       maxOutputTokens: 4_096,
-      transport: { mode: 'auto', connectTimeoutMs: 20_000, firstEventTimeoutMs: 30_000, idleTimeoutMs: 30_000 },
+      timeoutMs: 300_000,
+      transport: { mode: 'auto', connectTimeoutMs: 20_000, firstEventTimeoutMs: 120_000, idleTimeoutMs: 120_000 },
       capabilities: { vision: true }
     })
-    expect(DEFAULT_PROVIDER_CONFIG.providers[1]).toMatchObject({ kind: 'image', protocol: 'ark-seedream' })
+    expect(DEFAULT_PROVIDER_CONFIG.providers[1]).toMatchObject({ kind: 'image', protocol: 'ark-seedream', timeoutMs: 300_000 })
   })
 
   it('saves up to eight image services under distinct ids with a default among them', () => {
@@ -46,7 +47,7 @@ describe('Provider v6 configuration contracts', () => {
     const file = (images: readonly object[], defaultImageProviderId = 'image-provider') => ({
       ...DEFAULT_PROVIDER_CONFIG, providers: [DEFAULT_PROVIDER_CONFIG.providers[0], ...images], defaultImageProviderId
     })
-    expect(providerConfigFileSchema.parse(file([primary, extra], 'image-provider-b7c1'))).toMatchObject({ version: 6, defaultImageProviderId: 'image-provider-b7c1' })
+    expect(providerConfigFileSchema.parse(file([primary, extra], 'image-provider-b7c1'))).toMatchObject({ version: 7, defaultImageProviderId: 'image-provider-b7c1' })
     // The first image service keeps the primary id, ids are unique, and the default must be saved.
     expect(providerConfigFileSchema.safeParse(file([extra, primary])).success).toBe(false)
     expect(providerConfigFileSchema.safeParse(file([primary, extra, extra])).success).toBe(false)
@@ -71,7 +72,7 @@ describe('Provider v6 configuration contracts', () => {
     const ark = providerConfigFileSchema.parse(asLegacyV3('https://ark.cn-beijing.volces.com/api/v3'))
     const task = providerConfigFileSchema.parse(asLegacyV3('https://api.krill-ai.net/v1'))
 
-    expect(ark.version).toBe(6)
+    expect(ark.version).toBe(7)
     expect(ark.providers[1]).toMatchObject({
       protocol: 'ark-seedream',
       baseUrl: 'https://ark.cn-beijing.volces.com/api/v3'
@@ -84,7 +85,7 @@ describe('Provider v6 configuration contracts', () => {
 
   it('does not guess an implementation for an unknown legacy image endpoint', () => {
     const migrated = providerConfigFileSchema.parse(asLegacyV3('https://images.example.test/v1'))
-    expect(migrated.version).toBe(6)
+    expect(migrated.version).toBe(7)
     expect(migrated.providers[1]).toMatchObject({
       protocol: 'unconfigured',
       baseUrl: 'https://images.example.test/v1'
@@ -92,7 +93,7 @@ describe('Provider v6 configuration contracts', () => {
     expect(inferImageProtocol('https://images.example.test/v1')).toBe('unconfigured')
   })
 
-  it('reads a legacy file into v6 memory without rewriting the saved file', async () => {
+  it('reads a legacy file into v7 memory without rewriting the saved file', async () => {
     const root = await mkdtemp(join(tmpdir(), 'ai-canvas-provider-v4-'))
     try {
       const filePath = join(root, 'provider-settings.json')
@@ -100,12 +101,13 @@ describe('Provider v6 configuration contracts', () => {
       await writeFile(filePath, legacy, 'utf8')
       const migrated = await new FileProviderConfigStore(filePath).read()
 
-      expect(migrated).toMatchObject({ version: 6, defaultImageProviderId: 'image-provider', providers: [{ kind: 'llm' }, { kind: 'image', protocol: 'unconfigured' }] })
+      expect(migrated).toMatchObject({ version: 7, defaultImageProviderId: 'image-provider', providers: [{ kind: 'llm' }, { kind: 'image', protocol: 'unconfigured' }] })
       expect(migrated.providers[0]).toMatchObject({
         reasoningEffort: 'auto',
         imageDetail: 'auto',
         maxOutputTokens: 4_096,
-        transport: { mode: 'auto', connectTimeoutMs: 20_000, firstEventTimeoutMs: 30_000, idleTimeoutMs: 30_000 },
+        timeoutMs: 300_000,
+        transport: { mode: 'auto', connectTimeoutMs: 20_000, firstEventTimeoutMs: 120_000, idleTimeoutMs: 120_000 },
         capabilities: { vision: false }
       })
       await expect(readFile(filePath, 'utf8')).resolves.toBe(legacy)
@@ -114,7 +116,7 @@ describe('Provider v6 configuration contracts', () => {
     }
   })
 
-  it('maps non-streaming v4 capability to buffered and rejects local deadlines above total', () => {
+  it('maps non-streaming v4 capability to buffered, raises its waits to the v7 floors and rejects local deadlines above total', () => {
     const legacy = structuredClone(DEFAULT_PROVIDER_CONFIG) as unknown as Record<string, unknown>
     legacy.version = 4
     const providers = legacy.providers as Array<Record<string, unknown>>
@@ -122,12 +124,29 @@ describe('Provider v6 configuration contracts', () => {
     ;(providers[0]!.capabilities as Record<string, unknown>).streaming = false
     providers[0]!.timeoutMs = 10_000
     const migrated = providerConfigFileSchema.parse(legacy)
+    expect(migrated.providers[0].timeoutMs).toBe(300_000)
     expect(migrated.providers[0].transport).toEqual({
-      mode: 'buffered', connectTimeoutMs: 10_000, firstEventTimeoutMs: 10_000, idleTimeoutMs: 10_000
+      mode: 'buffered', connectTimeoutMs: 10_000, firstEventTimeoutMs: 120_000, idleTimeoutMs: 120_000
     })
     const invalid = structuredClone(DEFAULT_PROVIDER_CONFIG)
-    invalid.providers[0].transport.connectTimeoutMs = invalid.providers[0].timeoutMs + 1_000
+    invalid.providers[0].transport.firstEventTimeoutMs = invalid.providers[0].timeoutMs + 1_000
     expect(() => providerConfigFileSchema.parse(invalid)).toThrow(/局部超时/)
+  })
+
+  it('raises v6 waits that gave up too early to the new defaults, and keeps longer ones', () => {
+    const v6 = structuredClone(DEFAULT_PROVIDER_CONFIG) as unknown as { version: number; providers: Array<Record<string, unknown>> }
+    v6.version = 6
+    Object.assign(v6.providers[0]!, { timeoutMs: 30_000, transport: { mode: 'auto', connectTimeoutMs: 20_000, firstEventTimeoutMs: 30_000, idleTimeoutMs: 30_000 } })
+    v6.providers[1]!.timeoutMs = 120_000
+    v6.providers.push({ ...v6.providers[1]!, id: 'image-provider-slow1', label: '慢服务', timeoutMs: 600_000 })
+    const migrated = providerConfigFileSchema.parse(v6)
+    expect(migrated.version).toBe(7)
+    expect(migrated.providers[0]).toMatchObject({ timeoutMs: 300_000, transport: { connectTimeoutMs: 20_000, firstEventTimeoutMs: 120_000, idleTimeoutMs: 120_000 } })
+    expect(migrated.providers.slice(1).map((provider) => provider.timeoutMs)).toEqual([300_000, 600_000])
+    // A v7 file is read as saved: the owner may shorten a wait again.
+    const shortened = structuredClone(migrated)
+    shortened.providers[0].transport.firstEventTimeoutMs = 60_000
+    expect(providerConfigFileSchema.parse(shortened).providers[0].transport.firstEventTimeoutMs).toBe(60_000)
   })
 
   it('accepts arbitrary labels and models while preserving the two stable credential slot ids', () => {

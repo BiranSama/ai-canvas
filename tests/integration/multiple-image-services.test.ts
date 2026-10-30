@@ -82,7 +82,7 @@ it('keeps several image services side by side and runs each job on the service i
   ])
 
   // The file is saved as v6 and read back the same after a restart.
-  expect(JSON.parse(await readFile(join(root, 'security', 'provider-settings.json'), 'utf8'))).toMatchObject({ version: 6, defaultImageProviderId: second.id })
+  expect(JSON.parse(await readFile(join(root, 'security', 'provider-settings.json'), 'utf8'))).toMatchObject({ version: 7, defaultImageProviderId: second.id })
   await runtime.close()
   runtimes.splice(runtimes.indexOf(runtime), 1)
   const reopened = await GenerationRuntime.create(root)

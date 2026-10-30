@@ -54,6 +54,14 @@ export function readTurnGenerationUsage(connection: DatabaseConnection, turnId: 
     WHERE i.turn_id = ?`).get(turnId) as TurnGenerationUsage
 }
 
+/** The images a turn reserved, per image service, for an estimate at each service's price. */
+export function readTurnImagesByProvider(connection: DatabaseConnection, turnId: string): readonly { readonly providerId: string; readonly images: number }[] {
+  return connection.sqlite.prepare(`SELECT json_extract(i.compiled_request_json, '$.request.providerId') AS providerId,
+    COALESCE(SUM(json_extract(i.compiled_request_json, '$.request.count')), 0) AS images
+    FROM generation_workflow_intents i JOIN agent_budget_reservations r ON r.intent_id = i.id
+    WHERE i.turn_id = ? GROUP BY providerId`).all(turnId) as { providerId: string; images: number }[]
+}
+
 export function captureTurnGenerationBudget(connection: DatabaseConnection, scope: GenerationTurnScope,
   proposed: AgentRunBudget, grantItemId: string | null, now: string): AgentRunBudget {
   return connection.sqlite.transaction(() => {

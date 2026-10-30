@@ -175,6 +175,11 @@ export const plannerStepSchema = z.discriminatedUnion('kind', [
     kind: z.literal('complete'),
     assessment: agentCompletionAssessmentSchema,
     trace: plannerTraceSchema
+  }),
+  /** A pass that stopped to keep what it has done: its trace is stored, the guards are checked, and planning goes on. */
+  z.object({
+    kind: z.literal('progress'),
+    trace: plannerTraceSchema
   })
 ])
 
@@ -332,69 +337,40 @@ export const agentHarnessSnapshotSchema = z.object({
   lastSequence: z.number().int().nonnegative()
 })
 
-export const DEFAULT_REVIEW_BUDGET = agentRunBudgetSchema.parse({
-  maxModelTurns: 8,
-  maxToolCalls: 12,
-  maxSceneWriteBatches: 4,
-  maxRecoveryAttempts: 3,
-  maxGenerationJobs: 0,
-  maxGeneratedImages: 0,
-  maxWallTimeMs: 5 * 60_000,
-  maxCostCny: 0
-})
+/*
+ * A turn's limits are guards against a run going astray, not an allowance
+ * the work is expected to fit: designing one picture can take dozens of
+ * steps. Reaching one pauses the turn with its work kept, and the person can
+ * carry on in a follow-up turn. Image jobs and images stay bounded by the
+ * person's approval of each generation.
+ */
+const GUARD = { maxModelTurns: 16, maxToolCalls: 40, maxSceneWriteBatches: 20, maxRecoveryAttempts: 3, maxWallTimeMs: 30 * 60_000, maxCostCny: 0 }
 
-export const DEFAULT_COLLABORATION_BUDGET = agentRunBudgetSchema.parse({
-  maxModelTurns: 8,
-  maxToolCalls: 12,
-  maxSceneWriteBatches: 4,
-  maxRecoveryAttempts: 3,
-  maxGenerationJobs: 0,
-  maxGeneratedImages: 0,
-  maxWallTimeMs: 5 * 60_000,
-  maxCostCny: 0
-})
+export const DEFAULT_REVIEW_BUDGET = agentRunBudgetSchema.parse({ ...GUARD, maxGenerationJobs: 0, maxGeneratedImages: 0 })
 
-export const DEFAULT_AUTO_BUDGET = agentRunBudgetSchema.parse({
-  maxModelTurns: 12,
-  maxToolCalls: 20,
-  maxSceneWriteBatches: 6,
-  maxRecoveryAttempts: 3,
-  maxGenerationJobs: 2,
-  maxGeneratedImages: 4,
-  maxWallTimeMs: 10 * 60_000,
-  maxCostCny: 0
-})
+export const DEFAULT_COLLABORATION_BUDGET = agentRunBudgetSchema.parse({ ...GUARD, maxGenerationJobs: 0, maxGeneratedImages: 0 })
+
+export const DEFAULT_AUTO_BUDGET = agentRunBudgetSchema.parse({ ...GUARD, maxGenerationJobs: 2, maxGeneratedImages: 4 })
 
 /**
  * The multi-step engine spends one model call and usually one tool call per
- * step, so its turns need more of both than a single plan does.
+ * step, so its guards sit much higher than a single plan's.
  */
-export const STEPWISE_REVIEW_BUDGET = agentRunBudgetSchema.parse({
-  ...DEFAULT_REVIEW_BUDGET, maxModelTurns: 20, maxToolCalls: 30, maxSceneWriteBatches: 15
-})
+const STEPWISE_GUARD = { maxModelTurns: 80, maxToolCalls: 120, maxSceneWriteBatches: 80, maxWallTimeMs: 60 * 60_000 }
 
-export const STEPWISE_COLLABORATION_BUDGET = agentRunBudgetSchema.parse({
-  ...DEFAULT_COLLABORATION_BUDGET, maxModelTurns: 20, maxToolCalls: 30, maxSceneWriteBatches: 15
-})
+export const STEPWISE_REVIEW_BUDGET = agentRunBudgetSchema.parse({ ...DEFAULT_REVIEW_BUDGET, ...STEPWISE_GUARD })
 
-export const STEPWISE_AUTO_BUDGET = agentRunBudgetSchema.parse({
-  ...DEFAULT_AUTO_BUDGET, maxModelTurns: 30, maxToolCalls: 40, maxSceneWriteBatches: 20
-})
+export const STEPWISE_COLLABORATION_BUDGET = agentRunBudgetSchema.parse({ ...DEFAULT_COLLABORATION_BUDGET, ...STEPWISE_GUARD })
 
-/**
- * A per-turn allowance raised by the owner's setting: that many times the
- * model turns, tool calls, canvas writes and time. Image jobs, images and
- * spending keep their own limits.
- */
-export function scaledAgentBudget(budget: AgentRunBudget, scale: number): AgentRunBudget {
-  if (scale === 1) return budget
-  return agentRunBudgetSchema.parse({
-    ...budget,
-    maxModelTurns: budget.maxModelTurns * scale,
-    maxToolCalls: budget.maxToolCalls * scale,
-    maxSceneWriteBatches: budget.maxSceneWriteBatches * scale,
-    maxWallTimeMs: budget.maxWallTimeMs * scale
-  })
+export const STEPWISE_AUTO_BUDGET = agentRunBudgetSchema.parse({ ...DEFAULT_AUTO_BUDGET, ...STEPWISE_GUARD })
+
+/** The guards a turn can stop at with its work kept and a follow-up turn able to carry on. */
+export const TURN_GUARD_CODES = ['BUDGET_MODEL_TURNS', 'BUDGET_TOOL_CALLS', 'BUDGET_SCENE_WRITES', 'BUDGET_WALL_TIME', 'BUDGET_TURN_COST'] as const
+
+export type TurnGuardCode = typeof TURN_GUARD_CODES[number]
+
+export function isTurnGuardCode(code: string | null | undefined): code is TurnGuardCode {
+  return (TURN_GUARD_CODES as readonly string[]).includes(code ?? '')
 }
 
 const TERMINAL_TURN_STATUSES = new Set<AgentTurnStatus>([
