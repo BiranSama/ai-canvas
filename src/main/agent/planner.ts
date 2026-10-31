@@ -202,6 +202,16 @@ function titlePositionFor(value: ParsedComposition['titlePosition']): CreativeBr
   return value
 }
 
+// 「先不要生成图片」 says when to spend, not what the picture must avoid; the generation policy keeps to it.
+// Only a bare generation verb is dropped: 「避免渲染成卡通风格」 is about the picture and stays.
+const SPENDING_ONLY = /^(?:先|再|自动)?(?:生成|生图|出图|画图|渲染)(?:任何)?(?:图片|图像|成图|图)?(?:了|吧)?$/u
+
+export function briefProhibitions(text: string): string[] {
+  return [...text.matchAll(/(?:不要|禁止|避免)([^，。,.；;]{1,80})/g)]
+    .map((match) => match[1]!.trim())
+    .filter((item) => !SPENDING_ONLY.test(item))
+}
+
 export function buildCreativePlan(request: AgentRequest, idFactory: () => string, createdAt = new Date().toISOString()): PlannedComposition {
   const composition = parseComposition(request.text)
   const output = outputSize(composition.aspectWidth, composition.aspectHeight)
@@ -253,9 +263,7 @@ export function buildCreativePlan(request: AgentRequest, idFactory: () => string
   const hasExplicitAspect = statedRatio(request.text) !== null
   const precision = hasExplicitAspect && theme !== 'general' ? 'precise' : 'ambiguous'
   const keep = [...request.text.matchAll(/保留([^，。,.；;]{1,80})/g)].map((match) => match[1]!.trim())
-  // 「先不要生成图片」 says when to spend, not what the picture must avoid; the generation policy keeps to it.
-  const prohibitions = [...request.text.matchAll(/(?:不要|禁止|避免)([^，。,.；;]{1,80})/g)].map((match) => match[1]!.trim())
-    .filter((item) => !/^(?:先|再|自动)?(?:生成|生图|出图|画图|渲染)/u.test(item))
+  const prohibitions = briefProhibitions(request.text)
   const ambiguities = [
     ...(!hasExplicitAspect ? [{ id: idFactory(), topic: '画布比例', question: '未指定比例，推荐方向将使用内容友好的默认比例。', impact: 'high' as const }] : []),
     ...(theme === 'general' ? [{ id: idFactory(), topic: '主题', question: '主体类别仍然模糊，将保留中性、可逆的草图表达。', impact: 'high' as const }] : []),
@@ -703,7 +711,7 @@ function buildRevisedCreativeContext(request: AgentRequest, idFactory: () => str
     .filter(Boolean)
     .slice(0, 20)
   const addedKeep = [...revision.matchAll(/保留([^，。,.；;]{1,80})/g)].map((match) => match[1]!.trim())
-  const addedProhibitions = [...revision.matchAll(/(?:不要|禁止|避免)([^，。,.；;]{1,80})/g)].map((match) => match[1]!.trim())
+  const addedProhibitions = briefProhibitions(revision)
   const currentKeep = prior.version === 1 ? prior.constraints : prior.keep
   const currentProhibitions = prior.version === 1 ? [] : prior.prohibitions
   const revisionPriority: 'must' | 'prefer' = /必须|不要|禁止|保留|准确/u.test(revision) ? 'must' : 'prefer'
@@ -881,6 +889,8 @@ export class DeterministicMockPlanner implements AgentPlanner {
         tools: []
       })
     }
+    // What the reply says about images follows the plan, which may generate though the request did not say so.
+    const plansGeneration = tools.some((tool) => tool.kind === 'generation' || tool.kind === 'canvas_generation')
     return agentPlanSchema.parse({
       summary: wantsDirective
         ? '保存项目规则'
@@ -892,7 +902,7 @@ export class DeterministicMockPlanner implements AgentPlanner {
         : wantsResultPlacement
           ? '最近的生成结果已作为可编辑图片层放入画布。'
           : isCompositionLayout
-        ? `排好了${composition.sceneKind}的版式：${composition.aspectWidth}:${composition.aspectHeight} 画布，${composition.subject}${composition.title === null ? '' : `，标题“${composition.title}”`}都已经就位，每一层都可以直接改。${explicitlyGenerate ? '' : '还没有生成图片。'}\n下一步：${explicitlyGenerate ? '标题再大一点｜换一种配色' : '生成图片｜标题再大一点｜换一种配色'}`
+        ? `排好了${composition.sceneKind}的版式：${composition.aspectWidth}:${composition.aspectHeight} 画布，${composition.subject}${composition.title === null ? '' : `，标题“${composition.title}”`}都已经就位，每一层都可以直接改。${plansGeneration ? '会按这个版式生成图片。' : '还没有生成图片。'}\n下一步：${plansGeneration ? '标题再大一点｜换一种配色' : '生成图片｜标题再大一点｜换一种配色'}`
         : wantsLocalEdit
           ? '已按选中图片的蒙版创建局部修改任务；源图不会被覆盖。'
         : explicitlyGenerate
