@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import type { LlmProtocol } from '../../src/shared/provider-settings'
+import { openTurnProcess } from '../helpers/workbench-ui'
 
 type Scenario = 'normal' | 'repair' | 'exhausted' | 'incomplete' | 'cancel'
 interface FakeFacts { posts: number; cancelled: number; emittedAt: number; firstEventAt: number; requests: Array<{ stream: boolean }> }
@@ -113,6 +114,7 @@ for (const fixture of [
         await expect(flow.getByRole('button', { name: '恢复要求' })).toBeVisible({ timeout: 10_000 })
         if (fixture.scenario === 'exhausted') await window.screenshot({ path: testInfo.outputPath('lt1-agent-repair-exhausted-1280x800.png'), animations: 'disabled' })
       } else {
+        await openTurnProcess(window)
         await window.getByRole('button', { name: '本轮执行记录', exact: true }).click()
       await expect(flow.locator('.execution-status')).toHaveText('已完成', { timeout: 10_000 })
       }

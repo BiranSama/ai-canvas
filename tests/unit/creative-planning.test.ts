@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CommandBus, creativeContextSchema, createScene, scenePlanSchema } from '../../src/domain'
-import { buildCreativePlan } from '../../src/main/agent'
+import { briefProhibitions, buildCreativePlan, DeterministicMockPlanner } from '../../src/main/agent'
 import { deterministicFixtureIds, fixtureAgentRequest, SEMANTIC_FIXTURES } from '../helpers/semantic-fixtures'
 
 const portrait = SEMANTIC_FIXTURES[0]
@@ -90,5 +90,31 @@ describe('CreativeBrief and ScenePlan validation', () => {
     expect(result.ok).toBe(false)
     expect(bus.getScene()).toEqual(scene)
     expect(bus.undoDepth).toBe(0)
+  })
+
+  it('keeps prohibitions about the picture and drops the ones that only say when to generate', () => {
+    expect(briefProhibitions('先不要生成图片，避免渲染成卡通风格，不要出图了，禁止生成任何图片。')).toEqual(['渲染成卡通风格'])
+    expect(briefProhibitions('不要生成人物脸部特写，避免生成文字水印')).toEqual(['生成人物脸部特写', '生成文字水印'])
+    const context = buildCreativePlan(
+      fixtureAgentRequest(blankScene(), '创建一张 4:5 产品海报，主体是便携音箱，避免渲染成卡通风格。先不要生成图片。'),
+      deterministicFixtureIds('38')
+    )
+    expect(context.brief.version === 3 ? context.brief.prohibitions : []).toEqual(['渲染成卡通风格'])
+  })
+
+  it('says a layout will be generated when the plan generates it', async () => {
+    const request = '创建一张 4:5 产品海报，主体是便携音箱，标题是 SOFT SIGNAL。'
+    const planner = new DeterministicMockPlanner({ delayMs: 0, idFactory: deterministicFixtureIds('39') })
+    const plan = await planner.plan(fixtureAgentRequest(blankScene(), request), new AbortController().signal)
+    expect(plan.tools.some((tool) => tool.kind === 'canvas_generation')).toBe(true)
+    expect(plan.response).toContain('会按这个版式生成图片。')
+    expect(plan.response).not.toContain('还没有生成图片')
+    expect(plan.response).not.toMatch(/下一步：.*生成图片/u)
+
+    const held = new DeterministicMockPlanner({ delayMs: 0, idFactory: deterministicFixtureIds('3a') })
+    const layoutOnly = await held.plan(fixtureAgentRequest(blankScene(), `${request}先不要生成图片。`), new AbortController().signal)
+    expect(layoutOnly.tools.some((tool) => tool.kind === 'canvas_generation' || tool.kind === 'generation')).toBe(false)
+    expect(layoutOnly.response).toContain('还没有生成图片。')
+    expect(layoutOnly.response).toMatch(/下一步：生成图片｜/u)
   })
 })

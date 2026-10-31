@@ -1,4 +1,4 @@
-import { openDirectionReview } from '../helpers/workbench-ui'
+import { openDirectionReview, openTurnProcess } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -47,6 +47,7 @@ test('C-S1 selects a stable non-recommended direction, persists it and undoes it
     await cards.nth(1).getByRole('button', { name: '采用此方向' }).evaluate((button) => button.click())
     await expect(cards.nth(1).getByRole('button', { name: '已采用' })).toBeVisible({ timeout: 10_000 })
     await expect(review.getByRole('status')).toContainText('已切换到')
+    await openTurnProcess(first.window)
     await first.window.getByRole('button', { name: '本轮执行记录', exact: true }).click()
     await expect(first.window.getByTestId('agent-live-plan').getByText('设计方向已切换', { exact: true })).toBeVisible()
 

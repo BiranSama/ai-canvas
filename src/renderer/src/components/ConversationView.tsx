@@ -1,6 +1,6 @@
 import { ArrowUp, Check, ChevronDown, ChevronRight, Circle, Crosshair, Files, GripVertical, Image, ListFilter, PanelRightClose, PanelRightOpen, Pencil, RotateCcw, Square, Trash2, X } from 'lucide-react'
 import { type CSSProperties, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentActivity, AgentRun, ConversationSnapshot } from '../../../shared/agent'
+import type { AgentActivity, AgentRun, ConversationSnapshot, OperationReceipt } from '../../../shared/agent'
 import { adaptLegacyTurnInputMode, type AgentHarnessSnapshot, type AgentMode, type AgentTurnStatus, type TaskRelation, type TurnInputMode } from '../../../shared/agent-harness'
 import type { ProjectKnowledgeSnapshot } from '../../../shared/agent-context'
 import type { DesignDirectionSelectionResult } from '../../../shared/design-direction-selection'
@@ -20,6 +20,7 @@ import { CompletionReview } from './CompletionReview'
 import { useProjectScope } from '../store/use-project-scope'
 import { completionFactsSchema } from '../../../shared/design-capability'
 import { formatTurnModelUsage } from '../../../shared/model-usage'
+import { splitReplySuggestions } from '../../../shared/reply-suggestions'
 
 const ACTIVE_STATUSES = new Set<AgentRun['status']>([
   'queued', 'planning', 'awaiting_confirmation', 'awaiting_execution', 'executing'
@@ -136,6 +137,51 @@ function activityStateCopy(activity: AgentActivity): string {
   return '已停止'
 }
 
+const OPEN_PROCESSES_STORAGE_KEY = 'ai-canvas.open-processes.v1'
+
+/** The processes left open stay open while the person switches between the canvas and the conversation. */
+function readOpenProcesses(): ReadonlySet<string> {
+  try {
+    const stored: unknown = JSON.parse(sessionStorage.getItem(OPEN_PROCESSES_STORAGE_KEY) ?? '[]')
+    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveOpenProcesses(ids: ReadonlySet<string>): void {
+  try {
+    sessionStorage.setItem(OPEN_PROCESSES_STORAGE_KEY, JSON.stringify([...ids].slice(-50)))
+  } catch { /* the processes still open and close; they just start folded next time */ }
+}
+
+/** An Agent reply, with the next steps it names offered as choices on the latest one. */
+function ReplyText({ content, offerSuggestions, onSuggestion }: { readonly content: string; readonly offerSuggestions: boolean; onSuggestion(text: string): void }): React.JSX.Element {
+  const reply = splitReplySuggestions(content)
+  return <>
+    <p>{reply.text}</p>
+    {offerSuggestions && reply.suggestions.length > 0 && (
+      <div className="reply-suggestions" role="group" aria-label="下一步建议">
+        {reply.suggestions.map((suggestion) => <button key={suggestion} type="button" onClick={() => onSuggestion(suggestion)}>{suggestion}</button>)}
+      </div>
+    )}
+  </>
+}
+
+/** One line under a reply: how many steps the turn took, what its text model cost, and what is left for the person. */
+function turnSummaryCopy(receipt: OperationReceipt): string {
+  const unverified = receipt.completion?.unverifiedMust.length ?? 0
+  const usage = receipt.modelUsage
+  const cost = usage?.estimatedCostCny ?? null
+  const parts = [
+    receipt.items.length > 0 ? `${receipt.items.length} 步` : null,
+    usage === undefined ? null : `文字模型 ${usage.calls} 次`,
+    cost === null ? null : cost > 0 && cost < 0.01 ? '约 <¥0.01' : `约 ¥${cost.toFixed(2)}`,
+    unverified > 0 ? `${unverified} 项待你核对` : null
+  ].filter((part): part is string => part !== null)
+  return parts.length === 0 ? '本轮已完成' : parts.join(' · ')
+}
+
 function timeCopy(startedAt: string | null, endedAt: string | null): string {
   if (startedAt === null) return '尚未开始'
   if (endedAt === null) return '进行中'
@@ -173,6 +219,8 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const [submitting, setSubmitting] = useState(false)
   const submittingRef = useRef(false)
   const [activityExpanded, setActivityExpanded] = useState(() => localStorage.getItem('ai-canvas.activity-detail') === 'expanded')
+  /** Turns whose process (steps, checks, directions, usage, execution record) is unfolded under the reply. */
+  const [openProcessIds, setOpenProcessIds] = useState<ReadonlySet<string>>(readOpenProcesses)
   const [conversationRatio, setConversationRatio] = useState(initialConversationRatio)
   const [compactRecordOpen, setCompactRecordOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -740,6 +788,37 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
     window.setTimeout(() => inputRef.current?.focus(), 0)
   }
 
+  const takeSuggestion = (text: string): void => {
+    setDraft(text)
+    setProblem(null)
+    window.setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const toggleProcess = (messageId: string): void => {
+    const opening = !openProcessIds.has(messageId)
+    setOpenProcessIds((current) => {
+      const next = new Set(current)
+      if (next.has(messageId)) next.delete(messageId)
+      else next.add(messageId)
+      saveOpenProcesses(next)
+      return next
+    })
+    // An unfolded process below the fold is brought into view.
+    if (opening) window.setTimeout(() => threadRef.current?.querySelector(`[data-process-for="${messageId}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 0)
+  }
+
+  /** What the person chose in a turn, in their words: 「1:1 · 方形」. */
+  const answeredDecisions = (runId: string | null): readonly string[] => {
+    const turn = runId === null ? undefined : harness?.turns.find((candidate) => candidate.inputMessageId === runId)
+    if (turn === undefined) return []
+    return (harness?.items ?? []).flatMap((item) => {
+      if (item.turnId !== turn.id || item.type !== 'decision' || item.status !== 'completed') return []
+      const stored = item.payload as { readonly proposal?: { readonly options?: readonly { readonly id: string; readonly label: string }[] }; readonly optionId?: string }
+      const label = stored.proposal?.options?.find((option) => option.id === stored.optionId)?.label
+      return label === undefined ? [] : [label]
+    })
+  }
+
   const reviseCreativeBrief = (): void => {
     setDraft('修正当前创作简报：')
     setProblem(null)
@@ -754,6 +833,8 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const creativeBrief = scene.creativeContext?.brief ?? null
   const workTitle = creativeBrief?.text.find((item) => item.content.trim().length > 0)?.content ?? '当前作品'
   const settledExecution = executionFlow?.state === 'completed' && displayTurn?.status === 'completed'
+  const settledReceiptId = presentedMessages.filter((message) => message.receipt !== null && message.runId !== null && message.runId === displayRun?.id).at(-1)?.id
+  const settledProcessOpen = settledReceiptId !== undefined && openProcessIds.has(settledReceiptId)
   return (
     <div className="conversation-view">
       {header}
@@ -809,7 +890,12 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                 <button type="button" onClick={() => setInspectedRunId(null)}>返回当前任务</button>
               </div>
             )}
-            {presentedMessages.map((message, index) => (
+            {presentedMessages.map((message, index) => {
+              const receipt = message.receipt
+              const decisions = receipt === null ? [] : answeredDecisions(message.runId)
+              // A direction switch waiting on the person keeps the process open.
+              const open = openProcessIds.has(message.id) || directionConflict?.key.startsWith(`${message.id}:`) === true
+              return (
               <article
                 key={message.id}
                 ref={index === presentedMessages.length - 1 ? latestMessageRef : undefined}
@@ -819,37 +905,44 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                   <span>{message.role === 'user' ? '你' : '助手'}</span>
                   {message.role === 'assistant' && message.kind !== 'error' && <Check size={12} />}
                 </div>
-                <p>{message.content}</p>
+                {message.role === 'user' ? <p>{message.content}</p> : <ReplyText content={message.content} offerSuggestions={index === presentedMessages.length - 1} onSuggestion={takeSuggestion} />}
                 {message.attachments.length > 0 && (
                   <div className="message-attachments">
                     {message.attachments.map((attachment) => <span key={`${attachment.kind}-${attachment.id}`}>{attachment.name}</span>)}
                   </div>
                 )}
-                {message.receipt !== null && (
-                  <div className="operation-receipt" data-testid="operation-receipt">
-                    {message.receipt.completion !== undefined && <CompletionReview facts={message.receipt.completion} sceneRevision={scene.revision}
+                {receipt !== null && (
+                  <div className={`operation-receipt${open ? ' is-open' : ''}`} data-testid="operation-receipt" data-design-review={receipt.designReview === undefined ? undefined : 'true'}>
+                    {decisions.length > 0 && <p className="turn-decisions">你选了：{decisions.map((label) => `「${label}」`).join('、')}</p>}
+                    <div className="turn-summary">
+                      <span>{turnSummaryCopy(receipt)}</span>
+                      {receipt.undoable && receipt.batchId !== null && <button type="button" onClick={() => void undoActivity({ operationBatchId: receipt.batchId })}><RotateCcw size={12} />撤销这次修改</button>}
+                      <button type="button" className="turn-process-toggle" aria-expanded={open} aria-label={open ? '收起过程' : '查看过程'} onClick={() => toggleProcess(message.id)}>过程<ChevronDown size={12} /></button>
+                    </div>
+                    {open && <div className="turn-process" data-process-for={message.id}>
+                    {receipt.completion !== undefined && <CompletionReview facts={receipt.completion} sceneRevision={scene.revision}
                       busy={acceptingReviewId !== null} onAccept={() => void acceptReview(message.id)} />}
-                    {message.receipt.items.map((item, index) => (
+                    {receipt.items.map((item, index) => (
                       <div key={`${item.object}-${index}`}>
                         <span>{item.object}</span>
                         <strong>{item.action}</strong>
                         <small>{item.impact}</small>
                       </div>
                     ))}
-                    {message.receipt.designReview !== undefined && (
-                      <details className="design-review-record" open={(message.receipt.designReview.directions.length > 1
-                        && !message.receipt.designReview.directions.some((direction) => direction.id === scene.creativeContext?.selectedDirectionId))
+                    {receipt.designReview !== undefined && (
+                      <details className="design-review-record" open={(receipt.designReview.directions.length > 1
+                        && !receipt.designReview.directions.some((direction) => direction.id === scene.creativeContext?.selectedDirectionId))
                         || directionConflict !== null ? true : undefined}>
-                        <summary><span>方向与结构检查</span><small>{message.receipt.designReview.recommendation === 'needs_user_review' ? '需要复核' : '查看记录'}</small><ChevronDown size={14} /></summary>
+                        <summary><span>方向与结构检查</span><small>{receipt.designReview.recommendation === 'needs_user_review' ? '需要复核' : '查看记录'}</small><ChevronDown size={14} /></summary>
                       <section className="design-direction-review" aria-label="设计方向与本地评估">
                         <header>
                           <span>设计方向</span>
-                          <strong>{message.receipt.designReview.total === null ? '待检查' : `结构 ${message.receipt.designReview.total}/40`}</strong>
+                          <strong>{receipt.designReview.total === null ? '待检查' : `结构 ${receipt.designReview.total}/40`}</strong>
                         </header>
                         <div className="design-direction-grid">
-                          {message.receipt.designReview.directions.map((direction) => {
+                          {receipt.designReview.directions.map((direction) => {
                             const key = `${message.id}:${direction.id}`
-                            const reviewBriefId = message.receipt?.designReview?.briefId ?? scene.creativeContext?.brief.id
+                            const reviewBriefId = receipt.designReview?.briefId ?? scene.creativeContext?.brief.id
                             const isCurrent = reviewBriefId === scene.creativeContext?.brief.id
                               && direction.id === scene.creativeContext?.selectedDirectionId
                             const isApplying = directionApplyingKey === key
@@ -870,7 +963,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                                 type="button"
                                 disabled={isCurrent || isApplying || directionApplyingKey !== null}
                                 aria-busy={isApplying}
-                                onClick={() => void applyDirection(message.id, message.runId, message.receipt?.designReview?.briefId, direction)}
+                                onClick={() => void applyDirection(message.id, message.runId, receipt.designReview?.briefId, direction)}
                               >{isCurrent ? '已采用' : isApplying ? '正在切换…' : '采用此方向'}</button>
                               {conflict !== null && (
                                 <div className="direction-conflict-decision" role="group" aria-label="方向切换需要你的决定">
@@ -895,101 +988,100 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                         </div>
                         {directionNotice?.key.startsWith(`${message.id}:`) === true && <p className="direction-selection-notice" role="status">{directionNotice.message}</p>}
                         <footer>
-                          <span>{message.receipt.designReview.recommendation === 'needs_user_review' ? '需要你判断是否继续调整' : '本地结构化检查已完成'}</span>
+                          <span>{receipt.designReview.recommendation === 'needs_user_review' ? '需要你判断是否继续调整' : '本地结构化检查已完成'}</span>
                           <small>视觉效果待你复核</small>
                         </footer>
                       </section>
                       </details>
                     )}
-                    {message.receipt.modelUsage !== undefined && <small className="receipt-model-usage" data-testid="receipt-model-usage">{formatTurnModelUsage(message.receipt.modelUsage)}</small>}
-                    {(message.receipt.nextAction !== null || message.receipt.undoable) && (
-                      <footer>
-                        {message.receipt.nextAction !== null && <span>{message.receipt.nextAction}</span>}
-                        {message.receipt.undoable && message.receipt.batchId !== null && <button type="button" onClick={() => void undoActivity({ operationBatchId: message.receipt?.batchId ?? null })}><RotateCcw size={12} />撤销这次修改</button>}
-                      </footer>
-                    )}
+                    {receipt.modelUsage !== undefined && <small className="receipt-model-usage" data-testid="receipt-model-usage">{formatTurnModelUsage(receipt.modelUsage)}</small>}
+                    {receipt.nextAction !== null && <footer><span>{receipt.nextAction}</span></footer>}
+                    </div>}
                   </div>
                 )}
               </article>
-            ))}
-            {!plainCompletedReply && (executionFlow !== null || visibleActivities.length > 0 || displayRun !== null) && (
-              <section className="agent-execution-shell" data-testid="agent-status" aria-label="Agent 当前创作流">
-                {settledExecution && !activityExpanded && (
-                  <button type="button" className="execution-record-toggle" aria-expanded={false} onClick={() => setActivityExpanded(true)}>
-                    <ListFilter size={15} /><span>本轮执行记录</span><ChevronDown size={14} />
-                  </button>
-                )}
-                {executionFlow !== null && (!settledExecution || activityExpanded) && (
-                  <AgentExecutionFlowView
-                    flow={executionFlow}
-                    expanded={activityExpanded}
-                    onToggle={() => setActivityExpanded((current) => !current)}
-                    onCancel={() => void cancel()}
-                    onRestoreRequest={restoreCurrentRequest}
-                    onContinue={() => void continueAfterLimit()}
-                    showCancel={waitingDecision === null || activeRun?.status !== 'awaiting_confirmation'}
-                  />
-                )}
-                {activityExpanded && visibleActivities.length > 0 && (
-                  <section className="execution-audit" aria-label="可追溯执行记录">
-                    <header>
-                      <span><ListFilter size={13} /><strong>执行记录</strong><small>{presentedActivities.length} 条真实记录，最多显示最近 24 条</small></span>
-                    </header>
-                    <div className="activity-ledger-list">
-                      {visibleActivities.map((activity) => (
-                        <article key={activity.id} className={`agent-activity-card state-${activity.state}${activity.undoneAt === null ? '' : ' is-undone'}`}>
-                          <span className="activity-drawing" aria-hidden="true">
-                            <svg viewBox="0 0 38 38"><rect x="7" y="7" width="24" height="24" rx="6" /><path d="M12 22 C16 16, 20 25, 27 14" /></svg>
-                          </span>
-                          <span className="activity-copy"><small>{activity.label}</small><strong>{activityStateCopy(activity)}</strong><span>{activity.objectLabel} · {activity.actionLabel}</span></span>
-                          <div className="activity-inline-detail">
-                            <span>{activity.scopeLabel ?? '当前作品'}</span>
-                            <small>{activity.impactLabel}</small>
-                            {activity.budgetImpact !== null && (
-                              <small>{activity.budgetImpact.requests} 次请求 · {activity.budgetImpact.images} 张图片{activity.budgetImpact.maxCny > 0 ? ` · 预估上限 ¥${activity.budgetImpact.maxCny.toFixed(2)}` : ' · 本地生成不计费'}</small>
-                            )}
-                            <small>{timeCopy(activity.startedAt, activity.endedAt)} · 可追溯执行</small>
-                            {activity.events.length > 1 && <small>{activity.events.length} 个状态事件，最后：{activity.events.at(-1)?.summary}</small>}
-                          </div>
-                          <span className="activity-actions">
-                            {(activity.affectedIds.length > 0 || activity.jobId !== null) && <button type="button" aria-label={`定位：${activity.label}`} onClick={() => locateActivity(activity)}><Crosshair size={11} />定位</button>}
-                            {activity.operationBatchId !== null && activity.undoneAt === null && <button type="button" aria-label={`撤销：${activity.label}`} onClick={() => void undoActivity(activity)}><RotateCcw size={11} />撤销</button>}
-                            {activity.recoverable && ['failed', 'cancelled', 'interrupted'].includes(activity.state) && <button type="button" aria-label={`重新发起：${activity.label}`} onClick={() => recoverActivity(activity)}><RotateCcw size={11} />重新发起</button>}
-                            {activity.state === 'completed' && activity.operationBatchId === null && <span className="activity-finished-mark"><Check size={11} />已记录</span>}
-                          </span>
-                        </article>
-                      ))}
-                    </div>
-                  </section>
-                )}
-                {waitingDecision !== null && activeRun?.status === 'awaiting_confirmation' && (
-                  <div ref={decisionCardRef} className="decision-card" role="group" aria-labelledby={`decision-${waitingDecision.id}`}>
-                    <span className="decision-mark" aria-hidden="true"><svg viewBox="0 0 38 38"><rect x="7" y="7" width="24" height="24" rx="6" /><path d="M12 22 C16 16, 20 25, 27 14" /></svg></span>
-                    <div className="decision-copy">
-                      <small>需要你的决定</small>
-                      <strong id={`decision-${waitingDecision.id}`}>{waitingDecision.title}</strong>
-                      <p>{waitingDecision.consequence}</p>
-                    </div>
-                    <div className="decision-options">
-                      {waitingDecision.options.map((option) => (
-                        <button
-                          key={option.id}
-                          ref={option.id === waitingDecision.defaultOptionId ? decisionDefaultRef : undefined}
-                          type="button"
-                          className={option.id === waitingDecision.defaultOptionId ? 'is-default' : ''}
-                          aria-label={waitingDecision.kind === 'generation_confirmation' && option.id === waitingDecision.defaultOptionId ? '确认生成' : option.label}
-                          aria-describedby={`decision-consequence-${waitingDecision.id}-${option.id}`}
-                          onClick={() => void confirm(option.id)}
-                        >
-                          <span>{option.label}</span>
-                          <small id={`decision-consequence-${waitingDecision.id}-${option.id}`}>{option.consequence}</small>
-                        </button>
-                      ))}
-                      <button type="button" className="decision-cancel" aria-label="停止当前操作" onClick={() => void cancel()}><Square size={10} />取消本轮</button>
-                    </div>
+              )
+            })}
+            {/* Once the turn has finished, its execution record is part of the reply's process and shows only when that is open. */}
+            {!plainCompletedReply && (executionFlow !== null || visibleActivities.length > 0 || displayRun !== null)
+              && (!settledExecution || settledProcessOpen) && (
+            <section className="agent-execution-shell" data-testid="agent-status" aria-label="Agent 当前创作流">
+              {settledExecution && !activityExpanded && (
+                <button type="button" className="execution-record-toggle" aria-expanded={false} onClick={() => setActivityExpanded(true)}>
+                  <ListFilter size={15} /><span>本轮执行记录</span><ChevronDown size={14} />
+                </button>
+              )}
+              {executionFlow !== null && (!settledExecution || activityExpanded) && (
+                <AgentExecutionFlowView
+                  flow={executionFlow}
+                  expanded={activityExpanded}
+                  onToggle={() => setActivityExpanded((current) => !current)}
+                  onCancel={() => void cancel()}
+                  onRestoreRequest={restoreCurrentRequest}
+                  onContinue={() => void continueAfterLimit()}
+                  showCancel={waitingDecision === null || activeRun?.status !== 'awaiting_confirmation'}
+                />
+              )}
+              {activityExpanded && visibleActivities.length > 0 && (
+                <section className="execution-audit" aria-label="可追溯执行记录">
+                  <header>
+                    <span><ListFilter size={13} /><strong>执行记录</strong><small>{presentedActivities.length} 条真实记录，最多显示最近 24 条</small></span>
+                  </header>
+                  <div className="activity-ledger-list">
+                    {visibleActivities.map((activity) => (
+                      <article key={activity.id} className={`agent-activity-card state-${activity.state}${activity.undoneAt === null ? '' : ' is-undone'}`}>
+                        <span className="activity-drawing" aria-hidden="true">
+                          <svg viewBox="0 0 38 38"><rect x="7" y="7" width="24" height="24" rx="6" /><path d="M12 22 C16 16, 20 25, 27 14" /></svg>
+                        </span>
+                        <span className="activity-copy"><small>{activity.label}</small><strong>{activityStateCopy(activity)}</strong><span>{activity.objectLabel} · {activity.actionLabel}</span></span>
+                        <div className="activity-inline-detail">
+                          <span>{activity.scopeLabel ?? '当前作品'}</span>
+                          <small>{activity.impactLabel}</small>
+                          {activity.budgetImpact !== null && (
+                            <small>{activity.budgetImpact.requests} 次请求 · {activity.budgetImpact.images} 张图片{activity.budgetImpact.maxCny > 0 ? ` · 预估上限 ¥${activity.budgetImpact.maxCny.toFixed(2)}` : ' · 本地生成不计费'}</small>
+                          )}
+                          <small>{timeCopy(activity.startedAt, activity.endedAt)} · 可追溯执行</small>
+                          {activity.events.length > 1 && <small>{activity.events.length} 个状态事件，最后：{activity.events.at(-1)?.summary}</small>}
+                        </div>
+                        <span className="activity-actions">
+                          {(activity.affectedIds.length > 0 || activity.jobId !== null) && <button type="button" aria-label={`定位：${activity.label}`} onClick={() => locateActivity(activity)}><Crosshair size={11} />定位</button>}
+                          {activity.operationBatchId !== null && activity.undoneAt === null && <button type="button" aria-label={`撤销：${activity.label}`} onClick={() => void undoActivity(activity)}><RotateCcw size={11} />撤销</button>}
+                          {activity.recoverable && ['failed', 'cancelled', 'interrupted'].includes(activity.state) && <button type="button" aria-label={`重新发起：${activity.label}`} onClick={() => recoverActivity(activity)}><RotateCcw size={11} />重新发起</button>}
+                          {activity.state === 'completed' && activity.operationBatchId === null && <span className="activity-finished-mark"><Check size={11} />已记录</span>}
+                        </span>
+                      </article>
+                    ))}
                   </div>
-                )}
-              </section>
+                </section>
+              )}
+              {waitingDecision !== null && activeRun?.status === 'awaiting_confirmation' && (
+                <div ref={decisionCardRef} className="decision-card" role="group" aria-labelledby={`decision-${waitingDecision.id}`}>
+                  <span className="decision-mark" aria-hidden="true"><svg viewBox="0 0 38 38"><rect x="7" y="7" width="24" height="24" rx="6" /><path d="M12 22 C16 16, 20 25, 27 14" /></svg></span>
+                  <div className="decision-copy">
+                    <small>需要你的决定</small>
+                    <strong id={`decision-${waitingDecision.id}`}>{waitingDecision.title}</strong>
+                    <p>{waitingDecision.consequence}</p>
+                  </div>
+                  <div className="decision-options">
+                    {waitingDecision.options.map((option) => (
+                      <button
+                        key={option.id}
+                        ref={option.id === waitingDecision.defaultOptionId ? decisionDefaultRef : undefined}
+                        type="button"
+                        className={option.id === waitingDecision.defaultOptionId ? 'is-default' : ''}
+                        aria-label={waitingDecision.kind === 'generation_confirmation' && option.id === waitingDecision.defaultOptionId ? '确认生成' : option.label}
+                        aria-describedby={`decision-consequence-${waitingDecision.id}-${option.id}`}
+                        onClick={() => void confirm(option.id)}
+                      >
+                        <span>{option.label}</span>
+                        <small id={`decision-consequence-${waitingDecision.id}-${option.id}`}>{option.consequence}</small>
+                      </button>
+                    ))}
+                    <button type="button" className="decision-cancel" aria-label="停止当前操作" onClick={() => void cancel()}><Square size={10} />取消本轮</button>
+                  </div>
+                </div>
+              )}
+            </section>
             )}
             {problem !== null && <p className="conversation-problem" role="alert">{problem}</p>}
           </div>

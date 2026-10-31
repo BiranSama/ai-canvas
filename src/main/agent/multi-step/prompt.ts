@@ -6,7 +6,7 @@ import { formatBox, transformToBox, typeLabel } from '../tools/geometry'
 import type { ElementRefs } from '../tools/refs'
 import type { AgentToolContext, GenerationResultEntry, ManualLibrary } from '../tools/types'
 
-export const MULTI_STEP_PROMPT_VERSION = 'multi-step-8'
+export const MULTI_STEP_PROMPT_VERSION = 'multi-step-9'
 
 /**
  * Fixed for the whole session so providers can cache it. Per-turn facts go in
@@ -31,7 +31,7 @@ export function multiStepSystemPrompt(manuals: ManualLibrary | null): string {
     '- 只改用户提到的对象和属性，其他对象一律不动。',
     '- 标着「隐藏」的对象不出现在画面、成图和生图参考里。用户没提到就不要显示、修改或删除它们；要看它们的样子，用 look 的 target 单独看。',
     '- 工具返回「未执行」时按建议修正后再试；同一个错误不要原样重复。改坏了用 undo 撤销再换做法。',
-    '- 完成后用一两句话汇报做了什么、做了哪些假设，然后结束，不再调用工具。',
+    '- 完成后写一段汇报，然后结束，不再调用工具。汇报按这个顺序，整段不超过五句：先一句话说做好了什么；再说构思，为什么这样排、配色和字体怎么考虑；再说替用户定了什么（比例、风格、文案），方便用户改；最后单独一行写「下一步：」加两三个用户可能想做的事，用「｜」分开，每个不超过十个字，例如「下一步：生成图片｜标题再大一点｜换成冷色调」。',
     '',
     '## 设计常识',
     '- 层级清楚：一个视觉焦点，标题最醒目，正文和说明依次减弱。',

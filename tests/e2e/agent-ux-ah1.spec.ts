@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openTurnProcess } from '../helpers/workbench-ui'
 
 test('AH1 S8 exposes truthful modes, Review approval, live plan and inspectable local context', async () => {
   test.setTimeout(60_000)
@@ -42,6 +43,7 @@ test('AH1 S8 exposes truthful modes, Review approval, live plan and inspectable 
     await expect(window.getByRole('button', { name: '排到下一轮' })).toHaveAttribute('aria-pressed', 'true')
     await reviewDecision.getByRole('button', { name: '执行这一步' }).evaluate((button) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
+    await openTurnProcess(window)
     await window.getByRole('button', { name: '本轮执行记录', exact: true }).click()
     await expect(window.getByTestId('agent-live-plan').locator('.execution-status')).toHaveText('已完成')
 

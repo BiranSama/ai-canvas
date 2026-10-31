@@ -1,4 +1,4 @@
-import { openGenerationOptions } from '../helpers/workbench-ui'
+import { openGenerationOptions, expandExecutionFlow } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -36,6 +36,7 @@ test('uses seconds in settings, reads back the saved policy, and shows the persi
     await page.getByLabel('对话输入').fill('调整画布为一张安静的封面，先不要生成图片')
     await page.getByRole('button', { name: '发送要求', exact: true }).click()
     // The turn's time is a guard against a run going astray, far above what a picture takes.
+    await expandExecutionFlow(page)
     await expect(page.locator('.execution-time-policy').last()).toContainText('本轮总时限 30 分钟')
     await expect(page.locator('.execution-time-policy').last()).toContainText('等你做决定的时间不计入')
     const harness = await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getAgentHarnessSnapshot())

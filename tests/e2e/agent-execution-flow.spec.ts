@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openTurnProcess } from '../helpers/workbench-ui'
 
 test('Product 1.0 shows the truthful Agent stages and friendly tool calls as one bounded creative flow', async () => {
   test.setTimeout(45_000)
@@ -37,6 +38,7 @@ test('Product 1.0 shows the truthful Agent stages and friendly tool calls as one
     console.log(`LT1 receipt=${receiptLatencyMs.toFixed(1)}ms`)
 
     const flow = window.getByTestId('agent-live-plan')
+    await openTurnProcess(window)
     await window.getByRole('button', { name: '本轮执行记录', exact: true }).click()
     await expect(flow).toBeVisible({ timeout: 10_000 })
     await expect(flow.locator('.execution-status')).toHaveText('已完成', { timeout: 10_000 })

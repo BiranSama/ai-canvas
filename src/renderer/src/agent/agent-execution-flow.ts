@@ -591,7 +591,7 @@ function flowCopy(
   if (turn.status === 'planning') return { headline: '正在形成创作方案', summary: '等待文字模型返回可验证的下一步。', statusLabel: '规划中' }
   if (turn.status === 'building_context') return { headline: '正在准备作品上下文', summary: '只整理这次创作需要的画布与项目信息。', statusLabel: '准备中' }
   if (turn.status === 'running') return { headline: '正在处理当前作品', summary: '工具调用与画布变化会在这里逐项出现。', statusLabel: '执行中' }
-  if (turn.status === 'waiting_decision') return { headline: '需要你的决定', summary: 'Agent 已停在确认边界，不会自行越过。', statusLabel: '等待决定' }
+  if (turn.status === 'waiting_decision') return { headline: '需要你的决定', summary: '回答下面的问题，Agent 会接着做；你不答它不会往下走。', statusLabel: '等待决定' }
   if (turn.status === 'waiting_job') return { headline: '正在等待图片结果', summary: '图片任务已经创建；不会重复提交未知请求。', statusLabel: '等待图片' }
   if (COMPLETED_TURN_STATUSES.has(turn.status)) {
     return {

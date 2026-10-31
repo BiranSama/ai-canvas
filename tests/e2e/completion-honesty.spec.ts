@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openTurnProcess } from '../helpers/workbench-ui'
 
 test.setTimeout(65000)
 let app: ElectronApplication
@@ -27,6 +28,7 @@ test('preserves visual musts, accepts a concrete version with a real click, and 
   await page.getByRole('button', { name: '对话', exact: true }).click()
   await page.getByLabel('对话输入').fill('创建一张 4:5 人物海报，主体是侧身人物，保留人物面部自然且符合品牌调性。先不要生成图片。')
   await page.getByRole('button', { name: '发送要求', exact: true }).click()
+  await openTurnProcess(page)
   const review = page.getByRole('region', { name: '完成与验收事实' }).last()
   await expect(review).toContainText('人物面部自然且符合品牌调性')
   await expect(review).toContainText('操作已执行')
@@ -43,12 +45,14 @@ test('preserves visual musts, accepts a concrete version with a real click, and 
   await page.getByRole('button', { name: '形状', exact: true }).click()
   await expect.poll(async () => (await bootstrap()).scene.revision).toBeGreaterThan(before.scene.revision)
   await page.getByRole('button', { name: '对话', exact: true }).click()
+  await openTurnProcess(page)
   await expect(review).toContainText('此前版本已接受')
   await expect(review).toContainText('作品已修改')
   await expect(review.getByRole('button', { name: '接受这版作品', exact: true })).toHaveCount(0)
   await network(); await app.close()
   await launch(userData)
   await page.locator(`[data-project-id="${before.projectId}"]`).getByRole('button').first().click()
+  await openTurnProcess(page)
   const restoredReview = page.getByRole('region', { name: '完成与验收事实' }).last()
   await expect(restoredReview).toContainText('此前版本已接受')
   await expect(restoredReview).toContainText('人物面部自然且符合品牌调性')
