@@ -17,8 +17,31 @@ export async function openConversationRecord(page: Page) {
   await expect(page.getByLabel('对话输入', { exact: true })).toBeVisible()
 }
 
+/** Unfold the process under the latest reply: its steps, checks, directions, usage and execution record. */
+export async function openTurnProcess(page: Page) {
+  await openConversationRecord(page)
+  const toggle = page.locator('.turn-process-toggle').last()
+  await expect(toggle).toBeVisible()
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+}
+
+/** Show the creative flow's facts, time policy and stages, which are folded to one line by default. */
+export async function expandExecutionFlow(page: Page) {
+  const toggle = page.getByTestId('agent-live-plan').locator('.execution-expand')
+  await expect(toggle).toBeVisible()
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+}
+
 export async function openDirectionReview(page: Page) {
   await openConversationRecord(page)
+  // The latest turn that reviewed directions; later turns may not have.
+  const receipt = page.locator('[data-testid="operation-receipt"][data-design-review="true"]').last()
+  await expect(receipt).toBeVisible({ timeout: 12_000 })
+  const toggle = receipt.locator('.turn-process-toggle')
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   const disclosure = page.locator('details.design-review-record').last()
   await expect(disclosure).toBeAttached()
   if (await disclosure.getAttribute('open') === null) await disclosure.locator(':scope > summary').click()

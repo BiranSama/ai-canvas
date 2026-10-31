@@ -137,6 +137,24 @@ function activityStateCopy(activity: AgentActivity): string {
   return '已停止'
 }
 
+const OPEN_PROCESSES_STORAGE_KEY = 'ai-canvas.open-processes.v1'
+
+/** The processes left open stay open while the person switches between the canvas and the conversation. */
+function readOpenProcesses(): ReadonlySet<string> {
+  try {
+    const stored: unknown = JSON.parse(sessionStorage.getItem(OPEN_PROCESSES_STORAGE_KEY) ?? '[]')
+    return new Set(Array.isArray(stored) ? stored.filter((id): id is string => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveOpenProcesses(ids: ReadonlySet<string>): void {
+  try {
+    sessionStorage.setItem(OPEN_PROCESSES_STORAGE_KEY, JSON.stringify([...ids].slice(-50)))
+  } catch { /* the processes still open and close; they just start folded next time */ }
+}
+
 /** An Agent reply, with the next steps it names offered as choices on the latest one. */
 function ReplyText({ content, offerSuggestions, onSuggestion }: { readonly content: string; readonly offerSuggestions: boolean; onSuggestion(text: string): void }): React.JSX.Element {
   const reply = splitReplySuggestions(content)
@@ -202,7 +220,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const submittingRef = useRef(false)
   const [activityExpanded, setActivityExpanded] = useState(() => localStorage.getItem('ai-canvas.activity-detail') === 'expanded')
   /** Turns whose process (steps, checks, directions, usage, execution record) is unfolded under the reply. */
-  const [openProcessIds, setOpenProcessIds] = useState<ReadonlySet<string>>(() => new Set())
+  const [openProcessIds, setOpenProcessIds] = useState<ReadonlySet<string>>(readOpenProcesses)
   const [conversationRatio, setConversationRatio] = useState(initialConversationRatio)
   const [compactRecordOpen, setCompactRecordOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -782,6 +800,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
       const next = new Set(current)
       if (next.has(messageId)) next.delete(messageId)
       else next.add(messageId)
+      saveOpenProcesses(next)
       return next
     })
     // An unfolded process below the fold is brought into view.
@@ -893,7 +912,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                   </div>
                 )}
                 {receipt !== null && (
-                  <div className={`operation-receipt${open ? ' is-open' : ''}`} data-testid="operation-receipt">
+                  <div className={`operation-receipt${open ? ' is-open' : ''}`} data-testid="operation-receipt" data-design-review={receipt.designReview === undefined ? undefined : 'true'}>
                     {decisions.length > 0 && <p className="turn-decisions">你选了：{decisions.map((label) => `「${label}」`).join('、')}</p>}
                     <div className="turn-summary">
                       <span>{turnSummaryCopy(receipt)}</span>

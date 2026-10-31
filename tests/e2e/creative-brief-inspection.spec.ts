@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openTurnProcess } from '../helpers/workbench-ui'
 
 test('the current Creative Brief is inspectable and can be corrected through the same conversation', async () => {
   test.setTimeout(60_000)
@@ -41,7 +42,11 @@ test('the current Creative Brief is inspectable and can be corrected through the
     await window.getByRole('textbox', { name: '对话输入' }).fill('修正当前创作简报：面向独立出版读者，标题更轻盈。')
     await window.getByRole('button', { name: '发送要求' }).evaluate((button: { click(): void }) => button.click())
     await expect(window.getByRole('textbox', { name: '对话输入' })).toHaveValue('', { timeout: 10_000 })
-    await expect(window.getByTestId('operation-receipt').filter({ hasText: '修正当前创作简报' })).toHaveCount(1, { timeout: 10_000 })
+    // The correction's own turn has finished once its process names it.
+    await expect(async () => {
+      await openTurnProcess(window)
+      await expect(window.getByTestId('operation-receipt').last()).toContainText('修正当前创作简报', { timeout: 1_000 })
+    }).toPass({ timeout: 10_000 })
     await summary.evaluate((element: { click(): void }) => element.click())
     await expect(detail).toBeVisible()
     await expect(detail).toContainText('独立出版读者')
@@ -81,6 +86,7 @@ test('opening the Creative Brief keeps the conversation readable and its details
     await window.screenshot({ path: test.info().outputPath('brief-open.png') })
 
     // A real click reaches the receipt's details below the open brief.
+    await openTurnProcess(window)
     const review = window.locator('summary').filter({ hasText: '方向与结构检查' }).first()
     await review.scrollIntoViewIfNeeded()
     await review.click()

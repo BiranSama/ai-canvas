@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { openDirectionReview } from '../helpers/workbench-ui'
+import { openDirectionReview, openTurnProcess } from '../helpers/workbench-ui'
 
 const REQUEST = '创建一张 3:2 的雨夜唱片封面，标题是 AFTER RAIN，黑胶唱片放在右下方，后方有柔和轮廓光。先不要生成图片。'
 
@@ -31,6 +31,15 @@ test('AC-01 creates one persistent layout through conversation without implicit 
     await first.window.getByRole('textbox', { name: '对话输入' }).fill(REQUEST)
     await first.window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())
     await expect(first.window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
+    // The reply comes first: its next steps are choices, and the process stays folded under one line.
+    await expect(first.window.getByRole('region', { name: '完成与验收事实' })).toHaveCount(0)
+    await expect(first.window.getByTestId('operation-receipt').locator('.turn-summary')).toContainText('1 步')
+    const suggestions = first.window.getByRole('group', { name: '下一步建议' })
+    await expect(suggestions.getByRole('button')).toHaveText(['生成图片', '标题再大一点', '换一种配色'])
+    await suggestions.getByRole('button', { name: '标题再大一点' }).click()
+    await expect(first.window.getByRole('textbox', { name: '对话输入' })).toHaveValue('标题再大一点')
+    await first.window.getByRole('textbox', { name: '对话输入' }).fill('')
+    await openTurnProcess(first.window)
     await expect(first.window.getByRole('region', { name: '完成与验收事实' })).toContainText('结构检查通过')
     await expect(first.window.getByTestId('operation-receipt').getByText('创建 3:2 唱片封面布局')).toBeVisible()
     await openDirectionReview(first.window)

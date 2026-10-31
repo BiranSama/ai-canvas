@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openTurnProcess } from '../helpers/workbench-ui'
 
 const REQUEST = '创建一张优雅的雨夜唱片封面，标题是 AFTER RAIN，黑胶唱片放在右下方，后方有柔和轮廓光。先不要生成图片。'
 
@@ -52,6 +53,7 @@ test('AC-R2-05 persists a real decision and lets activity locate and undo its ex
 
     await window.getByRole('button', { name: '4:5 · 推荐' }).evaluate((button) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
+    await openTurnProcess(window)
     await window.getByRole('button', { name: '本轮执行记录', exact: true }).click()
     await expect(window.getByText(/个状态事件，最后/).first()).toBeVisible()
     await window.getByRole('button', { name: '定位：更新画布结构' }).evaluate((button) => button.click())
