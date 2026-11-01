@@ -301,6 +301,10 @@ test('launches the production canvas with native modules isolated in Main', asyn
       hasProcess: false,
       exposedMethods: [
         'getRuntimeInfo',
+        'getAppUpdate',
+        'checkForAppUpdate',
+        'installAppUpdate',
+        'onAppUpdate',
         'listLocalFonts',
         'takeOpenFileRequests',
         'readPsd',
