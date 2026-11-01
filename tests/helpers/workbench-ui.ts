@@ -8,10 +8,13 @@ import { writeFile } from 'node:fs/promises'
 export async function openEditor(page: Page) {
   const views = page.getByRole('navigation', { name: '工作视图' })
   const editor = views.getByRole('button', { name: '编辑', exact: true })
-  if (await editor.count() > 0 && await editor.getAttribute('aria-current') === 'page') return
-  await views.getByRole('button', { name: '对话', exact: true }).evaluate((button: { click(): void }) => button.click())
-  await page.locator('.preview-actions .open-editor').evaluate((button: { click(): void }) => button.click())
+  if (await editor.count() === 0 || await editor.getAttribute('aria-current') !== 'page') {
+    await views.getByRole('button', { name: '对话', exact: true }).evaluate((button: { click(): void }) => button.click())
+    await page.locator('.preview-actions .open-editor').evaluate((button: { click(): void }) => button.click())
+  }
   await expect(editor).toHaveAttribute('aria-current', 'page')
+  // The editor's header and canvas attach their key handlers after they paint; let two frames pass.
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))')
 }
 
 /** 出图 stays open after 放入画布; this goes on to the editor from the notice it shows. */

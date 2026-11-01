@@ -106,9 +106,10 @@ test('Glass Islands use real pointer interactions for resize, four-edge docking,
       env: { ...process.env, AI_CANVAS_E2E: 'r2', AI_CANVAS_STARTUP: 'library' }
     })
     const restoredWindow = await app.firstWindow()
-    await openEditor(restoredWindow)
     await expect(restoredWindow.getByRole('heading', { name: '项目' })).toBeVisible()
     await restoredWindow.getByRole('button', { name: '打开项目：未命名创作' }).click({ force: true })
+    // A project reopens on 对话; the islands belong to the editor.
+    await openEditor(restoredWindow)
     await expect(restoredWindow.locator('[data-island-id="inspector"]')).toHaveAttribute('data-island-mode', 'orb')
     const reloadedOrb = restoredWindow.locator('[data-island-id="inspector"]')
     await expect.poll(async () => {

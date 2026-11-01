@@ -84,6 +84,8 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
     await expect(window.getByRole('button', { name: '打开项目：未命名创作' })).toBeVisible()
     await window.getByRole('button', { name: '最近' }).evaluate((button: { click(): void }) => button.click())
     await window.getByRole('button', { name: '打开项目：未命名创作' }).click({ force: true })
+    // A project reopens on 对话; the islands belong to the editor.
+    await openEditor(window)
     await expect(window.locator('[data-island-id="inspector"]')).toHaveAttribute('data-island-mode', 'docked-top')
     expect(externalRequests).toEqual([])
   } finally {

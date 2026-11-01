@@ -314,6 +314,9 @@ async function openPicture(page: Page, path: string): Promise<void> {
   await page.keyboard.press('Control+o')
   await (await chooser).setFiles(path)
   await expect.poll(async () => (await bootstrap(page)).scene.canvas.outputWidth, { timeout: 15_000 }).toBe(640)
+  // A picture opened as a project opens in the editor.
+  await expect(page.getByRole('navigation', { name: '工作视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
+  await openEditor(page)
 }
 
 async function selectionBounds(page: Page): Promise<number[]> {
