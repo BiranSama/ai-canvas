@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('Direct Canvas supports inline editing, viewport conventions, clipboard and focus mode offline', async ({ browserName }, testInfo) => {
   void browserName
@@ -15,6 +16,7 @@ test('Direct Canvas supports inline editing, viewport conventions, clipboard and
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.bringToFront()
     await window.setViewportSize({ width: 1280, height: 800 })
     const stage = window.getByTestId('canvas-stage')
@@ -471,6 +473,7 @@ test('header actions and project-card actions stay separate and More opens a rea
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     const viewports = [
       { width: 1024, height: 700 },
       { width: 1280, height: 800 },

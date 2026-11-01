@@ -38,7 +38,7 @@ test('AC-05 keeps stored credentials out of Renderer reads, projects, logs and A
     const imageProviderRow = window.locator('.provider-setting-row').filter({ has: imageEndpoint })
     await imageEndpoint.fill('https://images.example.test/v1')
     await window.getByLabel('Image Provider 默认模型').fill('studio-image-1')
-    await imageProviderRow.getByRole('button', { name: '保存公开配置', exact: true }).evaluate((button) => button.click())
+    await imageProviderRow.getByRole('button', { name: '保存', exact: true }).evaluate((button) => button.click())
     await expect(window.getByTestId('provider-settings-status')).toContainText('未发起网络请求')
     const imageProviderKey = window.getByLabel('火山方舟 · Seedream 5.0 API Key')
     await imageProviderKey.fill(secret)

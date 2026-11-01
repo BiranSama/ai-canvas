@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { captureWorkbench, hitWorkbenchControl as hit } from '../helpers/workbench-ui'
+import { captureWorkbench, hitWorkbenchControl as hit, openEditor } from '../helpers/workbench-ui'
 
 for (const viewport of [{ width: 1440, height: 900, zoom: 1 }, { width: 1024, height: 700, zoom: 1.5 }]) {
   test(`all three instruments project at all four edges and restore at ${viewport.width} / ${viewport.zoom}`, async () => {
@@ -13,6 +13,7 @@ for (const viewport of [{ width: 1440, height: 900, zoom: 1 }, { width: 1024, he
     try {
       await app.evaluate(() => { globalThis.fetch = async () => { throw new Error('OFFLINE_DOCKS') } })
       const page = await app.firstWindow()
+      await openEditor(page)
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900))
       await expect(page.getByTestId('canvas-stage')).toBeVisible()
       await hit(page.getByRole('button', { name: '文字 T', exact: true }))
@@ -42,7 +43,7 @@ for (const viewport of [{ width: 1440, height: 900, zoom: 1 }, { width: 1024, he
           const grip = island.getByRole('toolbar', { name: `${instrument.label}布局控制`, exact: true })
           await grip.focus(); await grip.press(`Alt+${edge.key}`)
           await expect(island).toHaveAttribute('data-island-mode', `docked-${edge.name}`)
-          await page.getByRole('button', { name: '画布', exact: true }).focus()
+          await page.getByRole('button', { name: '编辑', exact: true }).focus()
           await page.mouse.move(50, 30)
           const horizontal = edge.name === 'top' || edge.name === 'bottom'
           await expect.poll(async () => {

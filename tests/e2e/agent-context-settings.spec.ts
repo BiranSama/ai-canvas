@@ -18,7 +18,7 @@ test('AH1 S5 exposes Context, Directive, Memory and local-only policy without ne
       if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
     })
     await window.getByTestId('open-settings').evaluate((button) => button.click())
-    await window.getByRole('button', { name: 'Agent 上下文' }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '项目记忆' }).evaluate((button) => button.click())
     await expect(window.getByTestId('agent-context-settings')).toBeVisible()
 
     await window.getByLabel('Agent 外发策略').selectOption('local_only')
@@ -42,13 +42,13 @@ test('AH1 S5 exposes Context, Directive, Memory and local-only policy without ne
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
 
     await window.getByTestId('open-settings').evaluate((button) => button.click())
-    await window.getByRole('button', { name: 'Agent 上下文' }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '项目记忆' }).evaluate((button) => button.click())
     const contextSettings = window.getByTestId('agent-context-settings')
     await expect(contextSettings.getByText('最近 Context Manifest')).toBeVisible()
     await expect(contextSettings.getByText(/Scene r\d+/)).toBeVisible()
     await expect(contextSettings.getByLabel('Agent 外发策略')).toHaveValue('local_only')
     await contextSettings.getByText('外发记录', { exact: true }).evaluate((summary) => summary.closest('summary')?.click())
-    await expect(contextSettings.getByText('还没有外发记录；只有实际准备或调用 Provider 后才会出现。')).toBeVisible()
+    await expect(contextSettings.getByText('还没有外发记录；真正调用服务后才会出现。')).toBeVisible()
     expect(externalRequests).toEqual([])
   } finally {
     await app.close()

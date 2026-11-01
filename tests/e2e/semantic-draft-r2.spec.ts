@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 const REQUEST = '创建一张 4:5 人物编辑海报，主体是侧身人物，标题是 QUIET FORM，保留右侧留白与柔和侧光。先不要生成图片。'
 
@@ -19,7 +20,7 @@ test('AC-R2-07 creates a theme-neutral editable semantic draft and persists its 
     await window.getByRole('textbox', { name: '对话输入' }).fill(REQUEST)
     await window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
-    await window.getByRole('button', { name: '画布', exact: true }).evaluate((button) => button.click())
+    await openEditor(window)
 
     const layers = window.getByRole('listbox', { name: '图层' }).getByRole('option')
     await expect(layers).toHaveCount(8)

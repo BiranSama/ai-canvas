@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 let app: ElectronApplication
 let page: Page
@@ -17,7 +18,7 @@ test.beforeEach(async () => {
   page = await app.firstWindow()
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByTestId('canvas-stage')).toBeVisible()
   await page.getByRole('button', { name: '形状', exact: true }).click()
   await expect.poll(async () => (await mainScene()).elements.length).toBe(1)

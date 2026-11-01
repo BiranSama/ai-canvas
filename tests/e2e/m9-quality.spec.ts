@@ -62,7 +62,7 @@ test('supports explicit offline operation, keyboard focus and IME composition', 
       return (await api.getConversationSnapshot()).messages.length
     })).toBeGreaterThan(0)
 
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('雨夜唱片封面，冷色轮廓光')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
@@ -99,7 +99,7 @@ test('maps reduced motion, reduced transparency and visible focus to stable CSS'
     expect(media.surfaceBackdrop).toBe('none')
     expect(Number.parseFloat(media.transitionDuration)).toBeLessThanOrEqual(0.00001)
 
-    const canvasButton = window.getByRole('button', { name: '画布', exact: true })
+    const canvasButton = window.getByRole('button', { name: '编辑', exact: true })
     await canvasButton.focus()
     const focus = await window.evaluate(`(() => {
       const style = getComputedStyle(document.querySelector('.view-switcher button[aria-current="page"]'))
@@ -162,7 +162,7 @@ test('keeps filmstrip memory bounded by loading thumbnails before originals', as
   try {
     const window = await app.firstWindow()
     const before = await window.evaluate('(performance.memory && performance.memory.usedJSHeapSize) || 0') as number
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('四种雨夜唱片封面构图')
     await openGenerationOptions(window)
     await window.getByLabel('生成数量').selectOption('4')

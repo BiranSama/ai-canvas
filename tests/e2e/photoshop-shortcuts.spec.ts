@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { samplePsd } from '../helpers/psd-fixture'
+import { openEditor } from '../helpers/workbench-ui'
 
 const IMAGE = resolve('tests/visual/__screenshots__/m3-canvas-1024x700.png')
 
@@ -39,7 +40,7 @@ async function artboardPoint(page: Page, x: number, y: number): Promise<{ x: num
 
 async function newCanvas(page: Page): Promise<void> {
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByTestId('canvas-stage')).toBeVisible()
 }
 

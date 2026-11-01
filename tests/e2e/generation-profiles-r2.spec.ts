@@ -20,7 +20,7 @@ test('AC-R2-04/08/09 runs draft and confirmed final simulations with profile pro
     const window = await app.firstWindow()
     window.on('request', (request) => { if (/^https?:/i.test(request.url())) externalRequests.push(request.url()) })
     await window.waitForLoadState('domcontentloaded')
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await openGenerationOptions(window)
     const profiles = window.getByRole('group', { name: '生成档位' })
 
@@ -60,10 +60,9 @@ test('AC-R2-04/08/09 runs draft and confirmed final simulations with profile pro
     await expect(family.getByRole('listitem')).toHaveCount(3)
     await expect(family.locator('.result-provenance')).toContainText(/档位|模型|Scene|回执/)
 
+    // The settings no longer repeat the profiles on a page of their own; 出图 lists them where they are chosen.
     await window.getByTestId('open-settings').evaluate((button) => button.click())
-    await window.getByRole('button', { name: '生成档位' }).evaluate((button) => button.click())
-    await expect(window.locator('[data-profile-id]')).toHaveCount(6)
-    await expect(window.locator('[data-profile-id="configured-final"]')).toContainText('可用 · 费用未知；有可靠回执时显示实际金额')
+    await expect(window.getByRole('dialog', { name: '设置', exact: true }).getByRole('button', { name: '生成档位' })).toHaveCount(0)
     expect(externalRequests).toEqual([])
   } finally {
     await app.close()

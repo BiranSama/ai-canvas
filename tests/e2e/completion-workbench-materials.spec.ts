@@ -23,7 +23,7 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
       await page.getByLabel('对话输入', { exact: true }).fill('创建一张 4:5 的山海封面，主体是一座远山，标题写“山海之间”，保留大面积留白，先不要生成图片。')
       await hit(page.getByRole('button', { name: '发送要求', exact: true }))
       await expect(page.getByTestId('operation-receipt')).toBeVisible()
-      await hit(page.getByRole('button', { name: '生成', exact: true }))
+      await hit(page.getByRole('button', { name: '出图', exact: true }))
       await page.getByTestId('generation-prompt').fill('山海之间，远山与留白')
       await hit(page.getByTestId('generation-submit'))
       await expect(page.getByTestId('generation-result')).toHaveCount(1)

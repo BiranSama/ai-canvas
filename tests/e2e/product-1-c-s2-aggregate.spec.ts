@@ -52,7 +52,7 @@ test('C-S2/D-S1 keeps one direction across Agent generation, final continuation,
       return (await api.listGenerationJobs()).find((job) => job.request.parameters.mode === 'canvas')?.status ?? null
     }), { timeout: 15_000 }).toBe('completed')
 
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
     await expect(window.locator('.saved-mark')).toContainText('已保存')
     await expect(window.locator('.provider-boundary')).toContainText('本地离线档不联网')

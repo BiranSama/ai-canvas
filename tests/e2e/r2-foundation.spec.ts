@@ -3,6 +3,7 @@ import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('AC-R2-01/02 opens from the path-free project library and keeps Glass Island layout outside Scene', async () => {
   test.setTimeout(60_000)
@@ -15,6 +16,7 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     window.on('request', (request) => {
       if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
     })

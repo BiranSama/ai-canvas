@@ -23,7 +23,7 @@ test('continued-generation controls, artwork and lineage remain reachable across
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1440, height: 900 })
-    await window.getByRole('button', { name: '生成', exact: true }).click()
+    await window.getByRole('button', { name: '出图', exact: true }).click()
     await window.getByTestId('generation-prompt').fill('安静的植物产品海报，柔和侧光，文字只作为轻盈的层级参考')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })

@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { cpus, platform, release, tmpdir, totalmem } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { captureWorkbench, hitWorkbenchControl as hit } from '../helpers/workbench-ui'
+import { captureWorkbench, hitWorkbenchControl as hit, openEditor } from '../helpers/workbench-ui'
 import { waitForPaintedShape } from '../helpers/canvas-hit-readiness'
 
 function summary(values: number[]) {
@@ -103,11 +103,11 @@ test('measures real drag, resize and focus work with 100 Main elements, long con
       const focusStarted = performance.now()
       await hit(page.getByRole('button', { name: '对话', exact: true }))
       await expect(page.getByLabel('对话输入', { exact: true })).toBeVisible()
-      await hit(page.getByRole('button', { name: '生成', exact: true }))
+      await hit(page.getByRole('button', { name: '出图', exact: true }))
       await expect(page.getByTestId('generation-result')).toHaveCount(8)
       await expect.poll(() => page.locator('.result-focus img').evaluateAll((nodes) => nodes.length > 0 && nodes.every((node) => (node as unknown as { complete: boolean }).complete && (node as unknown as { naturalWidth: number }).naturalWidth > 0))).toBe(true)
       await painted(page); focuses.push(performance.now() - focusStarted)
-      await hit(page.getByRole('button', { name: '画布', exact: true }))
+      await openEditor(page)
       const windowStarted = performance.now()
       await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0]!.setContentSize(width, 900), index % 2 ? 1440 : 1480)
       await painted(page); windowResizes.push(performance.now() - windowStarted)

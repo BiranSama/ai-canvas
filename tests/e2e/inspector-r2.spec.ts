@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('AC-R2-03 projects typed simple properties and the same data into horizontal docking', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-r2-inspector-'))
@@ -12,6 +13,7 @@ test('AC-R2-03 projects typed simple properties and the same data into horizonta
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.setViewportSize({ width: 1024, height: 700 })
     await window.getByRole('button', { name: '文字 T', exact: true }).evaluate((button: { click(): void }) => button.click())
     await window.getByRole('tab', { name: /属性/ }).evaluate((button: { click(): void }) => button.click())

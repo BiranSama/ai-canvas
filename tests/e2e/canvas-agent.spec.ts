@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('AC-R1-07 keeps a scoped Agent edit on canvas with receipt, no generation and one-step undo', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-canvas-agent-'))
@@ -14,6 +15,7 @@ test('AC-R1-07 keeps a scoped Agent edit on canvas with receipt, no generation a
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
+    await openEditor(window)
     await window.setViewportSize({ width: 1440, height: 900 })
     await window.getByRole('button', { name: '文字 T', exact: true }).click()
     await window.getByRole('button', { name: '形状', exact: true }).click()
@@ -33,7 +35,7 @@ test('AC-R1-07 keeps a scoped Agent edit on canvas with receipt, no generation a
     await window.getByRole('textbox', { name: '创作输入' }).fill('整体向右移一点，标题更大，先不要生成')
     await window.getByRole('button', { name: '发送创作指令' }).click()
     await expect(window.getByTestId('canvas-agent-receipt')).toBeVisible({ timeout: 10_000 })
-    await expect(window.getByRole('button', { name: '画布', exact: true })).toHaveAttribute('aria-current', 'page')
+    await expect(window.getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
 
     const after = await window.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop

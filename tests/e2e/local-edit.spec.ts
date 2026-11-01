@@ -1,4 +1,4 @@
-import { openGenerationOptions } from '../helpers/workbench-ui'
+import { openGenerationOptions, openEditor } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -27,8 +27,9 @@ test('AC-04 keeps the source immutable and retains a failed mask edit for exact 
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.setViewportSize({ width: 1280, height: 800 })
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('Stable source for a local edit')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
@@ -103,7 +104,7 @@ test('AC-04 keeps the source immutable and retains a failed mask edit for exact 
       })
       return submitted.jobId
     }, { sourceResultId: sourceResult!.id })
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await expect.poll(async () => (await listJobs(window)).find((job) => job.id === failedJobId)?.status).toBe('failed')
     await expect(window.getByTestId('generation-status')).toContainText('本地离线引擎 · 失败状态验证')
     await expect(window.getByTestId('generation-status')).toContainText('要求已保留')

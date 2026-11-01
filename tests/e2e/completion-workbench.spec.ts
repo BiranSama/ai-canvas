@@ -53,7 +53,7 @@ for (const size of sizes) for (const zoom of zooms) {
       await page.getByLabel('文字内容', { exact: true }).fill('山海之间')
       await page.getByLabel('文字内容', { exact: true }).blur()
       await expect.poll(() => page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap()).scene.elements.some((element) => element.type === 'text' && element.content === '山海之间'))).toBe(true)
-      await hit(page.getByRole('button', { name: '生成', exact: true }))
+      await hit(page.getByRole('button', { name: '出图', exact: true }))
       await page.getByTestId('generation-prompt').fill('山海之间，安静的山与海，保留轻盈留白。离线布局验收作品。')
       await hit(page.locator('.generation-options > summary'))
       await page.getByLabel('生成数量', { exact: true }).selectOption('2')

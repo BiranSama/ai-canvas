@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('AC-03 compiles the structured canvas into a deterministic reference and a new result', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-reference-'))
@@ -15,7 +16,7 @@ test('AC-03 compiles the structured canvas into a deterministic reference and a 
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1280, height: 800 })
     await expect(window.getByTestId('canvas-stage')).toBeVisible()
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('雨夜黑胶唱片，安静的编辑构图，冷色轮廓光')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
@@ -51,7 +52,7 @@ test('AC-03 compiles the structured canvas into a deterministic reference and a 
     expect(first.negativePrompt).toContain('选择框')
     expect(first.parameters).toMatchObject({ mode: 'canvas', originalRequirement: expect.stringContaining('雨夜唱片封面'), promptIr: { sceneRevision: 1 } })
 
-    await window.getByRole('button', { name: '画布', exact: true }).evaluate((button) => button.click())
+    await openEditor(window)
     await window.getByTestId('canvas-stage').locator('.konvajs-content').evaluate((surface) => {
       const rect = surface.getBoundingClientRect()
       const BrowserWheelEvent = Reflect.get(globalThis, 'WheelEvent') as new (
@@ -80,7 +81,7 @@ test('AC-03 compiles the structured canvas into a deterministic reference and a 
       })
     })
     expect(repeated.referenceAssetId).toBe(first.referenceAssetId)
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await expect(window.getByTestId('generation-result')).toHaveCount(3, { timeout: 15_000 })
     const sceneAfter = await window.evaluate(async () => {
       const renderer = globalThis as typeof globalThis & { readonly desktop: DesktopApi }

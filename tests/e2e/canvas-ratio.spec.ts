@@ -63,7 +63,7 @@ test('AC-R1-09 submits a 7:5 Mock generation and preserves its result lineage on
   })
   try {
     const window = await app.firstWindow()
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('抽象光影封面，纸张质感与克制的色块')
     await openGenerationOptions(window)
     await window.getByLabel('自由生成比例').fill('7:5')

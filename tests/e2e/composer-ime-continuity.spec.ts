@@ -2,12 +2,14 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('Chinese composition survives autosave in both shared composers without sending candidate Enter', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-composer-ime-'))
   const app = await electron.launch({ args: ['.', `--user-data-dir=${userData}`], cwd: resolve('.'), env: { ...process.env, AI_CANVAS_E2E: '1' } })
   try {
     const page = await app.firstWindow()
+    await openEditor(page)
     await page.setViewportSize({ width: 1440, height: 900 })
     const cdp = await page.context().newCDPSession(page)
     for (const [view, label] of [['对话', '对话输入'], ['画布', '创作输入']] as const) {

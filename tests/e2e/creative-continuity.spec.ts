@@ -14,7 +14,7 @@ test('a continued result records its parent, requested change, preserved facts a
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1440, height: 900 })
-    await window.getByRole('button', { name: '生成', exact: true }).click()
+    await window.getByRole('button', { name: '出图', exact: true }).click()
     await window.getByTestId('generation-prompt').fill('克制的晨间咖啡海报，陶瓷杯居中偏下，标题只作为轻盈的排版参考')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })

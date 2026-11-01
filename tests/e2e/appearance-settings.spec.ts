@@ -2,6 +2,7 @@ import { _electron as electron, expect, test, type ElectronApplication } from '@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('appearance themes and glass materials apply immediately and persist across restart', async () => {
   const testInfo = test.info()
@@ -52,7 +53,7 @@ test('appearance themes and glass materials apply immediately and persist across
     await window.getByRole('textbox', { name: '对话输入' }).fill('创建一张 4:5 的山海封面，远山在中央偏下，顶部保留轻盈标题区域，柔和雾光，先不要生成图片。')
     await window.getByRole('button', { name: '发送要求' }).evaluate((button: { click(): void }) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
-    await window.getByRole('button', { name: '画布', exact: true }).evaluate((button: { click(): void }) => button.click())
+    await openEditor(window)
     await window.screenshot({ path: join(captures, 'vt1-canvas-dusk-satin-1440x900.png') })
 
     await window.getByRole('button', { name: '设置', exact: true }).evaluate((button: { click(): void }) => button.click())

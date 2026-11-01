@@ -28,7 +28,7 @@ test('Provider settings make protocol routing and the real connection confirmati
     await dialog.getByLabel('LLM Provider 输出上限').fill('8192')
     await expect(llmRow.getByLabel('LLM Provider 能力').getByText('图像理解')).toBeVisible()
     await expect(llmRow.locator('.provider-resolved-endpoint')).toContainText('https://llm.example.test/v1/chat/completions')
-    await llmRow.getByRole('button', { name: '保存公开配置', exact: true }).evaluate((button) => button.click())
+    await llmRow.getByRole('button', { name: '保存', exact: true }).evaluate((button) => button.click())
     await expect(dialog.getByTestId('provider-settings-status')).toContainText('未发起网络请求')
 
     const keyInput = dialog.getByLabel('火山方舟 · Seed 2.1 Turbo API Key')
@@ -65,7 +65,7 @@ test('the image module freely configures an explicit protocol and opens directly
     window.on('request', (request) => {
       if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
     })
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await openGenerationOptions(window)
     await window.getByRole('button', { name: '配置图片模型' }).click()
 
@@ -79,7 +79,7 @@ test('the image module freely configures an explicit protocol and opens directly
     await imageRow.getByLabel('Image Provider 默认模型').fill('owner-image-model')
     await expect(imageRow.locator('.provider-resolved-endpoint')).toContainText('https://images.example.test/v1/images/generations')
     await expect(imageRow.locator('.provider-resolved-endpoint')).toContainText('https://images.example.test/v1/images/edits')
-    await imageRow.getByRole('button', { name: '保存公开配置', exact: true }).evaluate((button) => button.click())
+    await imageRow.getByRole('button', { name: '保存', exact: true }).evaluate((button) => button.click())
     await expect(dialog.getByTestId('provider-settings-status')).toContainText('未发起网络请求')
     const imageKey = imageRow.getByLabel('Owner Image Relay API Key')
     await imageKey.fill('synthetic-owner-image-key')

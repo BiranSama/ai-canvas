@@ -124,7 +124,7 @@ test('AC-R2-06 retains a failed edit annotation and retries the exact request sa
         return original(event, input)
       })
     })
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('Source image for transient annotation retry')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })

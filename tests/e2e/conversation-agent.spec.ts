@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import Database from 'better-sqlite3'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { openDirectionReview, openTurnProcess } from '../helpers/workbench-ui'
+import { openDirectionReview, openEditor, openTurnProcess } from '../helpers/workbench-ui'
 
 const REQUEST = '创建一张 3:2 的雨夜唱片封面，标题是 AFTER RAIN，黑胶唱片放在右下方，后方有柔和轮廓光。先不要生成图片。'
 
@@ -116,7 +116,7 @@ test('AC-01 creates one persistent layout through conversation without implicit 
     await reopened.window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())
     await expect(reopened.window.getByRole('paragraph').filter({ hasText: REQUEST })).toBeVisible()
     await expect(reopened.window.getByTestId('operation-receipt')).toBeVisible()
-    await reopened.window.getByRole('button', { name: '画布', exact: true }).evaluate((button) => button.click())
+    await openEditor(reopened.window)
     const layers = reopened.window.getByRole('listbox', { name: '图层' }).getByRole('option')
     await expect(layers).toHaveCount(8)
     await expect(reopened.window.getByText('唱片主体组', { exact: true })).toBeVisible()

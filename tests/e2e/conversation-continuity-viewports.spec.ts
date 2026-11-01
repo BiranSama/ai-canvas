@@ -34,7 +34,7 @@ for (const viewport of VIEWPORTS) {
       await input.fill('创建一张安静的 4:5 植物产品海报，先不要生成图片。')
       await input.press('Enter')
       await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
-      await window.getByRole('button', { name: '新建创作任务' }).click({ force: true })
+      await window.getByRole('button', { name: '新任务', exact: true }).click({ force: true })
       await input.fill('创建一张 16:9 山海封面，主体是一座远山，标题写“山海之间”，先不要生成图片。')
       await input.press('Enter')
       await expect.poll(() => window.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap()).scene.canvas)).toMatchObject({ aspectWidth: 16, aspectHeight: 9 })

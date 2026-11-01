@@ -15,7 +15,7 @@ test('uses seconds in settings, reads back the saved policy, and shows the persi
     })
     const page = await app.firstWindow(); await page.setViewportSize({ width: 1440, height: 900 })
     await page.locator('.new-project-main').click()
-    await page.getByRole('button', { name: '生成', exact: true }).click()
+    await page.getByRole('button', { name: '出图', exact: true }).click()
     await openGenerationOptions(page)
     await page.getByRole('button', { name: '配置图片模型', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '设置', exact: true })
@@ -24,7 +24,7 @@ test('uses seconds in settings, reads back the saved policy, and shows the persi
     await image.getByLabel('Image Provider API 地址').fill('https://time-ui.example.test/v1')
     await image.getByLabel('Image Provider 默认模型').fill('synthetic-time-model')
     await image.getByLabel('Image Provider 超时').fill('300')
-    await image.getByRole('button', { name: '保存公开配置', exact: true }).click()
+    await image.getByRole('button', { name: '保存', exact: true }).click()
     await expect(image.getByTestId('image-provider-effective-timeout')).toContainText('已保存：300 秒')
     await expect(image.getByTestId('image-provider-effective-timeout')).toContainText('排队不计入')
     const saved = await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getProviderSettings())
@@ -32,8 +32,8 @@ test('uses seconds in settings, reads back the saved policy, and shows the persi
     await page.screenshot({ path: test.info().outputPath('saved-image-timeout-seconds.png') })
     await dialog.getByRole('button', { name: '关闭设置', exact: true }).click()
     await page.getByRole('button', { name: '对话', exact: true }).click()
-    await page.getByRole('group', { name: 'Agent 模式', exact: true }).getByRole('button', { name: '审阅', exact: true }).click()
-    await page.getByLabel('对话输入').fill('调整画布为一张安静的封面，先不要生成图片')
+    // The turn waits on the generation question, so its time policy is read while it is open.
+    await page.getByLabel('对话输入').fill('创建一张4:5的安静封面，标题为晨雾。')
     await page.getByRole('button', { name: '发送要求', exact: true }).click()
     // The turn's time is a guard against a run going astray, far above what a picture takes.
     await expandExecutionFlow(page)

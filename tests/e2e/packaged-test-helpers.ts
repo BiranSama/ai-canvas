@@ -13,6 +13,6 @@ export const packagedTestEnvironment: { [key: string]: string } = {
 export async function enterPackagedWorkspace(window: Page): Promise<void> {
   await expect(window.getByRole('heading', { name: '项目' })).toBeVisible({ timeout: 15_000 })
   await window.getByRole('button', { name: '空白画布', exact: true }).click()
-  await expect(window.getByRole('button', { name: '画布', exact: true })).toHaveAttribute('aria-current', 'page', { timeout: 15_000 })
+  await expect(window.getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page', { timeout: 15_000 })
   await expect(window.getByTestId('canvas-stage')).toBeVisible()
 }

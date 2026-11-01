@@ -13,7 +13,7 @@ test('long failed requests stay compact and details scroll without displacing th
     await page.waitForLoadState('domcontentloaded')
     const input = generationRequestSchema.parse({ providerId: 'mock', model: 'mock-balanced', prompt: '安静的山海海报', aspectWidth: 4, aspectHeight: 5, outputWidth: 1024, outputHeight: 1280, count: 1 })
     await page.evaluate(async request => (globalThis as typeof globalThis & { desktop: DesktopApi }).desktop.enqueueGeneration(request), input)
-    await page.getByRole('button', { name: '生成', exact: true }).click()
+    await page.getByRole('button', { name: '出图', exact: true }).click()
     await expect(page.getByTestId('generation-result')).toHaveCount(1, { timeout: 15000 })
     await page.evaluate(async request => (globalThis as typeof globalThis & { desktop: DesktopApi }).desktop.enqueueGeneration(request), { ...input, model: 'mock-failure', prompt: '完整要求：山海人物、准确文字、光影与层次。'.repeat(300) })
     await expect(page.getByTestId('generation-status')).toContainText('生成失败', { timeout: 15000 })

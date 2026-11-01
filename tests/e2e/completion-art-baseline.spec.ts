@@ -34,7 +34,7 @@ for (const fixture of [
       await expect(page.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
       const before = await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())
       await writeFile(testInfo.outputPath(`${fixture.id}-scene-before.json`), JSON.stringify(before, null, 2))
-      await page.getByRole('button', { name: '生成', exact: true }).click()
+      await page.getByRole('button', { name: '出图', exact: true }).click()
       await page.getByTestId('generation-prompt').fill(fixture.brief)
       await page.getByTestId('generation-submit').click()
       await expect(page.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })

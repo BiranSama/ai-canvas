@@ -1,4 +1,4 @@
-import { openGenerationOptions } from '../helpers/workbench-ui'
+import { openGenerationOptions, openEditor } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
 import { mkdtemp, readdir, unlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -35,7 +35,7 @@ test('shows unknown and verified zero honestly, deduplicates task fees and resto
   const userData = await mkdtemp(join(tmpdir(), 'cost-ui-'))
   await launch(userData)
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   const id = (await bootstrap()).projectId
   for (let index = 0; index < 3; index++) {
     if (index > 0) await page.getByRole('button', { name: /展开参数/ }).click()
@@ -77,8 +77,9 @@ test('shows unknown and verified zero honestly, deduplicates task fees and resto
   const persisted = await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs())
   await writeFile(test.info().outputPath('cost-main-facts.json'), JSON.stringify({ jobs: persisted, network: 0, syntheticReceipt: true }, null, 2))
   await page.getByRole('button', { name: '设置', exact: true }).click()
+  await page.getByRole('dialog', { name: '设置', exact: true }).getByRole('button', { name: '高级', exact: true }).click()
   await expect(page.getByLabel('每任务预约额度')).toBeVisible()
-  await expect(page.getByRole('complementary', { name: 'Provider 执行边界' })).toContainText('价格未知时，预约不保证实际人民币扣费上限')
+  await expect(page.locator('.settings-job-limits')).toContainText('价格没填时，预留的钱不代表实际扣费上限')
   await page.getByRole('button', { name: '关闭设置', exact: true }).click()
 })
 
@@ -86,7 +87,7 @@ test('A/B versions, unsent drafts and current view survive three focuses, projec
   const userData = await mkdtemp(join(tmpdir(), 'context-ui-'))
   await launch(userData)
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   await page.getByTestId('generation-prompt').fill('A 山海之间，远山与留白')
   await openGenerationOptions(page)
   await page.getByLabel('生成数量').selectOption('3')
@@ -104,9 +105,9 @@ test('A/B versions, unsent drafts and current view survive three focuses, projec
   await expect.poll(async () => (await bootstrap()).workContext?.generation.compareBId).toBe(ids[2])
   await page.getByRole('button', { name: '对话', exact: true }).click()
   await page.getByLabel('对话输入').fill('A 下一轮只调整光线，尚未发送')
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByLabel('创作输入')).toHaveValue('A 下一轮只调整光线，尚未发送')
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   await expect(page.getByLabel('比较版本 A')).toHaveValue(ids[1]!)
   await expect(page.getByLabel('比较版本 B')).toHaveValue(ids[2]!)
   await expect(page.getByRole('button', { name: '操作 B', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -116,7 +117,7 @@ test('A/B versions, unsent drafts and current view survive three focuses, projec
   await expect.poll(async () => (await bootstrap()).projectId).not.toBe(selected.projectId)
   const b = await bootstrap()
   expect(b.projectId).not.toBe(selected.projectId)
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   await expect(page.getByTestId('generation-prompt')).toHaveValue('')
   await expect(page.getByLabel('生成数量')).toHaveValue('1')
   await expect(page.locator('.result-focus img')).toHaveCount(0)
@@ -162,7 +163,7 @@ test('save-as makes an independent project and keeps its restored Generate contr
   const userData = await mkdtemp(join(tmpdir(), 'context-copy-'))
   await launch(userData)
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   await page.getByTestId('generation-prompt').fill('副本之前的未发送要求')
   await openGenerationOptions(page)
   await page.getByLabel('生成数量').selectOption('2')
@@ -195,7 +196,7 @@ for (const revisitA of [false, true]) test(`rejects a delayed file read after A 
   const userData = await mkdtemp(join(tmpdir(), 'context-import-'))
   await launch(userData)
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   const a = await bootstrap()
   await page.evaluate(() => {
     const browser = globalThis as unknown as { File: { prototype: { arrayBuffer: () => Promise<ArrayBuffer> } }; __releaseRead: () => void; __readFinished: boolean }
@@ -254,7 +255,7 @@ test('clears unavailable comparison references and actionable previews while kee
   const userData = await mkdtemp(join(tmpdir(), 'context-missing-'))
   await launch(userData)
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   await page.getByTestId('generation-prompt').fill('结果移除后仍保留这条画面要求')
   await openGenerationOptions(page)
   await page.getByLabel('生成数量').selectOption('2')

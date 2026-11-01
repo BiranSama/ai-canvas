@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { openTurnProcess } from '../helpers/workbench-ui'
+import { openTurnProcess, openEditor } from '../helpers/workbench-ui'
 
 test.setTimeout(65000)
 let app: ElectronApplication
@@ -41,7 +41,7 @@ test('preserves visual musts, accepts a concrete version with a real click, and 
   const accepted = await conversation()
   expect(accepted.messages.findLast((message) => message.receipt?.completion?.userAcceptance !== null)?.receipt?.completion?.userAcceptance?.sceneRevision).toBe(before.scene.revision)
   expect((await bootstrap()).scene).toEqual(before.scene)
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await page.getByRole('button', { name: '形状', exact: true }).click()
   await expect.poll(async () => (await bootstrap()).scene.revision).toBeGreaterThan(before.scene.revision)
   await page.getByRole('button', { name: '对话', exact: true }).click()

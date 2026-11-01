@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('keeps canvas controls usable at 150 percent device scale', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-hidpi-'))
@@ -13,6 +14,7 @@ test('keeps canvas controls usable at 150 percent device scale', async () => {
 
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.setViewportSize({ width: 1280, height: 800 })
     const cdp = await app.context().newCDPSession(window)
     await cdp.send('Emulation.setDeviceMetricsOverride', {

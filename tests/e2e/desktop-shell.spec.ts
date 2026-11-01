@@ -2,6 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('launches the production canvas with native modules isolated in Main', async () => {
   test.setTimeout(60_000)
@@ -17,7 +18,7 @@ test('launches the production canvas with native modules isolated in Main', asyn
     window.on('console', (message) => console.log(`[renderer:${message.type()}] ${message.text()}`))
     window.on('pageerror', (error) => console.log(`[renderer:error] ${error.message}`))
     await window.waitForLoadState('domcontentloaded')
-    await expect(window.getByRole('button', { name: '画布', exact: true })).toHaveAttribute('aria-current', 'page')
+    await expect(window.getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
     await expect(window.getByTestId('canvas-stage')).toBeVisible()
     await expect(window.getByRole('listbox', { name: '图层' })).toBeVisible()
     await expect(window.getByTitle(/SQLite \d.*Sharp \d/)).toBeVisible()
@@ -27,7 +28,7 @@ test('launches the production canvas with native modules isolated in Main', asyn
     await window.getByRole('textbox', { name: '对话输入' }).fill('创建一张 4:5 的植物展览海报，标题是 VERDANT，蕨叶标本放在中央偏下，后方有柔和轮廓光。先不要生成图片。')
     await window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
-    await window.getByRole('button', { name: '画布', exact: true }).evaluate((button) => button.click())
+    await openEditor(window)
 
     const stage = window.getByTestId('canvas-stage')
     const viewportScale = window.getByTestId('viewport-scale')

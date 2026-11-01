@@ -20,28 +20,29 @@ test('AH1 S8 exposes truthful modes, Review approval, live plan and inspectable 
     window.on('request', (request) => { if (/^https?:/i.test(request.url())) externalRequests.push(request.url()) })
     await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())
 
-    const modes = window.getByRole('group', { name: 'Agent 模式' })
-    await expect(modes.getByRole('button', { name: '协作' })).toHaveAttribute('aria-pressed', 'true')
-    await modes.getByRole('button', { name: '审阅' }).evaluate((button) => button.click())
-    await expect(modes.getByRole('button', { name: '审阅' })).toHaveAttribute('aria-pressed', 'true')
-
-    await window.getByRole('textbox', { name: '对话输入' }).fill('使用 4:5 画布创建一张克制的银蓝海报，标题为 QUIET CURRENT，先不要生成图片。')
+    // No mode switches on the composer: the Agent works one way and asks before it generates.
+    await expect(window.getByRole('group', { name: 'Agent 模式' })).toHaveCount(0)
+    await window.getByRole('textbox', { name: '对话输入' }).fill('使用 4:5 画布创建一张克制的银蓝海报，标题为 QUIET CURRENT。')
     await window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())
     await expect(window.getByTestId('agent-live-plan')).toBeVisible({ timeout: 10_000 })
-    const reviewDecision = window.getByRole('group', { name: '先确认这项修改' })
-    await expect(reviewDecision).toBeVisible()
-    await expect(window.getByRole('group', { name: '这条消息如何加入当前工作' })).toBeVisible()
+    const generationDecision = window.getByRole('group', { name: '要现在生成图片吗？' })
+    await expect(generationDecision).toBeVisible({ timeout: 10_000 })
 
     const before = await window.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop
-      const [bootstrap, harness] = await Promise.all([api.getWorkspaceBootstrap(), api.getAgentHarnessSnapshot()])
-      return { revision: bootstrap.scene.revision, mode: harness.activeGoal?.mode, budget: harness.activeGoal?.budget }
+      return { mode: (await api.getAgentHarnessSnapshot()).activeGoal?.mode }
     })
-    expect(before).toMatchObject({ revision: 0, mode: 'review', budget: { maxGenerationJobs: 0, maxGeneratedImages: 0 } })
+    expect(before).toMatchObject({ mode: 'collaboration' })
 
-    await window.getByRole('button', { name: '排到下一轮' }).evaluate((button) => button.click())
-    await expect(window.getByRole('button', { name: '排到下一轮' })).toHaveAttribute('aria-pressed', 'true')
-    await reviewDecision.getByRole('button', { name: '执行这一步' }).evaluate((button) => button.click())
+    // While it waits, a message joins the turn the way its words suggest; one line says how, and it can be changed.
+    await window.getByRole('textbox', { name: '对话输入' }).fill('下一步再把标题加粗')
+    await expect(window.locator('.turn-input-hint')).toContainText('排到下一轮')
+    await expect(window.getByRole('group', { name: '这条消息如何加入当前工作' })).toHaveCount(0)
+    await window.locator('.turn-input-hint').getByRole('button', { name: '改一下' }).click()
+    await expect(window.getByRole('group', { name: '这条消息如何加入当前工作' })).toBeVisible()
+    await expect(window.getByRole('button', { name: /排到下一轮/ })).toHaveAttribute('aria-pressed', 'true')
+    await window.getByRole('textbox', { name: '对话输入' }).fill('')
+    await generationDecision.getByRole('button', { name: '先保留画布' }).evaluate((button) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
     await openTurnProcess(window)
     await window.getByRole('button', { name: '本轮执行记录', exact: true }).click()
