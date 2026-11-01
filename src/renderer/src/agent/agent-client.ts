@@ -1,6 +1,7 @@
 import type { Scene } from '../../../domain'
 import type { AgentRequest, EphemeralAnnotation, SceneSummary } from '../../../shared/agent'
 import { useWorkspaceStore } from '../store/workspace-store'
+import type { ReferenceAttachment } from '../store/creation-session-store'
 
 export function summarizeScene(scene: Scene): SceneSummary {
   return {
@@ -52,12 +53,6 @@ export function summarizeScene(scene: Scene): SceneSummary {
       transform: { ...element.transform }
     }))
   }
-}
-
-/** A picture the person attached from this computer: a reference for the Agent, not a layer on the canvas. */
-export interface ReferenceAttachment {
-  readonly assetId: string
-  readonly name: string
 }
 
 export async function createAgentRequest(

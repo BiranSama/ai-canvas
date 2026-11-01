@@ -4,14 +4,14 @@ import type { AgentActivity, AgentRun, ConversationSnapshot, OperationReceipt } 
 import { adaptLegacyTurnInputMode, type AgentHarnessSnapshot, type AgentTurnStatus, type TaskRelation, type TurnInputMode } from '../../../shared/agent-harness'
 import type { ProjectKnowledgeSnapshot } from '../../../shared/agent-context'
 import type { DesignDirectionSelectionResult } from '../../../shared/design-direction-selection'
-import { createAgentRequest, type ReferenceAttachment } from '../agent/agent-client'
+import { createAgentRequest } from '../agent/agent-client'
 import { agentEventsForTurn, subscribeAgentUpdates, subscribeAgentTransportUpdates } from '../agent/agent-event-stream'
 import { buildEphemeralAnnotationSaveCommands } from '../agent/ephemeral-annotation'
 import { currentEphemeralAnnotation, useEphemeralAnnotationStore } from '../agent/ephemeral-annotation-store'
 import { CanvasStage, type CanvasStageHandle } from '../canvas/CanvasStage'
 import { exportCanvasImage, type ExportFormat } from '../canvas/export-canvas'
 import { projectAgentExecutionFlow } from '../agent/agent-execution-flow'
-import { generatesWithoutAsking, useCreationSessionStore } from '../store/creation-session-store'
+import { generatesWithoutAsking, MAX_REFERENCES, useCreationSessionStore } from '../store/creation-session-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { AgentExecutionFlowView } from './AgentExecutionFlow'
 import { AgentContextSheet } from './AgentContextSheet'
@@ -71,7 +71,6 @@ function taskTitle(snapshot: ConversationSnapshot, run: AgentRun): string {
   return content.length > 54 ? `${content.slice(0, 54)}…` : content
 }
 
-const MAX_REFERENCES = 4
 const REFERENCE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 const INPUT_MODE_COPY: Record<TurnInputMode, { readonly label: string; readonly note: string }> = {
@@ -212,8 +211,9 @@ export function ConversationView({ Header, onShowLibrary }: {
   const [explicitInputMode, setExplicitInputMode] = useState<{ readonly turnId: string; readonly mode: TurnInputMode } | null>(null)
   const [idleTaskRelation, setIdleTaskRelation] = useState<TaskRelation>('continue_current')
   /** Pictures attached from this computer for the next message. */
-  const [references, setReferences] = useState<readonly ReferenceAttachment[]>([])
-  const [attaching, setAttaching] = useState(false)
+  const references = useCreationSessionStore((state) => state.references)
+  const attaching = useCreationSessionStore((state) => state.pendingReferences > 0)
+  const removeReference = useCreationSessionStore((state) => state.removeReference)
   const attachInputRef = useRef<HTMLInputElement>(null)
   const previewStageRef = useRef<CanvasStageHandle>(null)
   const projectName = useWorkspaceStore((state) => state.projectName)
@@ -567,29 +567,31 @@ export function ConversationView({ Header, onShowLibrary }: {
 
   const attachPictures = async (files: readonly File[]): Promise<void> => {
     const projectId = scene.projectId
-    setAttaching(true)
-    setProblem(null)
-    try {
-      for (const file of files.slice(0, Math.max(0, MAX_REFERENCES - references.length))) {
-        if (!REFERENCE_TYPES.has(file.type) || file.size <= 0 || file.size > 100 * 1024 * 1024) {
-          setProblem('附件只支持 PNG、JPEG、WebP 图片，最大 100 MB。')
-          continue
-        }
+    const session = useCreationSessionStore.getState()
+    const room = Math.max(0, MAX_REFERENCES - session.references.length - session.pendingReferences)
+    setProblem(files.length > room ? `一次最多附 ${MAX_REFERENCES} 张图。` : null)
+    // Each picture is added in the project's draft, so it stays while the person moves between views.
+    await Promise.all(files.slice(0, room).map(async (file) => {
+      if (!REFERENCE_TYPES.has(file.type) || file.size <= 0 || file.size > 100 * 1024 * 1024) {
+        setProblem('附件只支持 PNG、JPEG、WebP 图片，最大 100 MB。')
+        return
+      }
+      session.beginReference()
+      let added: { readonly assetId: string; readonly name: string } | null = null
+      try {
         const asset = await window.desktop.importAsset({
           projectId,
           name: file.name,
           mimeType: file.type as 'image/png' | 'image/jpeg' | 'image/webp',
           bytes: new Uint8Array(await file.arrayBuffer())
         })
-        if (!isCurrentProject()) return
-        setReferences((current) => [...current, { assetId: asset.id, name: file.name }].slice(0, MAX_REFERENCES))
+        added = { assetId: asset.id, name: file.name }
+      } catch {
+        if (isCurrentProject()) setProblem('附件没有加上，请重试。')
+      } finally {
+        useCreationSessionStore.getState().finishReference(projectId, added)
       }
-      if (files.length > MAX_REFERENCES - references.length) setProblem(`一次最多附 ${MAX_REFERENCES} 张图。`)
-    } catch {
-      if (isCurrentProject()) setProblem('附件没有加上，请重试。')
-    } finally {
-      setAttaching(false)
-    }
+    }))
   }
 
   // After a turn runs out of steps: a new turn on the same work, leaving whatever is being typed alone.
@@ -611,10 +613,7 @@ export function ConversationView({ Header, onShowLibrary }: {
       if (!isCurrentProject()) return
       if (ephemeralAnnotation !== null) markAnnotationSubmitted(run.id, text)
       else if (annotationVisible) clearAnnotation()
-      if (fromDraft) {
-        completeAcceptedTurn()
-        setReferences([])
-      }
+      if (fromDraft) completeAcceptedTurn()
       if (!hasActiveTurn) setIdleTaskRelation('continue_current')
       setExplicitInputMode(null)
       setInputModesOpen(false)
@@ -1254,7 +1253,7 @@ export function ConversationView({ Header, onShowLibrary }: {
                 {references.map((reference) => (
                   <span key={reference.assetId}>
                     <ImagePlus size={11} />{reference.name}
-                    <button type="button" aria-label={`移除附件 ${reference.name}`} onClick={() => setReferences((current) => current.filter((item) => item.assetId !== reference.assetId))}><X size={10} /></button>
+                    <button type="button" aria-label={`移除附件 ${reference.name}`} onClick={() => removeReference(reference.assetId)}><X size={10} /></button>
                   </span>
                 ))}
               </div>

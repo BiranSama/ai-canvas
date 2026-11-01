@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { ConversationView } from '../../src/renderer/src/components/ConversationView'
+import { useCreationSessionStore } from '../../src/renderer/src/store/creation-session-store'
 
 vi.mock('../../src/renderer/src/canvas/CanvasStage', () => ({ CanvasStage: () => <div /> }))
 
@@ -36,8 +37,9 @@ it('holds a message while attached pictures are still being added, and sends the
   const jobs = vi.fn(async () => [])
   const startAgentRun = vi.fn(async () => ({ id: 'run-1' }))
   Object.defineProperty(window, 'desktop', { configurable: true, value: { listGenerationJobs: jobs, importAsset, startAgentRun } })
-  const { container } = render(<ConversationView Header={() => null} onShowLibrary={() => undefined} />)
-  const picker = container.querySelector<HTMLInputElement>('.conversation-input-row input[type="file"]')!
+  useCreationSessionStore.setState({ references: [], pendingReferences: 0 })
+  const first = render(<ConversationView Header={() => null} onShowLibrary={() => undefined} />)
+  const picker = first.container.querySelector<HTMLInputElement>('.conversation-input-row input[type="file"]')!
   const picture = new File([new Uint8Array([1, 2, 3])], '参考.png', { type: 'image/png' })
   await act(async () => { fireEvent.change(picker, { target: { files: [picture] } }) })
   const input = screen.getByRole('textbox', { name: '对话输入' })
@@ -47,10 +49,16 @@ it('holds a message while attached pictures are still being added, and sends the
   fireEvent.keyDown(input, { key: 'Enter' })
   expect(jobs).not.toHaveBeenCalled()
 
+  // Leaving 对话 for another view and coming back keeps the picture being added, and then the added one.
+  first.unmount()
+  render(<ConversationView Header={() => null} onShowLibrary={() => undefined} />)
+  expect(screen.getByRole('button', { name: '发送要求' })).toBeDisabled()
   await act(async () => { finishImport() })
   expect(screen.getByRole('group', { name: '附件' })).toHaveTextContent('参考.png')
-  expect(send).toBeEnabled()
-  await act(async () => { fireEvent.click(send) })
+  fireEvent.change(screen.getByRole('textbox', { name: '对话输入' }), { target: { value: '照这张图的配色来' } })
+  const sendAgain = screen.getByRole('button', { name: '发送要求' })
+  expect(sendAgain).toBeEnabled()
+  await act(async () => { fireEvent.click(sendAgain) })
   expect(startAgentRun).toHaveBeenCalledWith(expect.objectContaining({
     attachments: expect.arrayContaining([expect.objectContaining({ kind: 'asset', id: '62000000-0000-4000-8000-000000000001' })])
   }), 'collaboration', 'new_task')

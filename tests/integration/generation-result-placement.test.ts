@@ -193,6 +193,13 @@ describe('AH1 S7 generation result actions', () => {
     const element = runtime.getWorkspaceBootstrap().scene.elements.find((candidate) => candidate.id === IDS.placeholder)!
     expect(element).toMatchObject({ type: 'image', transform: placeholder.transform, effects: expect.objectContaining({ feather: SUBJECT_FEATHER }) })
 
+    // A result with a placement of its own, such as a local edit, does not go looking for a place.
+    const edited = await waitForCompleted(runtime, (await runtime.enqueue({ ...request(), prompt: 'An edited picture', parameters: { mode: 'local-edit' } })).id)
+    const editPlacement = randomUUID()
+    const editPlaced = await runtime.placeGenerationResult({ resultId: edited.results[0]!.id, placementId: editPlacement, origin: 'user', preferredTargetId: IDS.placeholder })
+    expect(editPlaced).toMatchObject({ elementId: editPlacement })
+    expect(editPlaced.fit).toBeUndefined()
+
     // A locked place is left alone: the picture goes in the middle, as before.
     const second = await waitForCompleted(runtime, (await runtime.enqueue({ ...request(), prompt: 'Another object for a locked frame' })).id)
     const placementId = randomUUID()

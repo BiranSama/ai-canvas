@@ -2195,9 +2195,10 @@ export class GenerationRuntime {
     const layer = inContextLayerJob(match.job.request.parameters)
     const layerTarget = layer === null || targetElementId !== undefined ? undefined
       : current.elements.find((element) => element.id === layer.targetElementId && (element.type === 'image' || element.type === 'placeholder'))
-    const parameters = match.job.request.parameters
-    const preferred = targetElementId !== undefined || input.preferredTargetId === undefined || layer !== null
-      || selectionFillJob(parameters) !== null || unifiedRenderJob(parameters) !== null
+    // Only a picture made from a prompt looks for a place. A local edit, a fill, a redraw in context,
+    // a unified redraw or a composition from the canvas each has its own placement and keeps it.
+    const plainResult = typeof match.job.request.parameters.mode !== 'string'
+    const preferred = targetElementId !== undefined || input.preferredTargetId === undefined || !plainResult
       ? undefined
       : current.elements.find((element) => element.id === input.preferredTargetId && (element.type === 'image' || element.type === 'placeholder')
         && !element.locked && !current.elements.some((other) => (other.id === element.groupId && other.locked)

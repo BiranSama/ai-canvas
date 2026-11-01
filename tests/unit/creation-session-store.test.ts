@@ -4,7 +4,7 @@ import { asksBeforeGenerating, DEFAULT_PROVIDER_EXECUTION_POLICY, withAskBeforeG
 
 describe('creation session store', () => {
   beforeEach(() => {
-    useCreationSessionStore.setState({ projectId: null, draft: '', askBeforeGenerating: null })
+    useCreationSessionStore.setState({ projectId: null, draft: '', references: [], pendingReferences: 0, askBeforeGenerating: null })
   })
 
   it('shares a draft across views but clears it when the active project changes', () => {
@@ -17,6 +17,26 @@ describe('creation session store', () => {
 
     useCreationSessionStore.getState().bindProject('project-b')
     expect(useCreationSessionStore.getState()).toMatchObject({ projectId: 'project-b', draft: '' })
+  })
+
+  it('keeps attached pictures with the draft across views, and drops them with another project or a sent message', () => {
+    const session = useCreationSessionStore.getState()
+    session.bindProject('project-a')
+    session.beginReference()
+    expect(useCreationSessionStore.getState().pendingReferences).toBe(1)
+    useCreationSessionStore.getState().finishReference('project-a', { assetId: 'asset-1', name: '参考.png' })
+    // Returning to the same project, as a view switch does, keeps them.
+    useCreationSessionStore.getState().bindProject('project-a')
+    expect(useCreationSessionStore.getState()).toMatchObject({ pendingReferences: 0, references: [{ assetId: 'asset-1', name: '参考.png' }] })
+    // A picture that finishes after the project changed is not added to the next one.
+    useCreationSessionStore.getState().beginReference()
+    useCreationSessionStore.getState().bindProject('project-b')
+    useCreationSessionStore.getState().finishReference('project-a', { assetId: 'asset-2', name: '晚到.png' })
+    expect(useCreationSessionStore.getState()).toMatchObject({ projectId: 'project-b', references: [], pendingReferences: 0 })
+    useCreationSessionStore.getState().beginReference()
+    useCreationSessionStore.getState().finishReference('project-b', { assetId: 'asset-3', name: 'b.png' })
+    useCreationSessionStore.getState().completeAcceptedTurn()
+    expect(useCreationSessionStore.getState().references).toEqual([])
   })
 
   it('generates without asking only once the person turned 「生图前先问我」 off', () => {
