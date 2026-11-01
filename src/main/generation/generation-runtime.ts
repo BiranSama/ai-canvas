@@ -100,7 +100,7 @@ import { ArkHttpClient } from '../security/ark-http-client'
 import { KrillHttpTransport } from '../security/krill-http-transport'
 import { ProviderUsageLedger } from '../security/provider-usage-ledger'
 import { ProviderConnectionValidator } from '../security/provider-connection-validator'
-import { DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
+import { asksBeforeGenerating, DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
@@ -236,7 +236,7 @@ function configuredImageCapabilities(
 /** The longer side of a turn's before/after pictures, in pixels. */
 const TURN_SNAPSHOT_SIZE = 480
 
-class ProductGenerationPolicy extends GenerationPolicy {
+export class ProductGenerationPolicy extends GenerationPolicy {
   readonly #policy: () => ProviderExecutionPolicy
 
   constructor(policy: () => ProviderExecutionPolicy) {
@@ -250,9 +250,8 @@ class ProductGenerationPolicy extends GenerationPolicy {
       if (tool.kind === 'canvas_generation' || tool.kind === 'canvas_edit') return tool.providerId !== 'mock'
       return false
     })
-    const policy = this.#policy()
-    if (hasRealGeneration && policy.approvalMode === 'confirm_each') return true
-    if (hasRealGeneration && request.autoGenerate && !policy.autoGenerate) return true
+    // 「生图前先问我」 as the settings show it: on, every real generation asks, an explicit 「生成」 included.
+    if (hasRealGeneration && asksBeforeGenerating(this.#policy())) return true
     return super.requiresConfirmation(request, plan)
   }
 }

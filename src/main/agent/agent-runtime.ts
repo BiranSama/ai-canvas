@@ -145,7 +145,7 @@ export class AgentRuntime {
   readonly #persistentLoop: PersistentAgentLoop
   readonly #contextRepository: AgentContextRepository | null
   readonly #drawCanvas: (() => Promise<CanvasDrawing | null>) | null
-  /** The canvas as each run found it, drawn when it was sent and kept in memory until it finishes. */
+  /** The canvas as each run found it, drawn when its planning starts and kept in memory until it finishes. */
   readonly #beforeDrawings = new Map<string, Promise<CanvasDrawing | null>>()
   #closed = false
 
@@ -227,8 +227,6 @@ export class AgentRuntime {
       affectedIds: request.selectedIds
     })
     this.#logger.write('info', 'agent.started', { projectId: this.#projectId }, created.run.id)
-    // Drawn alongside, so sending never waits on it; stored only if the turn changes the canvas.
-    if (this.#drawCanvas !== null) this.#beforeDrawings.set(created.run.id, this.#drawCanvas().catch(() => null))
     await this.#persistentLoop.start({
       legacyRunId: created.run.id,
       sourceMessageId: created.userMessage.id,
@@ -447,6 +445,9 @@ export class AgentRuntime {
   #persistentProjection(): AgentLoopProjection {
     return {
       onPlanningStarted: async ({ legacyRunId }) => {
+        // The canvas as this turn finds it, sent now or queued earlier, before any of its changes; drawn alongside,
+        // so planning never waits on it, and stored only if the turn changes the canvas.
+        if (this.#drawCanvas !== null && !this.#beforeDrawings.has(legacyRunId)) this.#beforeDrawings.set(legacyRunId, this.#drawCanvas().catch(() => null))
         await this.#repository.transition(legacyRunId, { status: 'planning', startedAt: this.#now() })
         await this.#activityLedger?.transitionRunActivity(legacyRunId, 'plan', 'plan.running', 'running', {
           progress: null,

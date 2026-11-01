@@ -53,3 +53,40 @@ it('keeps a small picture of the canvas before and after a turn that changed it,
   const reply = (await finished(runtime, asked.id)).messages.findLast((message) => message.runId === asked.id && message.role === 'assistant')
   expect(reply?.receipt?.snapshots).toBeUndefined()
 }, 30_000)
+
+it('draws the before picture for a queued turn too, when its own planning starts', async () => {
+  vi.stubGlobal('fetch', vi.fn(() => { throw new Error('OFFLINE_SNAPSHOT_TEST') }))
+  const root = await mkdtemp(join(tmpdir(), 'turn-snapshots-queued-'))
+  const runtime = await GenerationRuntime.create(join(root, 'data')); runtimes.push(runtime)
+  await runtime.createProject(join(root, 'work.aicanvas'), 'Queued snapshots')
+  const shape = { ...makeAllElementTypesScene().elements.find((element) => element.id === IDS.shape)!, groupId: null, zIndex: 0 }
+  const laid = await runtime.executeSceneCommands({ expectedSceneRevision: runtime.getWorkspaceBootstrap().scene.revision,
+    batch: { id: randomUUID(), origin: 'user', summary: '色块', commands: [{ kind: 'element.add', element: shape }] } })
+  expect(laid.ok).toBe(true)
+  const move = (summary: string, x: number) => agentPlanSchema.parse({
+    summary, response: `${summary}。`, nextAction: null,
+    tools: [{ kind: 'scene_batch', summary, commands: [
+      { kind: 'element.update', elementId: IDS.shape, changes: { transform: { x, y: 0.5, width: 0.3, height: 0.3, rotation: 0 } } }
+    ] }]
+  })
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  vi.spyOn(ConfiguredAgentPlanner.prototype, 'plan')
+    .mockImplementationOnce(async () => { await gate; return move('挪到右边', 0.6) })
+    .mockResolvedValueOnce(move('再挪到左边', 0.1))
+  const first = await runtime.startAgentRun(fixtureAgentRequest(runtime.getWorkspaceBootstrap().scene, '挪到右边'), 'collaboration')
+  const second = await runtime.inputAgentRun(fixtureAgentRequest(runtime.getWorkspaceBootstrap().scene, '下一步再挪到左边'), 'queue_next')
+  release()
+  await finished(runtime, first.id)
+  const conversation = await finished(runtime, second.id)
+  const receipt = conversation.messages.findLast((message) => message.runId === second.id && message.role === 'assistant')?.receipt
+  expect(receipt?.snapshots).toEqual({ before: expect.any(String), after: expect.any(String) })
+  // Its before is the canvas the first turn left, not the one it was queued on.
+  const firstReceipt = conversation.messages.findLast((message) => message.runId === first.id && message.role === 'assistant')?.receipt
+  const [queuedBefore, firstAfter] = await Promise.all([
+    runtime.readAssetDataUrl(receipt!.snapshots!.before!, false),
+    runtime.readAssetDataUrl(firstReceipt!.snapshots!.after, false)
+  ])
+  expect(queuedBefore).toBe(firstAfter)
+}, 30_000)
+

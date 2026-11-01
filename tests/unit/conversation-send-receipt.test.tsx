@@ -27,3 +27,31 @@ it('acknowledges locally before context IPC settles and ignores a duplicate send
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: '对话输入' })).toHaveValue('建立一个安静的构图')
 })
+
+it('holds a message while attached pictures are still being added, and sends them with it', async () => {
+  let finishImport!: () => void
+  const importAsset = vi.fn(() => new Promise((resolve) => {
+    finishImport = () => resolve({ id: '62000000-0000-4000-8000-000000000001', width: 10, height: 10, format: 'png', hasAlpha: false })
+  }))
+  const jobs = vi.fn(async () => [])
+  const startAgentRun = vi.fn(async () => ({ id: 'run-1' }))
+  Object.defineProperty(window, 'desktop', { configurable: true, value: { listGenerationJobs: jobs, importAsset, startAgentRun } })
+  const { container } = render(<ConversationView Header={() => null} onShowLibrary={() => undefined} />)
+  const picker = container.querySelector<HTMLInputElement>('.conversation-input-row input[type="file"]')!
+  const picture = new File([new Uint8Array([1, 2, 3])], '参考.png', { type: 'image/png' })
+  await act(async () => { fireEvent.change(picker, { target: { files: [picture] } }) })
+  const input = screen.getByRole('textbox', { name: '对话输入' })
+  fireEvent.change(input, { target: { value: '照这张图的配色来' } })
+  const send = screen.getByRole('button', { name: '发送要求' })
+  expect(send).toBeDisabled()
+  fireEvent.keyDown(input, { key: 'Enter' })
+  expect(jobs).not.toHaveBeenCalled()
+
+  await act(async () => { finishImport() })
+  expect(screen.getByRole('group', { name: '附件' })).toHaveTextContent('参考.png')
+  expect(send).toBeEnabled()
+  await act(async () => { fireEvent.click(send) })
+  expect(startAgentRun).toHaveBeenCalledWith(expect.objectContaining({
+    attachments: expect.arrayContaining([expect.objectContaining({ kind: 'asset', id: '62000000-0000-4000-8000-000000000001' })])
+  }), 'collaboration', 'new_task')
+})

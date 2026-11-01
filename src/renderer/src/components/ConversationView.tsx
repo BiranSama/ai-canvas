@@ -596,7 +596,8 @@ export function ConversationView({ Header, onShowLibrary }: {
   const continueAfterLimit = (): Promise<void> => submitText('接着完成刚才没做完的部分。', false)
 
   const submitText = async (text: string, fromDraft: boolean): Promise<void> => {
-    if (text.length === 0 || submittingRef.current) return
+    // A message waits for the pictures still being attached, so it never goes without them.
+    if (text.length === 0 || submittingRef.current || (fromDraft && attaching)) return
     submittingRef.current = true
     setSubmitting(true)
     setProblem(null)
@@ -1246,10 +1247,10 @@ export function ConversationView({ Header, onShowLibrary }: {
                   : effectiveIdleTaskRelation === 'new_task' && hasFormalTask ? '描述新的作品…'
                     : effectiveScope === 'selection' ? '描述要怎样调整选中的元素…' : '描述你想创建或调整的画面…'}
               />
-              <button type="submit" className="send-button" aria-label="发送要求" disabled={submitting || draft.trim().length === 0}><ArrowUp size={16} /></button>
+              <button type="submit" className="send-button" aria-label="发送要求" disabled={submitting || attaching || draft.trim().length === 0} title={attaching ? '附件还在加入，好了就能发送' : undefined}><ArrowUp size={16} /></button>
             </div>
             {references.length > 0 && (
-              <div className="composer-attachments" aria-label="附件">
+              <div className="composer-attachments" role="group" aria-label="附件">
                 {references.map((reference) => (
                   <span key={reference.assetId}>
                     <ImagePlus size={11} />{reference.name}
