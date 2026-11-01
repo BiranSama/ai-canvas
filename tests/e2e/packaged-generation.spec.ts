@@ -20,7 +20,7 @@ test('runs a Mock generation inside the packaged Windows app', async () => {
   try {
     const window = await app.firstWindow()
     await enterPackagedWorkspace(window)
-    await window.locator('.view-switcher button').nth(2).click()
+    await window.getByRole('button', { name: '出图', exact: true }).click()
     await window.getByTestId('generation-prompt').fill('Packaged local Mock generation')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })

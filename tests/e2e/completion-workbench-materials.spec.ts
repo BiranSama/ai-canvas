@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { captureWorkbench, hitWorkbenchControl as hit } from '../helpers/workbench-ui'
+import { captureWorkbench, hitWorkbenchControl as hit, openEditor } from '../helpers/workbench-ui'
 
 for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
   test(`readable ${theme} instruments across all focuses, reduced motion and solid fallback`, async () => {
@@ -48,9 +48,10 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
           })
           await expect(page.locator('html')).toHaveAttribute('data-reduced-transparency', 'true')
         }
-        for (const focus of ['对话', '画布', '生成']) {
-          await hit(page.getByRole('button', { name: focus, exact: true }))
-          if (focus === '生成') await hit(page.locator('.generation-compact-summary'))
+        for (const focus of ['对话', '编辑', '出图']) {
+          if (focus === '编辑') await openEditor(page)
+          else await hit(page.getByRole('button', { name: focus, exact: true }))
+          if (focus === '出图') await hit(page.locator('.generation-compact-summary'))
           const measured = await page.evaluate(`({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
             reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
             reducedTransparency: matchMedia('(prefers-reduced-transparency: reduce)').matches,
@@ -61,7 +62,7 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
               .filter(n=>n.checkVisibility()).map(n=>({ text:n.textContent, color:getComputedStyle(n).color })) })`)
           if (reduced) expect((measured as { surfaces: { filter: string }[] }).surfaces.every((surface) => surface.filter === 'none')).toBe(true)
           captures.push({ focus, reduced, measured, native: await captureWorkbench(app, test.info().outputPath(`${theme}-${reduced ? 'reduced-150' : 'regular-100'}-${focus}.png`)) })
-          if (focus === '生成') await hit(page.locator('.generation-compact-summary'))
+          if (focus === '出图') await hit(page.locator('.generation-compact-summary'))
         }
       }
       await hit(page.getByRole('button', { name: '设置', exact: true }))

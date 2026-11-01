@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { openEditor } from '../helpers/workbench-ui'
+import { openEditor, editPlacedResult } from '../helpers/workbench-ui'
 
 test('AC-03 compiles the structured canvas into a deterministic reference and a new result', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-reference-'))
@@ -21,6 +21,7 @@ test('AC-03 compiles the structured canvas into a deterministic reference and a 
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
     await window.getByTestId('insert-generation-result').evaluate((button) => button.click())
+    await editPlacedResult(window)
     await expect(window.getByTestId('canvas-stage')).toBeVisible()
     await window.getByRole('textbox', { name: '创作输入' }).fill('生成完整的雨夜唱片封面，保持当前构图与柔和蓝色背光')
     await window.getByRole('button', { name: '生成画布' }).evaluate((button) => button.click())

@@ -12,8 +12,9 @@ test('Chinese composition survives autosave in both shared composers without sen
     await openEditor(page)
     await page.setViewportSize({ width: 1440, height: 900 })
     const cdp = await page.context().newCDPSession(page)
-    for (const [view, label] of [['对话', '对话输入'], ['画布', '创作输入']] as const) {
-      await page.getByRole('button', { name: view, exact: true }).click()
+    for (const [view, label] of [['对话', '对话输入'], ['编辑', '创作输入']] as const) {
+      if (view === '编辑') await openEditor(page)
+      else await page.getByRole('button', { name: view, exact: true }).click()
       const input = page.getByRole('textbox', { name: label, exact: true })
       await input.fill('')
       await input.focus()

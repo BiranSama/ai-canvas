@@ -401,7 +401,7 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
         ? useWorkspaceStore.getState().scene.elements.find((element) => element.id === receipt.elementId)
         : undefined
       setPlacedNotice(placedInto === undefined
-        ? '已放到画布正中。'
+        ? '已放到画布上。'
         : `已放进「${placedInto.name}」的位置${PLACED_FIT_COPY[receipt.fit ?? 'none']}。`)
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : '无法把结果放入画布。')

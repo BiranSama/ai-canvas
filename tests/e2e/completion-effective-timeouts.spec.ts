@@ -23,6 +23,8 @@ test('uses seconds in settings, reads back the saved policy, and shows the persi
     await image.getByLabel('Image Provider 调用协议').selectOption('openai-images')
     await image.getByLabel('Image Provider API 地址').fill('https://time-ui.example.test/v1')
     await image.getByLabel('Image Provider 默认模型').fill('synthetic-time-model')
+    // Timeouts sit in the card's 高级, folded by default.
+    await image.getByTestId('image-provider-advanced').locator('summary').click()
     await image.getByLabel('Image Provider 超时').fill('300')
     await image.getByRole('button', { name: '保存', exact: true }).click()
     await expect(image.getByTestId('image-provider-effective-timeout')).toContainText('已保存：300 秒')

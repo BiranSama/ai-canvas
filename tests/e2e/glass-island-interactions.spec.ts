@@ -26,10 +26,10 @@ test('Glass Islands use real pointer interactions for resize, four-edge docking,
   })
   try {
     const window = await app.firstWindow()
-    await openEditor(window)
     await expect(window.getByRole('heading', { name: '项目' })).toBeVisible()
     await window.getByRole('button', { name: /新建项目/ }).click({ force: true })
     await expect(window.getByRole('button', { name: '项目菜单：未命名创作' })).toBeVisible()
+    await openEditor(window)
 
     const workspace = window.locator('.canvas-workspace')
     const workspaceBox = await workspace.boundingBox()

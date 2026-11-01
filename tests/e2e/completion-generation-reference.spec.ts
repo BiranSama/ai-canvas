@@ -26,6 +26,7 @@ test.afterEach(async () => { if (app?.windows().length) { await network(); await
 test('reviews the real canvas before submission and continues only the selected image result', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ref-ui-'))
   await launch(root); await page.locator('.new-project-main').click()
+  await openEditor(page)
   await page.getByRole('button', { name: '形状', exact: true }).click()
   const initial = await bootstrap()
   await page.getByRole('button', { name: '生成画布', exact: true }).click()

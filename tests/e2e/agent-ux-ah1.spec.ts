@@ -42,7 +42,7 @@ test('AH1 S8 exposes truthful modes, Review approval, live plan and inspectable 
     await expect(window.getByRole('group', { name: '这条消息如何加入当前工作' })).toBeVisible()
     await expect(window.getByRole('button', { name: /排到下一轮/ })).toHaveAttribute('aria-pressed', 'true')
     await window.getByRole('textbox', { name: '对话输入' }).fill('')
-    await generationDecision.getByRole('button', { name: '先保留画布' }).evaluate((button) => button.click())
+    await generationDecision.getByRole('button', { name: '确认生成' }).evaluate((button) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
     await openTurnProcess(window)
     await window.getByRole('button', { name: '本轮执行记录', exact: true }).click()

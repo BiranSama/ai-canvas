@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('AC-R1-03/04/05 edits geometry, complete text properties and layer actions through one scene', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-editor-'))
@@ -15,6 +16,7 @@ test('AC-R1-03/04/05 edits geometry, complete text properties and layer actions 
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
     await window.setViewportSize({ width: 1440, height: 900 })
+    await openEditor(window)
     await expect(window.getByTestId('canvas-stage')).toBeVisible()
     await window.getByRole('button', { name: '文字 T', exact: true }).click()
 

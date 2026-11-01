@@ -16,7 +16,6 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
   })
   try {
     const window = await app.firstWindow()
-    await openEditor(window)
     window.on('request', (request) => {
       if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
     })
@@ -26,6 +25,7 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
     await expect(window.getByText(join(userData, 'projects'), { exact: true })).toHaveCount(0)
     await window.getByRole('button', { name: /新建项目/ }).click({ force: true })
     await expect(window.getByRole('button', { name: '项目菜单：未命名创作' })).toBeVisible()
+    await openEditor(window)
 
     const packages = (await readdir(join(userData, 'projects'))).filter((name) => name.endsWith('.aicanvas') && name !== 'Untitled.aicanvas')
     expect(packages).toEqual(['未命名创作.aicanvas'])

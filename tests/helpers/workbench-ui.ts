@@ -14,6 +14,14 @@ export async function openEditor(page: Page) {
   await expect(editor).toHaveAttribute('aria-current', 'page')
 }
 
+/** 出图 stays open after 放入画布; this goes on to the editor from the notice it shows. */
+export async function editPlacedResult(page: Page) {
+  const placed = page.getByTestId('generation-placed')
+  await expect(placed).toBeVisible({ timeout: 10_000 })
+  await placed.getByRole('button', { name: '去编辑', exact: true }).evaluate((button: { click(): void }) => button.click())
+  await expect(page.getByRole('navigation', { name: '工作视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
+}
+
 /** Follow the current disclosure flow before interacting with request options. */
 export async function openGenerationOptions(page: Page) {
   const parameters = page.locator('.generation-compact-summary')

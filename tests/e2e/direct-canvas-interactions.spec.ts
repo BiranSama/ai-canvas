@@ -473,7 +473,6 @@ test('header actions and project-card actions stay separate and More opens a rea
   })
   try {
     const window = await app.firstWindow()
-    await openEditor(window)
     const viewports = [
       { width: 1024, height: 700 },
       { width: 1280, height: 800 },
@@ -490,6 +489,7 @@ test('header actions and project-card actions stay separate and More opens a rea
     await window.setViewportSize(viewports[0]!)
     await window.locator('.new-project-main').click({ force: true })
     await expect(window.getByRole('button', { name: '项目菜单：未命名创作' })).toBeVisible({ timeout: 10_000 })
+    await openEditor(window)
     const settings = window.getByTestId('open-settings')
     const exportControl = window.locator('.export-control')
     for (const viewport of viewports) {

@@ -8,7 +8,7 @@ it('acknowledges locally before context IPC settles and ignores a duplicate send
   let rejectContext!: (error: Error) => void
   const jobs = vi.fn(() => new Promise<never>((_resolve, reject) => { rejectContext = reject }))
   Object.defineProperty(window, 'desktop', { configurable: true, value: { listGenerationJobs: jobs } })
-  render(<ConversationView header={null} />)
+  render(<ConversationView Header={() => null} onShowLibrary={() => undefined} />)
   const input = screen.getByRole('textbox', { name: '对话输入' })
   fireEvent.compositionStart(input)
   fireEvent.change(input, { target: { value: '建立一个安静的构图' } })

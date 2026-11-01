@@ -1,4 +1,4 @@
-import { openDirectionReview } from '../helpers/workbench-ui'
+import { openDirectionReview, editPlacedResult } from '../helpers/workbench-ui'
 import { openGenerationOptions } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -133,6 +133,7 @@ test('C-S2/D-S1 keeps one direction across Agent generation, final continuation,
     })
 
     await window.getByTestId('insert-generation-result').evaluate((button) => button.click())
+    await editPlacedResult(window)
     await expect(window.getByTestId('canvas-stage')).toBeVisible()
     const placed = await window.evaluate(async (resultAssetId) => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop

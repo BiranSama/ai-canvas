@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('keeps a measured 100 element Konva workspace interactive', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-performance-'))
@@ -15,6 +16,7 @@ test('keeps a measured 100 element Konva workspace interactive', async () => {
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1440, height: 900 })
+    await openEditor(window)
     await expect(window.getByTestId('canvas-stage')).toBeVisible()
 
     const measurement = await window.evaluate(`(async () => {

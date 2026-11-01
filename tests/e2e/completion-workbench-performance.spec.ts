@@ -23,6 +23,7 @@ test('measures real drag, resize and focus work with 100 Main elements, long con
       scope.fetch = async () => { scope.__perfNetwork++; throw new Error('OFFLINE_WORKBENCH_PERFORMANCE') }
     })
     const page = await app.firstWindow()
+    await openEditor(page)
     await page.bringToFront()
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900))
     await expect(page.getByTestId('canvas-stage')).toBeVisible()

@@ -6,7 +6,7 @@ import sharp from 'sharp'
 import type { PaintOp, SceneElement } from '../../src/domain'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { applyPaintOps } from '../../src/shared/paint-ops'
-import { openEditor } from '../helpers/workbench-ui'
+import { openEditor, editPlacedResult } from '../helpers/workbench-ui'
 
 async function launch(env: Record<string, string> = {}): Promise<{ app: ElectronApplication, page: Page }> {
   const userData = await mkdtemp(join(tmpdir(), 'select-'))
@@ -338,6 +338,7 @@ test('generative fill repaints the selection and comes back as a new layer maske
     expect(job.request.prompt).toContain('在选区里画出：一只纸鹤')
 
     await page.getByRole('button', { name: '放入画布' }).click()
+    await editPlacedResult(page)
     await expect.poll(async () => (await bootstrap(page)).scene.elements.map((candidate) => candidate.name)).toEqual(['图层 1', '生成式填充 1'])
     const filled = await image(page, '生成式填充 1')
     expect(filled.transform).toMatchObject({ x: 0, y: 0, width: 1, height: 1 })

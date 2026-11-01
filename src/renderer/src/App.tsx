@@ -34,7 +34,7 @@ import { clearEphemeralAnnotation } from './agent/ephemeral-annotation-store'
 import { CanvasStage, type CanvasStageHandle } from './canvas/CanvasStage'
 import { ActionTrace } from './canvas/ActionTrace'
 import { createElementForTool } from './canvas/element-factory'
-import { withMaskViewSetAside } from './canvas/mask-state'
+import { exportCanvasImage } from './canvas/export-canvas'
 import { CanvasToolbar } from './components/CanvasToolbar'
 import { PaintOptionsBar } from './components/PaintOptionsBar'
 import { SelectionOptionsBar } from './components/SelectionOptionsBar'
@@ -72,26 +72,6 @@ const viewLabels: Record<WorkspaceView, string> = {
   canvas: '编辑'
 }
 
-function downloadDataUrl(dataUrl: string, filename: string): void {
-  const anchor = document.createElement('a')
-  anchor.href = dataUrl
-  anchor.download = filename
-  anchor.click()
-}
-
-function exportFilename(projectName: string, format: 'png' | 'jpeg' | 'webp'): string {
-  const extension = format === 'jpeg' ? 'jpg' : format
-  const safeName = projectName
-    .trim()
-    .replace(/[<>:"/\\|?*]/g, '-')
-    .split('')
-    .filter((character) => character.charCodeAt(0) >= 32)
-    .join('')
-    .replace(/[. ]+$/g, '')
-    .slice(0, 96)
-  return `${safeName || '未命名作品'}.${extension}`
-}
-
 async function hydrateRuntimeWorkspace(bootstrap: WorkspaceBootstrap): Promise<void> {
   setProjectContextWritable(!bootstrap.workContextProblem)
   clearRuntimeAssets()
@@ -119,6 +99,8 @@ async function openPsdAsProject(file: File): Promise<void> {
     const opened = await openFileAsProject(file)
     if (opened === null) return
     await hydrateRuntimeWorkspace(opened.bootstrap)
+    // A PSD is opened to work on its layers, so it opens in the editor.
+    useWorkspaceStore.getState().setActiveView('canvas')
     if (opened.notice !== null) showAppNotice(opened.notice)
   } catch (error) {
     showAppNotice(error instanceof Error ? error.message : `没有打开“${file.name}”。`, 'problem')
@@ -264,10 +246,14 @@ function WorkspaceHeader({
 
   const openFile = (file: File): void => {
     clearEphemeralAnnotation()
+    const before = useWorkspaceStore.getState().scene.projectId
     void runProjectAction(async () => {
       const opened = await openFileAsProject(file)
       if (opened?.notice != null) showAppNotice(opened.notice)
       return { cancelled: false, bootstrap: opened?.bootstrap ?? null }
+    }).then(() => {
+      // A file opened as a project, a PSD or a picture, is there to be worked on, so it opens in the editor.
+      if (useWorkspaceStore.getState().scene.projectId !== before) useWorkspaceStore.getState().setActiveView('canvas')
     })
   }
 
@@ -614,12 +600,7 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
     }
   }, [chooseTool, copySelection, cutSelection, deleteSelection, duplicateSelection, editingGroupId, enterGroupEditing, exitGroupEditing, groupSelection, importFile, pasteSelection, redo, reorderElement, scene.elements, selectedIds, setActiveTool, setSelection, undo, ungroupSelection])
 
-  const exportCanvas = (format: 'png' | 'jpeg' | 'webp', jpegBackground: string): void => {
-    void withMaskViewSetAside(() => {
-      const dataUrl = stageRef.current?.exportDataUrl(format, jpegBackground)
-      if (dataUrl !== null && dataUrl !== undefined) downloadDataUrl(dataUrl, exportFilename(projectName, format))
-    })
-  }
+  const exportCanvas = (format: 'png' | 'jpeg' | 'webp', jpegBackground: string): void => exportCanvasImage(stageRef.current, projectName, format, jpegBackground)
 
   const editingGroup = editingGroupId === null
     ? undefined
@@ -881,7 +862,7 @@ export function App(): React.JSX.Element {
               ? <GenerateView key={`${projectId}:${projectSession}`} header={<WorkspaceHeader onShowLibrary={showLibrary} />} />
               : activeView === 'canvas'
                 ? <CanvasView key={`${projectId}:${projectSession}`} onShowLibrary={showLibrary} />
-                : <ConversationView key={`${projectId}:${projectSession}`} header={<WorkspaceHeader onShowLibrary={showLibrary} />} />}
+                : <ConversationView key={`${projectId}:${projectSession}`} Header={WorkspaceHeader} onShowLibrary={showLibrary} />}
           </>}
       </div>
     </>

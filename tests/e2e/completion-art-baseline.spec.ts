@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 // These retained synthetic projects are the before-state for the same-work
 // comparison. No model is used to judge or generate artwork in this capture.
@@ -41,8 +42,9 @@ for (const fixture of [
       const facts: unknown[] = []
       for (const size of [{ width: 1440, height: 900 }, { width: 1024, height: 700 }]) {
         await page.setViewportSize(size)
-        for (const focus of [{ id: 'conversation', label: '对话' }, { id: 'canvas', label: '画布' }, { id: 'generate', label: '生成' }]) {
-          await page.getByRole('button', { name: focus.label, exact: true }).click()
+        for (const focus of [{ id: 'conversation', label: '对话' }, { id: 'canvas', label: '编辑' }, { id: 'generate', label: '出图' }]) {
+          if (focus.id === 'canvas') await openEditor(page)
+          else await page.getByRole('button', { name: focus.label, exact: true }).click()
           if (focus.id === 'canvas') await expect(page.getByTestId('canvas-stage')).toBeVisible()
           if (focus.id === 'generate') await expect(page.getByTestId('generation-result')).toHaveCount(1)
           // The existing compact conversation deliberately hides its preview.

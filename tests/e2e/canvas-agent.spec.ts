@@ -35,7 +35,7 @@ test('AC-R1-07 keeps a scoped Agent edit on canvas with receipt, no generation a
     await window.getByRole('textbox', { name: '创作输入' }).fill('整体向右移一点，标题更大，先不要生成')
     await window.getByRole('button', { name: '发送创作指令' }).click()
     await expect(window.getByTestId('canvas-agent-receipt')).toBeVisible({ timeout: 10_000 })
-    await expect(window.getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
+    await expect(window.getByRole('navigation', { name: '工作视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
 
     const after = await window.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop

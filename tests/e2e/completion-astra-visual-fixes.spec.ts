@@ -51,7 +51,7 @@ for (const width of [1024, 1440]) {
   })
 }
 
-for (const width of [1024, 1440]) for (const choice of ['执行这一步', '先停在这里', '停止当前操作']) {
+for (const width of [1024, 1440]) for (const choice of ['确认生成', '先保留画布', '停止当前操作']) {
   test(`decision choice ${choice} is readable and genuinely executes at ${width}`, async () => {
     const userData = await mkdtemp(join(tmpdir(), 'astra-decision-'))
     const app = await electron.launch({ args: ['.', `--user-data-dir=${userData}`], cwd: resolve('.'), env: { ...process.env, AI_CANVAS_E2E: '1' } })
@@ -80,8 +80,11 @@ for (const width of [1024, 1440]) for (const choice of ['执行这一步', '先�
       await captureWorkbench(app, test.info().outputPath(`decision-${width}.png`))
       await hit(card.getByRole('button', { name: choice, exact: true }))
       await expect(card).toBeHidden()
-      await expect.poll(async () => (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene.revision).toBe(choice === '执行这一步' ? 1 : 0)
-      expect(await page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs()).length)).toBe(0)
+      // The plan waits on the question as a whole: 确认生成 lays it out and starts a picture; the other two leave the canvas as it was.
+      await expect.poll(async () => page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs()).length)).toBe(choice === '确认生成' ? 1 : 0)
+      const revision = (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene.revision
+      if (choice === '确认生成') expect(revision).toBeGreaterThanOrEqual(1)
+      else expect(revision).toBe(0)
     } finally { await app.close() }
   })
 }

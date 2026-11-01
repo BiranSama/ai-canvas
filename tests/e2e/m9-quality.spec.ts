@@ -1,4 +1,4 @@
-import { openGenerationOptions } from '../helpers/workbench-ui'
+import { openGenerationOptions, openEditor } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -99,8 +99,9 @@ test('maps reduced motion, reduced transparency and visible focus to stable CSS'
     expect(media.surfaceBackdrop).toBe('none')
     expect(Number.parseFloat(media.transitionDuration)).toBeLessThanOrEqual(0.00001)
 
-    const canvasButton = window.getByRole('button', { name: '编辑', exact: true })
-    await canvasButton.focus()
+    // The current view's tab in the header carries the visible focus ring.
+    const currentView = window.getByRole('navigation', { name: '工作视图' }).locator('button[aria-current="page"]')
+    await currentView.focus()
     const focus = await window.evaluate(`(() => {
       const style = getComputedStyle(document.querySelector('.view-switcher button[aria-current="page"]'))
       return { style: style.outlineStyle, width: style.outlineWidth }
@@ -194,6 +195,7 @@ test('recovers the committed scene and marks an in-flight job interrupted after 
   let second: ElectronApplication | null = null
   try {
     const firstWindow = await first.firstWindow()
+    await openEditor(firstWindow)
     await firstWindow.getByRole('button', { name: '形状' }).evaluate((button) => button.click())
     await expect.poll(async () => firstWindow.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop

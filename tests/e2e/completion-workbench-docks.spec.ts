@@ -43,7 +43,7 @@ for (const viewport of [{ width: 1440, height: 900, zoom: 1 }, { width: 1024, he
           const grip = island.getByRole('toolbar', { name: `${instrument.label}布局控制`, exact: true })
           await grip.focus(); await grip.press(`Alt+${edge.key}`)
           await expect(island).toHaveAttribute('data-island-mode', `docked-${edge.name}`)
-          await page.getByRole('button', { name: '编辑', exact: true }).focus()
+          await page.getByRole('navigation', { name: '工作视图' }).getByRole('button', { name: '编辑', exact: true }).focus()
           await page.mouse.move(50, 30)
           const horizontal = edge.name === 'top' || edge.name === 'bottom'
           await expect.poll(async () => {

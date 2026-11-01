@@ -1,5 +1,5 @@
 import { ArrowUp, Check, ChevronDown, ChevronRight, Circle, Crosshair, Files, GripVertical, Image, ImagePlus, ListFilter, PanelRightClose, PanelRightOpen, Pencil, PenTool, Plus, RotateCcw, Square, Trash2, X } from 'lucide-react'
-import { type CSSProperties, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type ComponentType, type CSSProperties, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentActivity, AgentRun, ConversationSnapshot, OperationReceipt } from '../../../shared/agent'
 import { adaptLegacyTurnInputMode, type AgentHarnessSnapshot, type AgentTurnStatus, type TaskRelation, type TurnInputMode } from '../../../shared/agent-harness'
 import type { ProjectKnowledgeSnapshot } from '../../../shared/agent-context'
@@ -8,7 +8,8 @@ import { createAgentRequest, type ReferenceAttachment } from '../agent/agent-cli
 import { agentEventsForTurn, subscribeAgentUpdates, subscribeAgentTransportUpdates } from '../agent/agent-event-stream'
 import { buildEphemeralAnnotationSaveCommands } from '../agent/ephemeral-annotation'
 import { currentEphemeralAnnotation, useEphemeralAnnotationStore } from '../agent/ephemeral-annotation-store'
-import { CanvasStage } from '../canvas/CanvasStage'
+import { CanvasStage, type CanvasStageHandle } from '../canvas/CanvasStage'
+import { exportCanvasImage, type ExportFormat } from '../canvas/export-canvas'
 import { projectAgentExecutionFlow } from '../agent/agent-execution-flow'
 import { generatesWithoutAsking, useCreationSessionStore } from '../store/creation-session-store'
 import { useWorkspaceStore } from '../store/workspace-store'
@@ -187,7 +188,11 @@ function timeCopy(startedAt: string | null, endedAt: string | null): string {
   return duration < 1_000 ? `${duration} 毫秒` : `${(duration / 1_000).toFixed(1)} 秒`
 }
 
-export function ConversationView({ header }: { readonly header: ReactNode }): React.JSX.Element {
+export function ConversationView({ Header, onShowLibrary }: {
+  /** The workspace header; its 导出 exports from the live canvas beside the conversation. */
+  readonly Header: ComponentType<{ readonly onExport?: (format: ExportFormat, jpegBackground: string) => void; readonly onShowLibrary: () => void }>
+  readonly onShowLibrary: () => void
+}): React.JSX.Element {
   const scene = useWorkspaceStore((state) => state.scene)
   const isCurrentProject = useProjectScope(scene.projectId)
   const [acceptingReviewId, setAcceptingReviewId] = useState<string | null>(null)
@@ -210,6 +215,8 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const [references, setReferences] = useState<readonly ReferenceAttachment[]>([])
   const [attaching, setAttaching] = useState(false)
   const attachInputRef = useRef<HTMLInputElement>(null)
+  const previewStageRef = useRef<CanvasStageHandle>(null)
+  const projectName = useWorkspaceStore((state) => state.projectName)
   const [scope, setScope] = useState<'selection' | 'canvas'>('selection')
   const [inputModesOpen, setInputModesOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
@@ -434,6 +441,10 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
     window.addEventListener('keydown', closeCompactPreview)
     return () => window.removeEventListener('keydown', closeCompactPreview)
   }, [])
+
+  const exportFromPreview = useCallback((format: ExportFormat, jpegBackground: string): void => {
+    exportCanvasImage(previewStageRef.current, projectName, format, jpegBackground)
+  }, [projectName])
 
   const updateConversationRatio = useCallback((clientX: number): void => {
     const bounds = workspaceRef.current?.getBoundingClientRect()
@@ -874,7 +885,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const settledProcessOpen = settledReceiptId !== undefined && openProcessIds.has(settledReceiptId)
   return (
     <div className="conversation-view">
-      {header}
+      <Header onExport={exportFromPreview} onShowLibrary={onShowLibrary} />
       <main
         ref={workspaceRef}
         className={`conversation-workspace${compactRecordOpen ? ' is-record-open' : ''}`}
@@ -1298,6 +1309,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
           </div>
           <div className={`conversation-live-canvas${annotationEditable ? ' is-annotating' : ''}`} style={{ '--scene-reflection': scene.canvas.backgroundColor } as CSSProperties}>
             <CanvasStage
+              ref={previewStageRef}
               preview
               ephemeralAnnotationEnabled={annotationEditable}
               ephemeralAnnotationRegions={annotationRegions}

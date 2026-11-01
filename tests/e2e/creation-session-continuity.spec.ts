@@ -15,6 +15,7 @@ test('conversation and canvas share one project-scoped creation draft', async ()
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1280, height: 800 })
     await window.waitForLoadState('domcontentloaded')
+    await openEditor(window)
 
     await window.getByRole('textbox', { name: '创作输入' }).fill('标题更疏朗，主体下移一点，先不要生成')
     await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())

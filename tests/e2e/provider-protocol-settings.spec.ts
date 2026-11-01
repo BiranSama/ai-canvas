@@ -22,6 +22,8 @@ test('Provider settings make protocol routing and the real connection confirmati
     await dialog.getByLabel('LLM Provider 调用协议').selectOption('openai-chat-completions')
     await dialog.getByLabel('LLM Provider API 地址').fill('https://llm.example.test/v1')
     await dialog.getByLabel('LLM Provider 默认模型').fill('fixture-tool-model')
+    // Thinking, image detail, output length and capabilities sit in the card's 高级.
+    await llmRow.locator('details.provider-advanced > summary').click()
     await dialog.getByLabel('LLM Provider 思考强度').selectOption('high')
     await expect(dialog.getByLabel('LLM Provider 图像细节')).toBeEnabled()
     await dialog.getByLabel('LLM Provider 图像细节').selectOption('low')

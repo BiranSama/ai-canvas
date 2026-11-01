@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('Inspector keeps a complete Chinese text edit and commits it once after editing', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-inspector-ime-'))
@@ -14,6 +15,7 @@ test('Inspector keeps a complete Chinese text edit and commits it once after edi
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1440, height: 900 })
+    await openEditor(window)
     await window.getByRole('button', { name: /文字 T/ }).click()
     await window.getByRole('tab', { name: '属性' }).click()
     const content = window.getByRole('textbox', { name: '文字内容' })
