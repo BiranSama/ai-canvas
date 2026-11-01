@@ -26,6 +26,7 @@ import { flushProjectWorkContext } from '../store/project-context-sync'
 import { MERCHANT_EXAMPLE_KEYS, MERCHANT_EXAMPLES } from '../fixtures/merchant-examples'
 import { createExampleProject } from '../project/example-project'
 import { ServiceConnectCard } from './ServiceConnectCard'
+import { AppUpdateNotice } from './AppUpdateNotice'
 
 interface ProjectLibraryProps {
   readonly runtime: RuntimeInfo
@@ -202,7 +203,10 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
     >
       <header className="library-titlebar">
         <div className="library-brand"><img src={appIconUrl} alt="AI Canvas" /><span>AI Canvas</span></div>
-        <button type="button" className="library-settings-button" aria-label="打开设置" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button>
+        <div className="library-titlebar-actions">
+          <AppUpdateNotice />
+          <button type="button" className="library-settings-button" aria-label="打开设置" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button>
+        </div>
       </header>
 
       <main className="library-main">

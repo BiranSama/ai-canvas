@@ -37,6 +37,7 @@ import { useFirstRunStore } from '../store/first-run-store'
 import { applyAppearanceSnapshot, defaultAppearanceSnapshot } from '../appearance/apply-appearance'
 import { AgentContextSettings } from './AgentContextSettings'
 import { UsageSettings } from './UsageSettings'
+import { AppUpdateSettings } from './AppUpdateSettings'
 
 type ProviderDrafts = Partial<Record<ConfigurableProviderId, ProviderPublicConfig>>
 type DiagnosticDisplayResult = DiagnosticExportResult | {
@@ -509,6 +510,7 @@ export function ProviderSettingsSheet({
               </>}
               {section === 'advanced' && <>
                 <h2>高级</h2>
+                <AppUpdateSettings />
                 {snapshot !== null && policyDraft !== null && <div className="settings-job-limits" aria-label="生图任务限制">
                   <strong>生图任务限制</strong>
                   <small>每个生图任务最多发多少个网络请求、出几张图、预留多少钱。价格没填时，预留的钱不代表实际扣费上限。</small>

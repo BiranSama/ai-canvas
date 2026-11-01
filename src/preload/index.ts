@@ -30,9 +30,18 @@ import type { SceneChangedEvent, SceneExecuteInput, SceneHistoryInput } from '..
 import type { DesignDirectionSelectionInput } from '../shared/design-direction-selection'
 import type { ProjectWorkContext } from '../shared/project-work-context'
 import type { SubjectModelDownloadInput, SubjectModelStatus, SubjectSegmentInput } from '../shared/segmentation'
+import type { AppUpdateSnapshot } from '../shared/app-update'
 
 const desktopApi: DesktopApi = Object.freeze({
   getRuntimeInfo: (): Promise<RuntimeInfo> => ipcRenderer.invoke(DESKTOP_CHANNELS.runtimeInfo),
+  getAppUpdate: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke(DESKTOP_CHANNELS.appUpdate),
+  checkForAppUpdate: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke(DESKTOP_CHANNELS.appUpdateCheck),
+  installAppUpdate: (): Promise<boolean> => ipcRenderer.invoke(DESKTOP_CHANNELS.appUpdateInstall),
+  onAppUpdate: (listener: (snapshot: AppUpdateSnapshot) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: AppUpdateSnapshot): void => listener(value)
+    ipcRenderer.on(DESKTOP_EVENTS.appUpdateChanged, handler)
+    return () => ipcRenderer.removeListener(DESKTOP_EVENTS.appUpdateChanged, handler)
+  },
   listLocalFonts: (rescan?: boolean) => ipcRenderer.invoke(DESKTOP_CHANNELS.localFonts, rescan === true),
   takeOpenFileRequests: () => ipcRenderer.invoke(DESKTOP_CHANNELS.openFileRequests),
   readPsd: (bytes: Uint8Array) => ipcRenderer.invoke(DESKTOP_CHANNELS.psdRead, bytes),

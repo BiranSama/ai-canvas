@@ -1,3 +1,4 @@
+import type { AppUpdateSnapshot } from './app-update'
 import type { PsdDocumentImport } from './psd-import'
 import type { SubjectModelDownloadInput, SubjectModelStatus, SubjectSegmentInput, SubjectSegmentResult } from './segmentation'
 import type { AgentRequest, AgentRun, ConversationSnapshot } from './agent'
@@ -61,6 +62,9 @@ import type { ImageEffects } from '../domain'
 
 export const DESKTOP_CHANNELS = {
   runtimeInfo: 'desktop:runtime-info',
+  appUpdate: 'app:update',
+  appUpdateCheck: 'app:update-check',
+  appUpdateInstall: 'app:update-install',
   localFonts: 'desktop:local-fonts',
   openFileRequests: 'desktop:open-file-requests',
   psdRead: 'project:psd-read',
@@ -145,6 +149,7 @@ export const DESKTOP_EVENTS = {
   agentEvent: 'agent:event',
   appearanceChanged: 'appearance:changed',
   openFileRequested: 'desktop:open-file-requested',
+  appUpdateChanged: 'app:update-changed',
   subjectModelStatus: 'segmentation:model-status-changed'
 } as const
 
@@ -200,6 +205,13 @@ export interface OpenFileRequest {
 export interface DesktopApi {
   onWindowClosing(listener: () => Promise<void>): () => void
   getRuntimeInfo(): Promise<RuntimeInfo>
+  /** This copy's version and where updating it stands. */
+  getAppUpdate(): Promise<AppUpdateSnapshot>
+  /** Checks GitHub Releases now; a new version downloads in the background. */
+  checkForAppUpdate(): Promise<AppUpdateSnapshot>
+  /** Restarts into the downloaded version; false when none is waiting. */
+  installAppUpdate(): Promise<boolean>
+  onAppUpdate(listener: (snapshot: AppUpdateSnapshot) => void): () => void
   /** Font families installed on this computer, scanned once per run unless asked to rescan. */
   listLocalFonts(rescan?: boolean): Promise<readonly LocalFontFamily[]>
   /** Images waiting to be opened as projects; each is handed over once. */

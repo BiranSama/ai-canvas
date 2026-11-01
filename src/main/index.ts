@@ -7,6 +7,8 @@ import { subjectSegmentation } from './segmentation/subject-segmentation-electro
 import { openableFileArguments, queueOpenFiles } from './open-file-requests'
 import { DESKTOP_EVENTS } from '../shared/desktop-api'
 import { createMainWindow, hardenSession } from './window'
+import { createAppUpdateService } from './update/electron-app-update'
+import type { AppUpdateService } from './update/app-update-service'
 
 // Without a usable graphics card Chromium no longer falls back to software WebGL by itself; the object
 // selection's model needs WebGL, and the window only ever shows the app's own pages.
@@ -18,6 +20,7 @@ let allowQuit = false
 let closingWindows = false
 let finalizingQuit = false
 let appearanceSettings: AppearanceSettingsService | null = null
+let appUpdates: Promise<AppUpdateService> | null = null
 
 if (!hasSingleInstanceLock) {
   app.quit()
@@ -52,14 +55,17 @@ if (!hasSingleInstanceLock) {
       ? join(app.getPath('documents'), 'AI Canvas')
       : join(userDataDirectory, 'projects')
     generationRuntime = GenerationRuntime.create(userDataDirectory, { projectLibraryDirectory, subject: subjectSegmentation })
+    const updates = createAppUpdateService()
+    appUpdates = updates
+    void updates.then((service) => service.start(), () => undefined)
     const result = createMainWindow()
-    registerDesktopIpc(result.backgroundMaterial, generationRuntime, appearanceSettings)
+    registerDesktopIpc(result.backgroundMaterial, generationRuntime, appearanceSettings, updates)
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         const nextResult = createMainWindow()
-        if (generationRuntime !== null && appearanceSettings !== null) {
-          registerDesktopIpc(nextResult.backgroundMaterial, generationRuntime, appearanceSettings)
+        if (generationRuntime !== null && appearanceSettings !== null && appUpdates !== null) {
+          registerDesktopIpc(nextResult.backgroundMaterial, generationRuntime, appearanceSettings, appUpdates)
         }
       }
     })

@@ -39,4 +39,9 @@ nsis:
   shortcutName: AI Canvas
 portable:
   artifactName: AI-Canvas-${version}-${arch}-Portable.${ext}
-publish: null
+# The installed build updates itself from this repository's GitHub Releases (see .github/workflows/release.yml).
+publish:
+  provider: github
+  owner: BiranSama
+  repo: ai-canvas
+  releaseType: release

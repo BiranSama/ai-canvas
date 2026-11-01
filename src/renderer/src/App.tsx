@@ -48,6 +48,7 @@ import { ConversationView } from './components/ConversationView'
 import { GenerateView } from './components/GenerateView'
 import { Inspector } from './components/Inspector'
 import { ProviderSettingsSheet } from './components/ProviderSettingsSheet'
+import { AppUpdateNotice } from './components/AppUpdateNotice'
 import { ProjectLibrary } from './components/ProjectLibrary'
 import { isPsdFile, OPENABLE_FILE_ACCEPT, openFileAsProject } from './project/open-file-project'
 import { AppNotice } from './components/AppNotice'
@@ -268,6 +269,7 @@ function WorkspaceHeader({
         ))}
       </nav>
       <div className="header-actions">
+        <AppUpdateNotice />
         <button type="button" className="icon-button" aria-label="撤销" disabled={!canUndo} onClick={undo}><Undo2 size={17} /></button>
         <button type="button" className="icon-button" aria-label="重做" disabled={!canRedo} onClick={redo}><Redo2 size={17} /></button>
         <span className="header-divider" />

@@ -1,0 +1,58 @@
+name: Release
+
+# Pushing a tag such as v0.4.0 builds the Windows installer and portable app
+# and publishes them, with the update feed, as a GitHub Release. Installed
+# copies pick the new version up from there.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches package.json
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match package.json version ${version}."
+            exit 1
+          fi
+
+      # Reads the pnpm version from package.json#packageManager.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      - run: pnpm lint
+
+      - run: pnpm test
+
+      - run: pnpm build
+
+      - name: Package and publish
+        run: pnpm exec electron-builder --win nsis portable --publish always --config.electronDist=node_modules/electron/dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

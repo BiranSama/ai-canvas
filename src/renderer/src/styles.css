@@ -3525,3 +3525,17 @@ button.knowledge-copy { cursor: pointer; }
   .service-connect.is-connected { grid-template-columns: 40px minmax(0, 1fr); }
   .service-connect-next { grid-column: 1 / -1; justify-content: flex-start; }
 }
+
+/* Updating the app: a pill in the header and the library titlebar, and a row in 高级. */
+.library-titlebar-actions { display: flex; align-items: center; gap: 10px; -webkit-app-region: no-drag; }
+.app-update-notice { position: relative; display: flex; height: 32px; align-items: center; gap: 7px; padding: 0 4px 0 11px; border: 1px solid color-mix(in srgb, var(--quiet-blue) 30%, transparent); border-radius: 11px; color: var(--graphite); background: var(--quiet-blue-soft); font-size: 11px; white-space: nowrap; -webkit-app-region: no-drag; }
+.app-update-notice > svg { color: var(--quiet-blue); }
+.app-update-notice button { height: 24px; padding: 0 9px; border: 0; border-radius: 8px; color: var(--muted-slate); background: transparent; font: inherit; font-size: 10px; cursor: pointer; }
+.app-update-notice button.is-primary { color: white; background: var(--quiet-blue); }
+.app-update-notice button:disabled { opacity: .6; cursor: default; }
+.app-update-notice small { position: absolute; top: calc(100% + 6px); right: 0; padding: 6px 9px; border-radius: 9px; color: #8a4f48; background: var(--thick-glass); box-shadow: var(--shadow-float); font-size: 10px; }
+.settings-app-update { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; margin: 14px 0; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 14px; background: color-mix(in srgb, var(--field) 72%, transparent); }
+.settings-app-update > span { display: grid; gap: 4px; }
+.settings-app-update strong { font-size: 12px; font-weight: 620; }
+.settings-app-update small { color: var(--muted-slate); font-size: 11px; line-height: 1.6; }
+.settings-app-update .settings-save { display: flex; height: 32px; align-items: center; gap: 6px; }
