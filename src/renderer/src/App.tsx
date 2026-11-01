@@ -68,8 +68,8 @@ import type { ConfigurableProviderId } from '../../shared/provider-settings'
 
 const viewLabels: Record<WorkspaceView, string> = {
   conversation: '对话',
-  canvas: '画布',
-  generate: '生成'
+  generate: '出图',
+  canvas: '编辑'
 }
 
 function downloadDataUrl(dataUrl: string, filename: string): void {
@@ -305,7 +305,8 @@ function WorkspaceHeader({
         </div>
       </div>
       <nav className="view-switcher" aria-label="工作视图">
-        {(Object.keys(viewLabels) as WorkspaceView[]).map((view) => (
+        {/* 编辑 is not a place to go first: it shows here while open, and the canvas's 编辑 button opens it. */}
+        {(Object.keys(viewLabels) as WorkspaceView[]).filter((view) => view !== 'canvas' || activeView === 'canvas').map((view) => (
           <button key={view} type="button" className={activeView === view ? 'is-active' : ''} aria-current={activeView === view ? 'page' : undefined} onClick={() => setActiveView(view)}>{viewLabels[view]}</button>
         ))}
       </nav>
@@ -314,7 +315,7 @@ function WorkspaceHeader({
         <button type="button" className="icon-button" aria-label="重做" disabled={!canRedo} onClick={redo}><Redo2 size={17} /></button>
         <span className="header-divider" />
         {!inspectorOpen && <button type="button" className="icon-button" aria-label="打开图层检查器" onClick={() => setInspectorOpen(true)}><Layers3 size={17} /></button>}
-        <button ref={settingsButtonRef} type="button" className="icon-button" data-testid="open-settings" aria-label="供应商设置" onClick={() => { setSettingsProviderId(null); setSettingsOpen(true) }}><Settings2 size={16} /></button>
+        <button ref={settingsButtonRef} type="button" className="icon-button" data-testid="open-settings" aria-label="设置" onClick={() => { setSettingsProviderId(null); setSettingsOpen(true) }}><Settings2 size={16} /></button>
         {onExport !== undefined && (
           <div className="export-control">
             <button type="button" onClick={() => onExport(format, jpegBackground)}><Download size={15} />导出</button>

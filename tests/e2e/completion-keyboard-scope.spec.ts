@@ -34,8 +34,8 @@ async function mainScene() {
 test('settings isolate every background canvas command and return focus on Escape', async () => {
   const before = await mainScene()
   await page.getByTestId('open-settings').click()
-  const dialog = page.getByRole('dialog', { name: '供应商设置' })
-  await expect(dialog.getByRole('button', { name: '关闭供应商设置' })).toBeFocused()
+  const dialog = page.getByRole('dialog', { name: '设置', exact: true })
+  await expect(dialog.getByRole('button', { name: '关闭设置' })).toBeFocused()
   await dialog.getByRole('button', { name: '外观', exact: true }).click()
   for (const key of ['Delete', 'Backspace', 'Control+x', 'Control+v', 'Control+z', 'Control+y', 'ArrowLeft', 't', 'b']) {
     await page.keyboard.press(key)
@@ -46,7 +46,7 @@ test('settings isolate every background canvas command and return focus on Escap
     expect(await dialog.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
   }
   const optical = dialog.locator('summary', { hasText: '光学与动态' })
-  await dialog.getByRole('button', { name: '关闭供应商设置' }).focus()
+  await dialog.getByRole('button', { name: '关闭设置' }).focus()
   for (let i = 0; i < 50 && !await optical.evaluate((element) => element === element.ownerDocument.activeElement); i++) await page.keyboard.press('Tab')
   await expect(optical).toBeFocused()
   await page.keyboard.press('Enter')

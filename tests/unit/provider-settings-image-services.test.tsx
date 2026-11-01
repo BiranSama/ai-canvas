@@ -60,7 +60,7 @@ it('adds an image service, makes it the default and removes it after a second cl
   expect(screen.queryByText('Grok Imagine')).not.toBeInTheDocument()
 })
 
-it('saves the per-turn cost at which the Agent pauses, apart from the image-task limits', async () => {
+it('keeps 生图前先问我 and the per-turn cost on 偏好, and the image-task limits under 高级', async () => {
   const desktop = {
     getProviderSettings: vi.fn(async () => snapshot('image-provider', false)),
     getRuntimeInfo: vi.fn(async () => { throw new Error('not needed') }),
@@ -71,11 +71,22 @@ it('saves the per-turn cost at which the Agent pauses, apart from the image-task
   render(<ProviderSettingsSheet onClose={() => undefined} />)
   await act(async () => undefined)
 
-  const cap = screen.getByRole('spinbutton', { name: 'Agent 每轮费用上限' })
+  // The services come first; nothing about spending sits there any more.
+  expect(screen.queryByRole('spinbutton', { name: '每轮费用上限' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: '偏好' }))
+  const ask = screen.getByRole('checkbox', { name: '生图前先问我' })
+  expect(ask).toBeChecked()
+  await act(async () => { fireEvent.click(ask) })
+  expect(desktop.setProviderExecutionPolicy).toHaveBeenLastCalledWith(expect.objectContaining({ approvalMode: 'session', autoGenerate: true }))
+  expect(screen.getByRole('checkbox', { name: '生图前先问我' })).not.toBeChecked()
+
+  const cap = screen.getByRole('spinbutton', { name: '每轮费用上限' })
   expect(cap).toHaveValue(3)
-  expect(screen.queryByRole('combobox', { name: 'Agent 每轮步数' })).not.toBeInTheDocument()
   fireEvent.change(cap, { target: { value: '8' } })
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存执行边界' })) })
-  expect(desktop.setProviderExecutionPolicy).toHaveBeenCalledWith(expect.objectContaining({ maxCostCnyPerTurn: 8, maxRequestsPerJob: DEFAULT_PROVIDER_CONFIG.executionPolicy.maxRequestsPerJob }))
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })) })
+  expect(desktop.setProviderExecutionPolicy).toHaveBeenLastCalledWith(expect.objectContaining({ maxCostCnyPerTurn: 8, maxRequestsPerJob: DEFAULT_PROVIDER_CONFIG.executionPolicy.maxRequestsPerJob }))
   expect(screen.getAllByText(/估算花到 ¥8\.00 就暂停/).length).toBeGreaterThan(0)
+
+  fireEvent.click(screen.getByRole('button', { name: '高级' }))
+  expect(screen.getByRole('spinbutton', { name: '每任务最大请求数' })).toHaveValue(DEFAULT_PROVIDER_CONFIG.executionPolicy.maxRequestsPerJob)
 })

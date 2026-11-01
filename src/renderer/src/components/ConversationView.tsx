@@ -1,20 +1,21 @@
-import { ArrowUp, Check, ChevronDown, ChevronRight, Circle, Crosshair, Files, GripVertical, Image, ListFilter, PanelRightClose, PanelRightOpen, Pencil, RotateCcw, Square, Trash2, X } from 'lucide-react'
+import { ArrowUp, Check, ChevronDown, ChevronRight, Circle, Crosshair, Files, GripVertical, Image, ImagePlus, ListFilter, PanelRightClose, PanelRightOpen, Pencil, PenTool, Plus, RotateCcw, Square, Trash2, X } from 'lucide-react'
 import { type CSSProperties, type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentActivity, AgentRun, ConversationSnapshot, OperationReceipt } from '../../../shared/agent'
-import { adaptLegacyTurnInputMode, type AgentHarnessSnapshot, type AgentMode, type AgentTurnStatus, type TaskRelation, type TurnInputMode } from '../../../shared/agent-harness'
+import { adaptLegacyTurnInputMode, type AgentHarnessSnapshot, type AgentTurnStatus, type TaskRelation, type TurnInputMode } from '../../../shared/agent-harness'
 import type { ProjectKnowledgeSnapshot } from '../../../shared/agent-context'
 import type { DesignDirectionSelectionResult } from '../../../shared/design-direction-selection'
-import { createAgentRequest } from '../agent/agent-client'
+import { createAgentRequest, type ReferenceAttachment } from '../agent/agent-client'
 import { agentEventsForTurn, subscribeAgentUpdates, subscribeAgentTransportUpdates } from '../agent/agent-event-stream'
 import { buildEphemeralAnnotationSaveCommands } from '../agent/ephemeral-annotation'
 import { currentEphemeralAnnotation, useEphemeralAnnotationStore } from '../agent/ephemeral-annotation-store'
 import { CanvasStage } from '../canvas/CanvasStage'
 import { projectAgentExecutionFlow } from '../agent/agent-execution-flow'
-import { autoGenerationTurnCopy, useCreationSessionStore } from '../store/creation-session-store'
+import { generatesWithoutAsking, useCreationSessionStore } from '../store/creation-session-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { AgentExecutionFlowView } from './AgentExecutionFlow'
 import { AgentContextSheet } from './AgentContextSheet'
 import { CreativeBriefSummary } from './CreativeBriefSummary'
+import { TurnSnapshotCompare, TurnSnapshotThumbnail } from './TurnSnapshots'
 import { activeModal } from '../interaction/keyboard-scope'
 import { CompletionReview } from './CompletionReview'
 import { useProjectScope } from '../store/use-project-scope'
@@ -69,11 +70,8 @@ function taskTitle(snapshot: ConversationSnapshot, run: AgentRun): string {
   return content.length > 54 ? `${content.slice(0, 54)}…` : content
 }
 
-const AGENT_MODE_COPY: Record<AgentMode, { readonly label: string; readonly note: string }> = {
-  review: { label: '审阅', note: '每步确认' },
-  collaboration: { label: '协作', note: '低风险自动' },
-  auto: { label: '自动', note: '边界内连续' }
-}
+const MAX_REFERENCES = 4
+const REFERENCE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp'])
 
 const INPUT_MODE_COPY: Record<TurnInputMode, { readonly label: string; readonly note: string }> = {
   correct_current: { label: '修正本轮', note: '替换尚未执行的计划' },
@@ -203,16 +201,17 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const [knowledge, setKnowledge] = useState<ProjectKnowledgeSnapshot | null>(null)
   const draft = useCreationSessionStore((state) => state.draft)
   const setDraft = useCreationSessionStore((state) => state.setDraft)
-  const autoGenerate = useCreationSessionStore((state) => state.autoGenerateForNextTurn)
-  const setAutoGenerate = useCreationSessionStore((state) => state.setAutoGenerateForNextTurn)
-  const agentMode = useCreationSessionStore((state) => state.agentMode)
-  const setAgentMode = useCreationSessionStore((state) => state.setAgentMode)
-  const providerAutoGeneration = useCreationSessionStore((state) => state.providerAutoGeneration)
   const bindProject = useCreationSessionStore((state) => state.bindProject)
-  const refreshProviderAutoGeneration = useCreationSessionStore((state) => state.refreshProviderAutoGeneration)
+  const refreshGenerationPreference = useCreationSessionStore((state) => state.refreshGenerationPreference)
   const completeAcceptedTurn = useCreationSessionStore((state) => state.completeAcceptedTurn)
   const [explicitInputMode, setExplicitInputMode] = useState<{ readonly turnId: string; readonly mode: TurnInputMode } | null>(null)
   const [idleTaskRelation, setIdleTaskRelation] = useState<TaskRelation>('continue_current')
+  /** Pictures attached from this computer for the next message. */
+  const [references, setReferences] = useState<readonly ReferenceAttachment[]>([])
+  const [attaching, setAttaching] = useState(false)
+  const attachInputRef = useRef<HTMLInputElement>(null)
+  const [scope, setScope] = useState<'selection' | 'canvas'>('selection')
+  const [inputModesOpen, setInputModesOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const [annotationExitPrompt, setAnnotationExitPrompt] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
@@ -221,6 +220,8 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const [activityExpanded, setActivityExpanded] = useState(() => localStorage.getItem('ai-canvas.activity-detail') === 'expanded')
   /** Turns whose process (steps, checks, directions, usage, execution record) is unfolded under the reply. */
   const [openProcessIds, setOpenProcessIds] = useState<ReadonlySet<string>>(readOpenProcesses)
+  /** Turns whose before/after is open under the summary. */
+  const [comparingIds, setComparingIds] = useState<ReadonlySet<string>>(() => new Set())
   const [conversationRatio, setConversationRatio] = useState(initialConversationRatio)
   const [compactRecordOpen, setCompactRecordOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -344,13 +345,11 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
   const activeTurnIdentity = activeTurn?.id ?? activeRun?.id ?? null
   const inputModeTouched = explicitInputMode?.turnId === activeTurnIdentity
   const inputMode = inputModeTouched ? explicitInputMode.mode : recommendedInputMode(draft)
-  const effectiveAgentMode = activeTurn === null ? agentMode : harness?.activeGoal?.mode ?? agentMode
   const hasFormalTask = harness?.turns.some((turn) => turn.taskId !== null
     && turn.taskRelation !== 'temporary_try') ?? false
   const effectiveIdleTaskRelation = idleTaskRelation === 'continue_current' && !hasFormalTask ? 'new_task' : idleTaskRelation
   const pendingTemporaryTurn = harness?.turns.find((turn) => turn.taskRelation === 'temporary_try' && turn.temporaryState === 'pending'
     && !ACTIVE_TURN_STATUSES.has(turn.status)) ?? null
-  const autoGenerationCopy = autoGenerationTurnCopy(effectiveAgentMode, providerAutoGeneration)
   const activities = snapshot?.activities ?? []
   const presentedActivities = presentedRunId === null ? activities : activities.filter((activity) => activity.runId !== null && presentedRunIds.has(activity.runId))
   const executionFlow = inspectedRun === null
@@ -413,6 +412,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
     () => scene.elements.filter((element) => selectedIds.includes(element.id)),
     [scene.elements, selectedIds]
   )
+  const effectiveScope = selectedElements.length > 0 && scope === 'selection' ? 'selection' : 'canvas'
   const annotationTarget = selectedElements.find((element) => element.type === 'image')
     ?? [...scene.elements].reverse().find((element) => element.type === 'image')
   const retainedAnnotationTarget = scene.elements.find((element) => element.id === annotationTargetId)
@@ -443,8 +443,8 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
 
   useEffect(() => {
     bindProject(scene.projectId)
-    void refreshProviderAutoGeneration()
-  }, [bindProject, refreshProviderAutoGeneration, scene.projectId])
+    void refreshGenerationPreference()
+  }, [bindProject, refreshGenerationPreference, scene.projectId])
 
   useEffect(() => {
     if (waitingDecisionAnchorRevision === null) return
@@ -554,6 +554,33 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
     await submitText(draft.trim(), true)
   }
 
+  const attachPictures = async (files: readonly File[]): Promise<void> => {
+    const projectId = scene.projectId
+    setAttaching(true)
+    setProblem(null)
+    try {
+      for (const file of files.slice(0, Math.max(0, MAX_REFERENCES - references.length))) {
+        if (!REFERENCE_TYPES.has(file.type) || file.size <= 0 || file.size > 100 * 1024 * 1024) {
+          setProblem('附件只支持 PNG、JPEG、WebP 图片，最大 100 MB。')
+          continue
+        }
+        const asset = await window.desktop.importAsset({
+          projectId,
+          name: file.name,
+          mimeType: file.type as 'image/png' | 'image/jpeg' | 'image/webp',
+          bytes: new Uint8Array(await file.arrayBuffer())
+        })
+        if (!isCurrentProject()) return
+        setReferences((current) => [...current, { assetId: asset.id, name: file.name }].slice(0, MAX_REFERENCES))
+      }
+      if (files.length > MAX_REFERENCES - references.length) setProblem(`一次最多附 ${MAX_REFERENCES} 张图。`)
+    } catch {
+      if (isCurrentProject()) setProblem('附件没有加上，请重试。')
+    } finally {
+      setAttaching(false)
+    }
+  }
+
   // After a turn runs out of steps: a new turn on the same work, leaving whatever is being typed alone.
   const continueAfterLimit = (): Promise<void> => submitText('接着完成刚才没做完的部分。', false)
 
@@ -564,17 +591,21 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
     setProblem(null)
     try {
       const ephemeralAnnotation = annotationStatus === 'editing' ? currentEphemeralAnnotation() : null
-      const request = await createAgentRequest(text, autoGenerate, 'selection', ephemeralAnnotation)
+      const request = await createAgentRequest(text, generatesWithoutAsking(), effectiveScope, ephemeralAnnotation, fromDraft ? references : [])
       if (!isCurrentProject()) return
       const run = !hasActiveTurn
-        ? await window.desktop.startAgentRun(request, agentMode, fromDraft ? effectiveIdleTaskRelation : 'continue_current')
+        ? await window.desktop.startAgentRun(request, 'collaboration', fromDraft ? effectiveIdleTaskRelation : 'continue_current')
         : await window.desktop.inputAgentRun(request, adaptLegacyTurnInputMode(inputMode))
       if (!isCurrentProject()) return
       if (ephemeralAnnotation !== null) markAnnotationSubmitted(run.id, text)
       else if (annotationVisible) clearAnnotation()
-      if (fromDraft) completeAcceptedTurn()
+      if (fromDraft) {
+        completeAcceptedTurn()
+        setReferences([])
+      }
       if (!hasActiveTurn) setIdleTaskRelation('continue_current')
       setExplicitInputMode(null)
+      setInputModesOpen(false)
       await refresh()
     } catch {
       setProblem('这条要求没有送达，请重试。')
@@ -619,12 +650,11 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
         markAnnotationJobSubmitted(retried.id)
         return
       }
-      const request = await createAgentRequest(annotationRequirement, autoGenerate, 'selection', annotation)
+      const request = await createAgentRequest(annotationRequirement, generatesWithoutAsking(), 'selection', annotation)
       if (!ownsAnnotation()) return
-      const run = await window.desktop.startAgentRun(request, agentMode)
+      const run = await window.desktop.startAgentRun(request, 'collaboration')
       if (!ownsAnnotation()) return
       markAnnotationSubmitted(run.id, annotationRequirement)
-      useCreationSessionStore.getState().setAutoGenerateForNextTurn(false)
       await refresh()
     } catch {
       if (ownsAnnotation()) useEphemeralAnnotationStore.getState().markFailed('重试没有送达；标注与原要求仍然保留。')
@@ -794,6 +824,13 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
     window.setTimeout(() => inputRef.current?.focus(), 0)
   }
 
+  const toggleCompare = (messageId: string): void => setComparingIds((current) => {
+    const next = new Set(current)
+    if (next.has(messageId)) next.delete(messageId)
+    else next.add(messageId)
+    return next
+  })
+
   const toggleProcess = (messageId: string): void => {
     const opening = !openProcessIds.has(messageId)
     setOpenProcessIds((current) => {
@@ -847,6 +884,16 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
           <div className="conversation-title">
             <div className="conversation-title-row">
               <span>创作记录</span>
+              {hasFormalTask && (
+                <button
+                  type="button"
+                  className="new-task-toggle"
+                  aria-pressed={idleTaskRelation === 'new_task'}
+                  disabled={hasActiveTurn}
+                  title={TASK_RELATION_COPY.new_task.note}
+                  onClick={() => setIdleTaskRelation((current) => current === 'new_task' ? 'continue_current' : 'new_task')}
+                ><Plus size={12} />新任务</button>
+              )}
               <button type="button" className="compact-preview-toggle" onClick={() => setCompactRecordOpen(false)}><PanelRightOpen size={15} />返回作品</button>
             </div>
             <h1>{workTitle}</h1>
@@ -915,10 +962,13 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                   <div className={`operation-receipt${open ? ' is-open' : ''}`} data-testid="operation-receipt" data-design-review={receipt.designReview === undefined ? undefined : 'true'}>
                     {decisions.length > 0 && <p className="turn-decisions">你选了：{decisions.map((label) => `「${label}」`).join('、')}</p>}
                     <div className="turn-summary">
+                      {receipt.snapshots !== undefined && <TurnSnapshotThumbnail snapshots={receipt.snapshots} projectId={scene.projectId}
+                        open={comparingIds.has(message.id)} onToggle={() => toggleCompare(message.id)} />}
                       <span>{turnSummaryCopy(receipt)}</span>
                       {receipt.undoable && receipt.batchId !== null && <button type="button" onClick={() => void undoActivity({ operationBatchId: receipt.batchId })}><RotateCcw size={12} />撤销这次修改</button>}
                       <button type="button" className="turn-process-toggle" aria-expanded={open} aria-label={open ? '收起过程' : '查看过程'} onClick={() => toggleProcess(message.id)}>过程<ChevronDown size={12} /></button>
                     </div>
+                    {receipt.snapshots !== undefined && comparingIds.has(message.id) && <TurnSnapshotCompare snapshots={receipt.snapshots} projectId={scene.projectId} />}
                     {open && <div className="turn-process" data-process-for={message.id}>
                     {receipt.completion !== undefined && <CompletionReview facts={receipt.completion} sceneRevision={scene.revision}
                       busy={acceptingReviewId !== null} onAccept={() => void acceptReview(message.id)} />}
@@ -1099,20 +1149,6 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                 <button type="button" className="quiet-choice" onClick={() => void resolveTemporaryTry('reject')}>放弃</button>
               </div>
             )}
-            {!hasActiveTurn && (
-              <div className="task-relation-modes" role="group" aria-label="这条要求与当前任务的关系">
-                {(['continue_current', 'new_task', 'temporary_try'] as const).map((relation) => (
-                  <button
-                    key={relation}
-                    type="button"
-                    className={effectiveIdleTaskRelation === relation ? 'is-active' : ''}
-                    aria-pressed={effectiveIdleTaskRelation === relation}
-                    title={TASK_RELATION_COPY[relation].note}
-                    onClick={() => setIdleTaskRelation(relation)}
-                  >{TASK_RELATION_COPY[relation].label}</button>
-                ))}
-              </div>
-            )}
             {(harness?.queue.some((entry) => entry.status === 'queued' || entry.status === 'paused') ?? false) && (
               <div className="task-queue-summary" aria-label="排队任务">
                 {harness?.queue.filter((entry) => entry.status === 'queued' || entry.status === 'paused').slice(0, 3).map((entry) => (
@@ -1121,16 +1157,24 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
               </div>
             )}
             {selectedElements.length > 0 && (
-              <div className="selection-context" aria-label="当前选区">
-                <span>作用于</span>
-                {selectedElements.map((element) => (
-                  <button key={element.id} type="button" onClick={() => setSelection(selectedIds.filter((id) => id !== element.id))}>
+              <div className="canvas-selection-context conversation-scope" aria-label="作用范围">
+                <span>作用范围</span>
+                <button type="button" className={effectiveScope === 'selection' ? 'is-active' : ''} aria-pressed={effectiveScope === 'selection'} onClick={() => setScope('selection')}>所选图层 · {selectedElements.length}</button>
+                <button type="button" className={effectiveScope === 'canvas' ? 'is-active' : ''} aria-pressed={effectiveScope === 'canvas'} onClick={() => setScope('canvas')}>整个画布</button>
+                {effectiveScope === 'selection' && selectedElements.map((element) => (
+                  <button key={element.id} type="button" className="selected-object" aria-label={`不再作用于 ${element.name}`} onClick={() => setSelection(selectedIds.filter((id) => id !== element.id))}>
                     {element.name}<X size={10} />
                   </button>
                 ))}
               </div>
             )}
-            {hasActiveTurn && (
+            {hasActiveTurn && draft.trim().length > 0 && !inputModesOpen && (
+              <p className="turn-input-hint">
+                这条会{INPUT_MODE_COPY[inputMode].label}：{INPUT_MODE_COPY[inputMode].note}。
+                <button type="button" onClick={() => setInputModesOpen(true)}>改一下</button>
+              </p>
+            )}
+            {hasActiveTurn && inputModesOpen && (
               <div className="turn-input-modes" role="group" aria-label="这条消息如何加入当前工作">
                 {(Object.keys(INPUT_MODE_COPY) as TurnInputMode[]).map((mode) => (
                   <button
@@ -1148,7 +1192,28 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
               </div>
             )}
             <div className="conversation-input-row">
-              <span className="composer-leading-mark" aria-hidden="true" />
+              <button
+                type="button"
+                className="composer-attach"
+                aria-label="添加附件"
+                title={`附上本机图片作参考，最多 ${MAX_REFERENCES} 张；不会放到画布上`}
+                disabled={attaching || references.length >= MAX_REFERENCES}
+                onClick={() => attachInputRef.current?.click()}
+              ><ImagePlus size={15} /></button>
+              <input
+                ref={attachInputRef}
+                className="visually-hidden"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                multiple
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(event) => {
+                  const files = [...(event.currentTarget.files ?? [])]
+                  event.currentTarget.value = ''
+                  if (files.length > 0) void attachPictures(files)
+                }}
+              />
               <textarea
                 maxLength={8000}
                 ref={inputRef}
@@ -1167,30 +1232,25 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
                 }}
                 placeholder={hasActiveTurn
                   ? `${INPUT_MODE_COPY[inputMode].label}：${INPUT_MODE_COPY[inputMode].note}…`
-                  : selectedElements.length > 0 ? '描述要怎样调整选中的元素…' : '描述你想创建或调整的画面…'}
+                  : effectiveIdleTaskRelation === 'new_task' && hasFormalTask ? '描述新的作品…'
+                    : effectiveScope === 'selection' ? '描述要怎样调整选中的元素…' : '描述你想创建或调整的画面…'}
               />
               <button type="submit" className="send-button" aria-label="发送要求" disabled={submitting || draft.trim().length === 0}><ArrowUp size={16} /></button>
             </div>
+            {references.length > 0 && (
+              <div className="composer-attachments" aria-label="附件">
+                {references.map((reference) => (
+                  <span key={reference.assetId}>
+                    <ImagePlus size={11} />{reference.name}
+                    <button type="button" aria-label={`移除附件 ${reference.name}`} onClick={() => setReferences((current) => current.filter((item) => item.assetId !== reference.assetId))}><X size={10} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="conversation-composer-meta">
               <div className="composer-meta-primary">
-                <span><span className="composer-state-label">{COMPOSER_STATE_COPY[composerState]}</span>{annotationRegions.length > 0 ? `临时圈选 · ${annotationRegions.length} 区` : selectedElements.length > 0 ? `选中元素 · ${selectedElements.length} 个` : `当前画布 · ${scene.elements.length} 个元素`}</span>
+                <span><span className="composer-state-label">{COMPOSER_STATE_COPY[composerState]}</span>{!hasActiveTurn && idleTaskRelation === 'new_task' && hasFormalTask ? '新任务 · ' : ''}{annotationRegions.length > 0 ? `临时圈选 · ${annotationRegions.length} 区` : effectiveScope === 'selection' ? `选中元素 · ${selectedElements.length} 个` : `当前画布 · ${scene.elements.length} 个元素`}</span>
                 <button ref={contextButtonRef} type="button" className="context-sheet-trigger" aria-expanded={contextOpen} onClick={() => setContextOpen(true)}><Files size={11} />本轮上下文</button>
-              </div>
-              <div className="composer-meta-controls">
-                <div className="agent-mode-selector" role="group" aria-label="Agent 模式">
-                  {(Object.keys(AGENT_MODE_COPY) as AgentMode[]).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={effectiveAgentMode === mode ? 'is-active' : ''}
-                      aria-pressed={effectiveAgentMode === mode}
-                      disabled={hasActiveTurn}
-                      title={AGENT_MODE_COPY[mode].note}
-                      onClick={() => setAgentMode(mode)}
-                    >{AGENT_MODE_COPY[mode].label}</button>
-                  ))}
-                </div>
-                <label className="inline-toggle" title={autoGenerationCopy.title}><input type="checkbox" checked={autoGenerate} disabled={!autoGenerationCopy.enabled || hasActiveTurn} onChange={(event) => setAutoGenerate(event.currentTarget.checked)} /><span>{autoGenerationCopy.label}</span></label>
               </div>
             </div>
           </form>
@@ -1233,7 +1293,7 @@ export function ConversationView({ header }: { readonly header: ReactNode }): Re
             <div className="preview-actions">
               <button type="button" className="compact-record-toggle" aria-expanded={compactRecordOpen} onClick={() => setCompactRecordOpen(true)}><PanelRightClose size={15} />创作记录</button>
               <button type="button" className={annotationVisible ? 'is-active' : ''} aria-pressed={annotationVisible} onClick={toggleAnnotation}><Pencil size={11} />临时标注</button>
-              <button type="button" onClick={() => setActiveView('canvas')}>打开画布</button>
+              <button type="button" className="open-editor" onClick={() => setActiveView('canvas')}><PenTool size={11} />编辑</button>
             </div>
           </div>
           <div className={`conversation-live-canvas${annotationEditable ? ' is-annotating' : ''}`} style={{ '--scene-reflection': scene.canvas.backgroundColor } as CSSProperties}>

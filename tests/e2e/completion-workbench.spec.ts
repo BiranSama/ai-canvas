@@ -83,10 +83,10 @@ for (const size of sizes) for (const zoom of zooms) {
         if (focus === '画布') {
           await hit(page.getByRole('button', { name: '选择 V', exact: true }))
           await hit(page.getByTestId('open-settings'))
-          const settings = page.getByRole('dialog', { name: '供应商设置', exact: true })
+          const settings = page.getByRole('dialog', { name: '设置', exact: true })
           await expect(settings).toBeInViewport({ ratio: 0.99 })
           await hit(settings.getByRole('button', { name: '外观', exact: true }))
-          await hit(settings.getByRole('button', { name: '关闭供应商设置', exact: true }))
+          await hit(settings.getByRole('button', { name: '关闭设置', exact: true }))
           await expect(page.getByTestId('open-settings')).toBeFocused()
           await hit(page.getByRole('button', { name: '草图', exact: true }))
           await hit(page.getByRole('button', { name: '选择 V', exact: true }))

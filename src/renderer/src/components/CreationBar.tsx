@@ -3,7 +3,7 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentRun, ConversationSnapshot } from '../../../shared/agent'
 import { createAgentRequest } from '../agent/agent-client'
 import { subscribeAgentUpdates } from '../agent/agent-event-stream'
-import { autoGenerationTurnCopy, useCreationSessionStore } from '../store/creation-session-store'
+import { generatesWithoutAsking, useCreationSessionStore } from '../store/creation-session-store'
 import { useGenerationDraftStore } from '../store/generation-draft-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { useProjectScope } from '../store/use-project-scope'
@@ -46,13 +46,8 @@ export function CreationBar(): React.JSX.Element {
   }
   const value = useCreationSessionStore((state) => state.draft)
   const setValue = useCreationSessionStore((state) => state.setDraft)
-  const agentMode = useCreationSessionStore((state) => state.agentMode)
-  const setAgentMode = useCreationSessionStore((state) => state.setAgentMode)
-  const autoGenerate = useCreationSessionStore((state) => state.autoGenerateForNextTurn)
-  const setAutoGenerate = useCreationSessionStore((state) => state.setAutoGenerateForNextTurn)
-  const providerAutoGeneration = useCreationSessionStore((state) => state.providerAutoGeneration)
   const bindProject = useCreationSessionStore((state) => state.bindProject)
-  const refreshProviderAutoGeneration = useCreationSessionStore((state) => state.refreshProviderAutoGeneration)
+  const refreshGenerationPreference = useCreationSessionStore((state) => state.refreshGenerationPreference)
   const completeAcceptedTurn = useCreationSessionStore((state) => state.completeAcceptedTurn)
   const setActiveView = useWorkspaceStore((state) => state.setActiveView)
   const referenceMode = useGenerationDraftStore((state) => state.referenceMode)
@@ -75,7 +70,6 @@ export function CreationBar(): React.JSX.Element {
   const waitingDecision = [...waitingDecisions].reverse().find((decision) => decision.runId === activeRun?.id) ?? waitingDecisions.at(-1) ?? null
   const effectiveScope = scope === 'pixels' && pixelSelection ? 'pixels'
     : selectedIds.length === 0 ? 'canvas' : scope === 'pixels' ? 'selection' : scope
-  const autoGenerationCopy = autoGenerationTurnCopy(agentMode, providerAutoGeneration)
   const refresh = useCallback(async (): Promise<void> => {
     try {
       setSnapshot(await window.desktop.getConversationSnapshot())
@@ -86,8 +80,8 @@ export function CreationBar(): React.JSX.Element {
 
   useEffect(() => {
     bindProject(scene.projectId)
-    void refreshProviderAutoGeneration()
-  }, [bindProject, refreshProviderAutoGeneration, scene.projectId])
+    void refreshGenerationPreference()
+  }, [bindProject, refreshGenerationPreference, scene.projectId])
 
   useEffect(() => {
     const initial = window.setTimeout(() => void refresh(), 0)
@@ -128,8 +122,8 @@ export function CreationBar(): React.JSX.Element {
     setSubmitting(true)
     setProblem(null)
     try {
-      const request = await createAgentRequest(text, autoGenerate, effectiveScope === 'canvas' ? 'canvas' : 'selection', effectiveScope === 'pixels' ? selectionAnnotation() : null)
-      if (activeRun === null) await window.desktop.startAgentRun(request, agentMode)
+      const request = await createAgentRequest(text, generatesWithoutAsking(), effectiveScope === 'canvas' ? 'canvas' : 'selection', effectiveScope === 'pixels' ? selectionAnnotation() : null)
+      if (activeRun === null) await window.desktop.startAgentRun(request, 'collaboration')
       else await window.desktop.inputAgentRun(request, 'correct_current')
       completeAcceptedTurn()
       await refresh()
@@ -282,16 +276,7 @@ export function CreationBar(): React.JSX.Element {
         </div>
       )}
       <div className="creation-meta">
-        <span><span className="composer-state-label">{CREATION_STATE_COPY[composerState]}</span>{problem ?? latestRunProblem ?? (activeRun !== null ? `当前操作 · ${activeRun.status === 'planning' ? '正在理解要求' : activeRun.status === 'awaiting_confirmation' ? '等你决定' : '正在更新作品'}` : `当前画布 · ${autoGenerate ? '修改后继续生成' : '仅调整画布'}`)}</span>
-        <label className="composer-mode-select">
-          <span className="visually-hidden">Agent 模式</span>
-          <select aria-label="Agent 模式" value={agentMode} disabled={activeRun !== null} onChange={(event) => setAgentMode(event.currentTarget.value as typeof agentMode)}>
-            <option value="review">审阅</option>
-            <option value="collaboration">协作</option>
-            <option value="auto">自动</option>
-          </select>
-        </label>
-        <label className="inline-toggle" title={autoGenerationCopy.title}><input type="checkbox" checked={autoGenerate} disabled={!autoGenerationCopy.enabled || activeRun !== null} onChange={(event) => setAutoGenerate(event.currentTarget.checked)} /><span>{autoGenerationCopy.label}</span></label>
+        <span><span className="composer-state-label">{CREATION_STATE_COPY[composerState]}</span>{problem ?? latestRunProblem ?? (activeRun !== null ? `当前操作 · ${activeRun.status === 'planning' ? '正在理解要求' : activeRun.status === 'awaiting_confirmation' ? '等你决定' : '正在更新作品'}` : `当前画布 · ${scene.elements.length} 个元素`)}</span>
         <label className="reference-mode-select" title="决定生成时如何理解当前画布">
           <span className="visually-hidden">参考方式</span>
           <select aria-label="参考方式" value={referenceMode} disabled={compiling || activeRun !== null} onChange={(event) => updateGenerationDraft({ referenceMode: event.currentTarget.value as typeof referenceMode })}>

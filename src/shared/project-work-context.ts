@@ -41,7 +41,7 @@ export const projectWorkContextSchema = z.object({
   generation: generationWorkContextSchema,
   conversationDraft: z.string().max(8_000).default(''),
   workspace: z.object({
-    activeView: z.enum(['conversation', 'canvas', 'generate']).default('canvas'),
+    activeView: z.enum(['conversation', 'canvas', 'generate']).default('conversation'),
     selectedIds: z.array(z.string().uuid()).max(1_000).default([]),
     zoom: z.number().min(.05).max(32).default(1),
     pan: z.object({ x: z.number().finite(), y: z.number().finite() }).default({ x: 0, y: 0 }),

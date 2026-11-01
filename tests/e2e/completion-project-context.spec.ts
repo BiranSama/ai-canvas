@@ -76,10 +76,10 @@ test('shows unknown and verified zero honestly, deduplicates task fees and resto
   await page.screenshot({ path: test.info().outputPath('cost-known-and-unknown.png') })
   const persisted = await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs())
   await writeFile(test.info().outputPath('cost-main-facts.json'), JSON.stringify({ jobs: persisted, network: 0, syntheticReceipt: true }, null, 2))
-  await page.getByRole('button', { name: '供应商设置', exact: true }).click()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   await expect(page.getByLabel('每任务预约额度')).toBeVisible()
   await expect(page.getByRole('complementary', { name: 'Provider 执行边界' })).toContainText('价格未知时，预约不保证实际人民币扣费上限')
-  await page.getByRole('button', { name: '关闭供应商设置', exact: true }).click()
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click()
 })
 
 test('A/B versions, unsent drafts and current view survive three focuses, project library switches and restart', async () => {

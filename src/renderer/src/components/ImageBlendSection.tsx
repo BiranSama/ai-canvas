@@ -12,11 +12,14 @@ const TONE_STRENGTHS = [
 ] as const
 
 /** Layer effects that blend an image into the picture: tone, edge fade and a soft shadow. The asset is never changed. */
-export function ImageBlendSection({ element, onChange }: {
+export function ImageBlendSection({ element, onChange, onRestoreRectangle }: {
   readonly element: ImageElement
   readonly onChange: (effects: ImageEffects) => void
+  /** Back to the picture as a plain rectangle: no cut-out mask, feather or tone; the shadow stays. */
+  readonly onRestoreRectangle: () => void
 }): React.JSX.Element {
   const effects = element.effects ?? NO_EFFECTS
+  const blended = element.mask?.enabled === true || effects.feather > 0 || effects.colorMatch !== null
   const [busy, setBusy] = useState<number | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
   const set = (changes: Partial<ImageEffects>): void => onChange({ ...effects, ...changes })
@@ -62,6 +65,12 @@ export function ImageBlendSection({ element, onChange }: {
         }} />
         <output>{Math.round(softShadowStrength(effects.shadow) * 100)}%</output>
       </label>
+      {blended && (
+        <div className="blend-row blend-restore">
+          <span>{element.mask?.enabled === true ? '抠图、羽化或调色' : '羽化或调色'}</span>
+          <button type="button" onClick={onRestoreRectangle}>还原为矩形</button>
+        </div>
+      )}
       {problem !== null && <p className="field-note is-problem" role="alert">{problem}</p>}
       <p className="field-note">只改显示，不改原图，可以随时调回。投影适合背景透明的主体。</p>
     </div>

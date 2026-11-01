@@ -171,6 +171,21 @@ const storedProviderExecutionPolicySchema = z.object({
   maxCostCnyPerTurn
 }))
 
+type GenerationApproval = Pick<ProviderExecutionPolicy, 'approvalMode' | 'autoGenerate'>
+
+/**
+ * 「生图前先问我」, read from the two fields that hold it: off only when real
+ * generations go ahead unasked and the Agent may start them on its own.
+ * Any other pair asks, as it did before the two became one switch.
+ */
+export function asksBeforeGenerating(policy: GenerationApproval): boolean {
+  return !(policy.approvalMode === 'session' && policy.autoGenerate)
+}
+
+export function withAskBeforeGenerating<T extends GenerationApproval>(policy: T, ask: boolean): T {
+  return { ...policy, approvalMode: ask ? 'confirm_each' : 'session', autoGenerate: !ask }
+}
+
 export const DEFAULT_PROVIDER_EXECUTION_POLICY = providerExecutionPolicySchema.parse({
   approvalMode: 'confirm_each',
   autoGenerate: false,

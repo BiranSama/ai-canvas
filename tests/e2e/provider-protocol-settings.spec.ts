@@ -14,7 +14,7 @@ test('Provider settings make protocol routing and the real connection confirmati
   try {
     const window = await app.firstWindow()
     await window.getByTestId('open-settings').evaluate((button) => button.click())
-    const dialog = window.getByRole('dialog', { name: '供应商设置' })
+    const dialog = window.getByRole('dialog', { name: '设置', exact: true })
     await expect(dialog).toBeVisible()
     const llmRow = dialog.locator('.provider-setting-row').filter({ hasText: 'Seed 2.1 Turbo' })
     await llmRow.getByRole('button', { name: '编辑' }).evaluate((button) => button.click())
@@ -69,7 +69,7 @@ test('the image module freely configures an explicit protocol and opens directly
     await openGenerationOptions(window)
     await window.getByRole('button', { name: '配置图片模型' }).click()
 
-    const dialog = window.getByRole('dialog', { name: '供应商设置' })
+    const dialog = window.getByRole('dialog', { name: '设置', exact: true })
     const imageRow = dialog.locator('[data-provider-slot="image"]')
     await expect(imageRow).toBeVisible()
     await expect(imageRow.getByLabel('Image Provider 调用协议')).toBeVisible()
@@ -85,9 +85,9 @@ test('the image module freely configures an explicit protocol and opens directly
     await imageKey.fill('synthetic-owner-image-key')
     await imageRow.getByRole('button', { name: '安全保存 Owner Image Relay 凭据' }).evaluate((button) => button.click())
     await expect(dialog.getByTestId('provider-settings-status')).toContainText('界面不会再次显示密钥')
-    await dialog.getByRole('button', { name: '关闭供应商设置' }).evaluate((button) => button.click())
-    await expect(window.getByLabel('生成供应商')).toContainText('Owner Image Relay')
-    await expect(window.getByLabel('生成供应商')).toContainText('owner-image-model')
+    await dialog.getByRole('button', { name: '关闭设置' }).evaluate((button) => button.click())
+    await expect(window.getByLabel('生图服务')).toContainText('Owner Image Relay')
+    await expect(window.getByLabel('生图服务')).toContainText('owner-image-model')
     await expect(window.getByRole('group', { name: '生成档位' }).getByRole('button', { name: '多候选探索', exact: true })).toHaveClass(/is-active/)
     expect(externalRequests).toEqual([])
   } finally {

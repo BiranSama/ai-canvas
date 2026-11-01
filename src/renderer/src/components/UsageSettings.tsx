@@ -25,7 +25,7 @@ export function UsageSettings(): React.JSX.Element {
     <section className="settings-section-summary usage-settings" aria-label="用量">
       <span className="settings-kicker">用量</span>
       <h2>文字模型用量</h2>
-      <p>当前项目最近 20 轮对话里文字模型的调用。估算按「供应商」里填的单价计算，没填单价的只显示 token。缓存命中率越高，同样的对话越便宜、越快。</p>
+      <p>当前项目最近 20 轮对话里文字模型的调用。估算按「服务」里填的单价计算，没填单价的只显示 token。缓存命中率越高，同样的对话越便宜、越快。</p>
       {problem !== null && <p role="alert">{problem}</p>}
       {rows === null && problem === null && <p>正在读取…</p>}
       {totals !== null && <div className="usage-totals" data-testid="usage-totals">

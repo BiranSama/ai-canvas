@@ -32,7 +32,7 @@ test('AC-05 keeps stored credentials out of Renderer reads, projects, logs and A
     const settingsButton = window.getByTestId('open-settings')
     await expect(settingsButton).toBeVisible()
     await settingsButton.evaluate((button) => button.click())
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
     await window.locator('.provider-setting-row').filter({ hasText: 'Seedream' }).getByRole('button', { name: '编辑' }).evaluate((button) => button.click())
     const imageEndpoint = window.getByLabel('Image Provider API 地址')
     const imageProviderRow = window.locator('.provider-setting-row').filter({ has: imageEndpoint })
@@ -72,7 +72,7 @@ test('AC-05 keeps stored credentials out of Renderer reads, projects, logs and A
       expect((await readFile(filePath)).includes(Buffer.from(secret))).toBe(false)
     }
 
-    await window.getByRole('button', { name: '关闭供应商设置' }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '关闭设置' }).evaluate((button) => button.click())
     await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())
     await window.getByRole('textbox', { name: '对话输入' }).fill(`不要使用这个测试 key：${secret}`)
     await window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())

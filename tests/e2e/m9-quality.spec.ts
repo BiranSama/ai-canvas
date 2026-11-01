@@ -19,7 +19,7 @@ test('supports explicit offline operation, keyboard focus and IME composition', 
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1280, height: 800 })
-    await expect(window.getByRole('button', { name: '供应商设置' })).toBeVisible()
+    await expect(window.getByRole('button', { name: '设置', exact: true })).toBeVisible()
     const cdp = await app.context().newCDPSession(window)
     await cdp.send('Network.enable')
     await cdp.send('Network.emulateNetworkConditions', {
@@ -37,11 +37,11 @@ test('supports explicit offline operation, keyboard focus and IME composition', 
       button.focus()
       button.click()
     })
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
     await window.locator('.provider-setting-row').filter({ hasText: 'Seed 2.1' }).getByRole('button', { name: '编辑' }).evaluate((button) => button.click())
     await expect(window.getByLabel('火山方舟 · Seed 2.1 Turbo API Key')).toBeFocused()
     await window.keyboard.press('Escape')
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeHidden()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeHidden()
     await expect(settingsButton).toBeFocused()
 
     await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())

@@ -345,6 +345,12 @@ export interface OperationReceipt {
   readonly undoable: boolean
   /** Text-model calls of the turn, when the engine records them. */
   readonly modelUsage?: TurnModelUsage
+  /**
+   * Small pictures of the canvas when the turn was sent and when it finished,
+   * as stored assets, for the card's thumbnail and before/after. Only for a
+   * turn that changed the canvas; before is null when it could not be taken.
+   */
+  readonly snapshots?: { readonly before: string | null; readonly after: string }
   readonly designReview?: {
     readonly briefId?: string
     readonly directions: readonly {

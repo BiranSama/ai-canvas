@@ -58,25 +58,23 @@ it('reports an invalid oversized draft once, refuses to save it, and recovers af
   } finally { stop() }
 })
 
-it('restores only the owning project context and never restores a one-turn generation grant', () => {
+it('restores only the owning project context and never saves the generation preference with the project', () => {
   const a = createBlankScene(), b = createBlankScene()
   hydrateWorkspaceScene(a, 'A')
   useGenerationDraftStore.getState().updateDraft({ prompt: 'A 山海封面', quantity: 3, compareAId: crypto.randomUUID(), compareBId: crypto.randomUUID(), compareEnabled: true, compareActiveSide: 'B', resultScrollLeft: 128, expandedSections: ['references'] })
   useWorkspaceStore.getState().setViewport(1.7, { x: 48, y: -12 })
   useWorkspaceStore.getState().setActiveView('generate')
   useCreationSessionStore.getState().setDraft('A 的下一轮未发送文字')
-  useCreationSessionStore.getState().setProviderAutoGenerationAllowed(true)
-  useCreationSessionStore.getState().setAutoGenerateForNextTurn(true)
+  useCreationSessionStore.getState().setAskBeforeGenerating(false)
   const saved = captureProjectWorkContext()!
   expect(JSON.stringify(saved)).not.toContain('autoGenerate')
   hydrateWorkspaceScene(b, 'B')
   expect(useGenerationDraftStore.getState()).toMatchObject({ projectId: b.projectId, prompt: '', quantity: 1, compareEnabled: false, compareAId: null })
-  expect(useCreationSessionStore.getState()).toMatchObject({ draft: '', autoGenerateForNextTurn: false })
+  expect(useCreationSessionStore.getState()).toMatchObject({ draft: '' })
   useGenerationDraftStore.getState().updateDraft({ prompt: 'late A' }, a.projectId)
   expect(useGenerationDraftStore.getState().prompt).toBe('')
   hydrateWorkspaceScene(a, 'A', undefined, saved)
   expect(captureProjectWorkContext()).toEqual(saved)
-  expect(useCreationSessionStore.getState().autoGenerateForNextTurn).toBe(false)
   expect(projectWorkContextSchema.safeParse({ ...defaultProjectWorkContext(a.projectId), autoGenerate: true }).success).toBe(false)
 })
 

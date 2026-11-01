@@ -200,7 +200,15 @@ export const placeGenerationResultInputSchema = z.object({
   projectId: idSchema.optional(),
   resultId: idSchema,
   placementId: idSchema,
-  origin: z.enum(['user', 'agent']).default('user')
+  origin: z.enum(['user', 'agent']).default('user'),
+  /**
+   * Where the person would like a plain result to go (the placeholder or image
+   * they selected, or the one subject placeholder): it goes there and blends
+   * in as the Agent's does. Ignored for a result that already has its place
+   * (a local edit, a generative fill, a unified redraw) and when the target
+   * cannot take it, and then the result goes in the middle as before.
+   */
+  preferredTargetId: idSchema.optional()
 })
 
 export const placeGenerationResultReceiptSchema = z.object({

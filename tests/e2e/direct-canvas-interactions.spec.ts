@@ -499,8 +499,8 @@ test('header actions and project-card actions stay separate and More opens a rea
     }
     await window.setViewportSize(viewports[0]!)
     await settings.evaluate((button: { click(): void }) => button.click())
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
-    await window.getByRole('button', { name: '关闭供应商设置' }).click()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
+    await window.getByRole('button', { name: '关闭设置' }).click()
 
     await window.getByRole('button', { name: '返回项目库' }).click()
     const favorite = window.getByRole('button', { name: /收藏项目：未命名创作/ })

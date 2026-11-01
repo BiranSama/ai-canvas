@@ -388,7 +388,14 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
         </div>
       )}
       {element.type === 'image' && showSection('融入画面 融合 色调 羽化 投影 阴影 blend tone feather shadow') && (
-        <ImageBlendSection element={element} onChange={(effects) => updateElement(element.id, { effects })} />
+        <ImageBlendSection
+          element={element}
+          onChange={(effects) => updateElement(element.id, { effects })}
+          onRestoreRectangle={() => updateElement(element.id, {
+            effects: { colorMatch: null, feather: 0, shadow: element.effects?.shadow ?? null },
+            ...(element.mask === null || element.mask === undefined ? {} : { mask: { ...element.mask, enabled: false } })
+          })}
+        />
       )}
       {element.type === 'sketch' && showSection('草图 参考强度 最终导出 sketch fidelity visible') && (
         <div className="inspector-section">

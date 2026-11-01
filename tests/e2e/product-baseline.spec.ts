@@ -41,13 +41,13 @@ test('normal product surfaces stay free of historical stage and raw development 
     await expectProductSurface(window)
 
     await window.getByRole('button', { name: '打开设置' }).evaluate((button) => button.click())
-    const settings = window.getByRole('dialog', { name: '供应商设置' })
+    const settings = window.getByRole('dialog', { name: '设置', exact: true })
     await expect(settings).toBeVisible()
     for (const section of ['供应商', 'Agent 上下文', '生成档位', '项目与存储', '外观', '隐私与高级']) {
       await settings.getByRole('button', { name: section, exact: true }).evaluate((button) => button.click())
       await expectProductSurface(window)
     }
-    await settings.getByRole('button', { name: '关闭供应商设置' }).evaluate((button) => button.click())
+    await settings.getByRole('button', { name: '关闭设置' }).evaluate((button) => button.click())
 
     await window.getByRole('button', { name: '新建项目' }).evaluate((button) => button.click())
     await expect(window.getByTestId('canvas-stage')).toBeVisible({ timeout: 10_000 })
@@ -59,7 +59,7 @@ test('normal product surfaces stay free of historical stage and raw development 
     }
 
     await window.getByTestId('open-settings').evaluate((button) => button.click())
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
     await expectProductSurface(window)
     expect(externalRequests).toEqual([])
   } finally {

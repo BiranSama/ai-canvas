@@ -62,7 +62,7 @@ it('redraws every exported layer but text and lays the result between them and t
     const receipt = await runtime.placeGenerationResult({ resultId: job.results[0]!.id, placementId: id(20), origin: 'user' })
     expect(receipt).toMatchObject({ elementId: id(20), reused: false })
     const placed = runtime.getWorkspaceBootstrap().scene.elements
-    expect(placed.map((element) => element.name)).toEqual(['背景', '圆', '统一渲染 1', '标题'])
+    expect(placed.map((element) => element.name)).toEqual(['背景', '圆', '统一重绘 1', '标题'])
     expect(placed[2]).toMatchObject({ type: 'image', fit: 'cover', transform: { x: 0, y: 0, width: 1, height: 1 } })
     expect(placed.every((element) => element.visible)).toBe(true)
 

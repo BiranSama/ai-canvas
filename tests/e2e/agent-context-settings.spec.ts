@@ -35,7 +35,7 @@ test('AH1 S5 exposes Context, Directive, Memory and local-only policy without ne
     await expect(window.getByTestId('provider-settings-status')).toContainText('未来上下文删除')
     await expect(window.locator('.knowledge-list').filter({ hasText: '本项目采用克制的银蓝色调' })).toContainText('deleted')
 
-    await window.getByRole('button', { name: '关闭供应商设置' }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '关闭设置' }).evaluate((button) => button.click())
     await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())
     await window.getByRole('textbox', { name: '对话输入' }).fill('建立一个 4:5 的本地海报布局，标题是 AURORA，先不要生成图片。')
     await window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())

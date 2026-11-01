@@ -337,6 +337,14 @@ export class ConversationRepository {
     return this.getMessage(id)
   }
 
+  /** Adds a turn's before/after pictures to the receipt already written, so drawing them never holds the reply back. */
+  async attachReceiptSnapshots(messageId: string, snapshots: NonNullable<OperationReceipt['snapshots']>): Promise<void> {
+    const row = this.#connection.sqlite.prepare('SELECT receipt_json FROM conversation_messages WHERE id = ?').get(messageId) as { receipt_json: string | null } | undefined
+    if (row?.receipt_json == null) return
+    const receipt = JSON.parse(row.receipt_json) as OperationReceipt
+    this.#connection.sqlite.prepare('UPDATE conversation_messages SET receipt_json = ? WHERE id = ?').run(JSON.stringify({ ...receipt, snapshots }), messageId)
+  }
+
   async ensureToolCall(runId: string, ordinal: number, input: AgentPlan['tools'][number]): Promise<void> {
     const tool = agentToolPlanSchema.parse(input)
     const run = await this.getRun(runId)

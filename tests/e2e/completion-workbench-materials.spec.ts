@@ -27,12 +27,12 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
       await page.getByTestId('generation-prompt').fill('山海之间，远山与留白')
       await hit(page.getByTestId('generation-submit'))
       await expect(page.getByTestId('generation-result')).toHaveCount(1)
-      await hit(page.getByRole('button', { name: '供应商设置', exact: true }))
-      const settings = page.getByRole('dialog', { name: '供应商设置', exact: true })
+      await hit(page.getByRole('button', { name: '设置', exact: true }))
+      const settings = page.getByRole('dialog', { name: '设置', exact: true })
       await hit(settings.getByRole('button', { name: '外观', exact: true }))
       await hit(settings.locator(`[data-appearance-preview="${theme}"]`))
       await expect(page.locator('html')).toHaveAttribute('data-appearance-theme', theme)
-      await hit(settings.getByRole('button', { name: '关闭供应商设置', exact: true }))
+      await hit(settings.getByRole('button', { name: '关闭设置', exact: true }))
       const scene = (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene
       const captures: unknown[] = []
       const cdp = await page.context().newCDPSession(page)
@@ -64,12 +64,12 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
           if (focus === '生成') await hit(page.locator('.generation-compact-summary'))
         }
       }
-      await hit(page.getByRole('button', { name: '供应商设置', exact: true }))
+      await hit(page.getByRole('button', { name: '设置', exact: true }))
       await hit(settings.getByRole('button', { name: '外观', exact: true }))
       await hit(settings.locator('[data-glass-preview="solid"]'))
       await expect(page.locator('html')).toHaveAttribute('data-glass-material', 'solid')
       captures.push({ settings: true, native: await captureWorkbench(app, test.info().outputPath(`${theme}-settings-small.png`)) })
-      await hit(settings.getByRole('button', { name: '关闭供应商设置', exact: true }))
+      await hit(settings.getByRole('button', { name: '关闭设置', exact: true }))
       expect((await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene).toEqual(scene)
       expect(await app.evaluate(() => (globalThis as typeof globalThis & { __materialRequests: number }).__materialRequests)).toBe(0)
       await writeFile(test.info().outputPath('material-facts.json'), JSON.stringify({ theme, userData, captures, scene, actualProviderRequests: 0 }, null, 2))
