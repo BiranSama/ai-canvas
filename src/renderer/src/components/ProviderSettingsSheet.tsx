@@ -33,6 +33,7 @@ import {
   type ProviderSettingsSnapshot
 } from '../../../shared/provider-settings'
 import { useCreationSessionStore } from '../store/creation-session-store'
+import { useFirstRunStore } from '../store/first-run-store'
 import { applyAppearanceSnapshot, defaultAppearanceSnapshot } from '../appearance/apply-appearance'
 import { AgentContextSettings } from './AgentContextSettings'
 import { UsageSettings } from './UsageSettings'
@@ -138,6 +139,7 @@ export function ProviderSettingsSheet({
   const [section, setSection] = useState<'providers' | 'preferences' | 'agent' | 'usage' | 'projects' | 'appearance' | 'advanced'>('providers')
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
   const [status, setStatus] = useState('正在读取设置…')
+  const showFirstRunAgain = useFirstRunStore((state) => state.showAgain)
   const [libraryBusy, setLibraryBusy] = useState(false)
   const [migrationSummary, setMigrationSummary] = useState<string | null>(null)
   const [connectionConfirming, setConnectionConfirming] = useState(false)
@@ -451,6 +453,13 @@ export function ProviderSettingsSheet({
                   }} />
                 </label>
                 <button type="button" className="settings-save" disabled={busy !== null || policyDraft.maxCostCnyPerTurn === snapshot.executionPolicy.maxCostCnyPerTurn} onClick={() => void saveExecutionPolicy()}>保存</button>
+              </div>
+              <div className="settings-field-row">
+                <span><strong>新手指引</strong><small>空白对话里的三步说明，和项目库里的「先连上服务」。</small></span>
+                <button type="button" className="settings-save" onClick={() => {
+                  showFirstRunAgain()
+                  setStatus('新手指引会在下一次打开空白对话时出现。')
+                }}>重新显示新手指引</button>
               </div>
             </section>
           )}

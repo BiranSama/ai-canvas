@@ -20,7 +20,7 @@ import {
   Undo2
 } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createSceneInitializationCommands, type SceneElement } from '../../domain'
+import type { SceneElement } from '../../domain'
 import type { DesktopApi, RuntimeInfo } from '../../shared/desktop-api'
 import type { RecentProjectSummary, WorkspaceBootstrap } from '../../shared/project'
 import appIconUrl from '../../../build/icon.png'
@@ -54,7 +54,8 @@ import { AppNotice } from './components/AppNotice'
 import { showAppNotice } from './components/app-notice'
 import { ShortcutSheet } from './components/ShortcutSheet'
 import { WorkspaceRecoveryView } from './components/RendererErrorBoundary'
-import { createVisualExampleScene, VISUAL_EXAMPLE_KEYS, visualExampleLabels, type VisualExampleKey } from './fixtures/visual-examples'
+import { MERCHANT_EXAMPLE_KEYS, MERCHANT_EXAMPLES, type MerchantExampleKey } from './fixtures/merchant-examples'
+import { createExampleProject } from './project/example-project'
 import { groupBoundsForChildTransforms, hydrateWorkspaceScene, isPaintTool, isSelectionTool, useWorkspaceStore, type CanvasTool, type WorkspaceView } from './store/workspace-store'
 import { GlassIsland } from './islands/GlassIsland'
 import { resetAllGlassIslands } from './islands/island-events'
@@ -210,38 +211,8 @@ function WorkspaceHeader({
     }
   }
 
-  const createExampleProject = async (key: VisualExampleKey): Promise<void> => {
-    if (projectBusy) return
-    setProjectBusy(true)
-    setProjectProblem(null)
-    try {
-      const projectName = visualExampleLabels[key]
-      await flushProjectWorkContext()
-      const result = await window.desktop.createProject({ suggestedName: projectName })
-      if (result.cancelled || result.bootstrap === null) return
-      const exampleScene = createVisualExampleScene(key, {
-        projectId: result.bootstrap.scene.projectId,
-        sceneId: result.bootstrap.scene.id
-      })
-      const initialized = await window.desktop.executeSceneCommands({
-        projectId: result.bootstrap.projectId,
-        expectedSceneRevision: result.bootstrap.scene.revision,
-        batch: {
-          id: globalThis.crypto.randomUUID(),
-          origin: 'system',
-          summary: `载入示例作品：${projectName}`,
-          commands: [...createSceneInitializationCommands(exampleScene)]
-        }
-      })
-      if (!initialized.ok) throw new Error(initialized.error.message)
-      await hydrateRuntimeWorkspace({ ...result.bootstrap, scene: initialized.receipt.state.scene,
-        sceneSequence: initialized.receipt.state.sequence, canUndo: initialized.receipt.state.canUndo, canRedo: initialized.receipt.state.canRedo })
-      setProjectMenuOpen(false)
-    } catch (error) {
-      setProjectProblem(error instanceof Error ? error.message : '示例项目没有创建成功。')
-    } finally {
-      setProjectBusy(false)
-    }
+  const openExampleProject = (key: MerchantExampleKey): void => {
+    void runProjectAction(async () => ({ cancelled: false, bootstrap: await createExampleProject(key) }))
   }
 
   const openFile = (file: File): void => {
@@ -334,7 +305,7 @@ function WorkspaceHeader({
         </div>
         <div className="example-projects" aria-label="示例作品">
           <span><LayoutTemplate size={12} />示例作品</span>
-          {VISUAL_EXAMPLE_KEYS.map((key) => <button key={key} type="button" role="menuitem" disabled={projectBusy} onClick={() => void createExampleProject(key)}>{visualExampleLabels[key]}</button>)}
+          {MERCHANT_EXAMPLE_KEYS.map((key) => <button key={key} type="button" role="menuitem" disabled={projectBusy} onClick={() => openExampleProject(key)}>{MERCHANT_EXAMPLES[key].label}</button>)}
         </div>
         {recentProjects.length > 0 && <div className="recent-projects"><span>最近项目</span>{recentProjects.slice(0, 4).map((project) => <button key={project.id} type="button" role="menuitem" disabled={projectBusy || project.id === useWorkspaceStore.getState().scene.projectId} onClick={() => void runProjectAction(async () => ({ cancelled: false, bootstrap: await window.desktop.openRecentProject(project.id) }))}><strong>{project.name}</strong><small>{new Date(project.lastOpenedAt).toLocaleDateString()}</small></button>)}</div>}
         {projectProblem !== null && <p role="alert">{projectProblem}</p>}

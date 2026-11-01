@@ -12,7 +12,9 @@ import { CanvasStage, type CanvasStageHandle } from '../canvas/CanvasStage'
 import { exportCanvasImage, type ExportFormat } from '../canvas/export-canvas'
 import { projectAgentExecutionFlow } from '../agent/agent-execution-flow'
 import { generatesWithoutAsking, MAX_REFERENCES, useCreationSessionStore } from '../store/creation-session-store'
+import { useFirstRunStore } from '../store/first-run-store'
 import { useWorkspaceStore } from '../store/workspace-store'
+import { DEFAULT_STARTER_PROMPTS, useStarterPrompts } from '../project/example-project'
 import { AgentExecutionFlowView } from './AgentExecutionFlow'
 import { AgentContextSheet } from './AgentContextSheet'
 import { CreativeBriefSummary } from './CreativeBriefSummary'
@@ -208,6 +210,10 @@ export function ConversationView({ Header, onShowLibrary }: {
   const bindProject = useCreationSessionStore((state) => state.bindProject)
   const refreshGenerationPreference = useCreationSessionStore((state) => state.refreshGenerationPreference)
   const completeAcceptedTurn = useCreationSessionStore((state) => state.completeAcceptedTurn)
+  const guideDismissed = useFirstRunStore((state) => state.guideDismissed)
+  const dismissGuide = useFirstRunStore((state) => state.dismissGuide)
+  // Read through the store so an example opened after this view mounted still brings its own prompts.
+  const starterPrompts = useStarterPrompts((state) => state.prompts[scene.projectId] ?? DEFAULT_STARTER_PROMPTS)
   const [explicitInputMode, setExplicitInputMode] = useState<{ readonly turnId: string; readonly mode: TurnInputMode } | null>(null)
   const [idleTaskRelation, setIdleTaskRelation] = useState<TaskRelation>('continue_current')
   /** Pictures attached from this computer for the next message. */
@@ -320,6 +326,8 @@ export function ConversationView({ Header, onShowLibrary }: {
   const presentedTaskKey = presentedRun === null ? null : taskKeyForRun(presentedRun)
   const taskRepresentatives = (snapshot?.runs ?? []).filter((run, index, runs) =>
     runs.findIndex((candidate) => taskKeyForRun(candidate) === taskKeyForRun(run)) === index)
+  /** An empty conversation on a new install shows the three steps, and the places they point at pulse in turn. */
+  const guiding = snapshot?.messages.length === 0 && !guideDismissed
   const historicalRuns = taskRepresentatives.filter((run) => currentTaskKey === null || taskKeyForRun(run) !== currentTaskKey)
   const visibleHistoryRuns = historicalRuns.slice(0, historyVisibleCount)
   const presentedRunIds = new Set((snapshot?.runs ?? [])
@@ -913,7 +921,24 @@ export function ConversationView({ Header, onShowLibrary }: {
           <div ref={threadRef} className="conversation-thread" aria-live="polite">
             {/* The brief scrolls with the conversation, so opening it never squeezes the messages. */}
             {creativeBrief !== null && <CreativeBriefSummary brief={creativeBrief} onRevise={reviseCreativeBrief} />}
-            {snapshot?.messages.length === 0 && (
+            {guiding && (
+              <section className="first-run-guide" aria-label="新手指引">
+                <strong>三步上手</strong>
+                <ol>
+                  <li><span>1</span>在下面说一句话，讲清要做什么、什么尺寸、写什么字。</li>
+                  <li><span>2</span>结果会出现在右边的画布上，每一层都能改。</li>
+                  <li><span>3</span>想自己动手，就点画布上的「编辑」。</li>
+                </ol>
+                <div className="first-run-prompts" role="group" aria-label="试试这样说">
+                  <small>试试这样说</small>
+                  {starterPrompts.map((prompt) => (
+                    <button key={prompt} type="button" onClick={() => takeSuggestion(prompt)}>{prompt}</button>
+                  ))}
+                </div>
+                <button type="button" className="quiet-choice first-run-dismiss" onClick={dismissGuide}>知道了</button>
+              </section>
+            )}
+            {snapshot?.messages.length === 0 && guideDismissed && (
               <div className="conversation-opening">
                 <Circle size={11} fill="currentColor" />
                 <strong>从作品需要的内容开始</strong>
@@ -1148,7 +1173,7 @@ export function ConversationView({ Header, onShowLibrary }: {
           </div>
           {contextOpen && <AgentContextSheet harness={harness} knowledge={knowledge} onClose={closeContext} />}
           <form
-            className={`conversation-composer glass-surface composer-${composerState}`}
+            className={`conversation-composer glass-surface composer-${composerState}${guiding ? ' is-guided' : ''}`}
             data-composer-state={composerState}
             onSubmit={(event) => void submit(event)}
           >
@@ -1298,13 +1323,13 @@ export function ConversationView({ Header, onShowLibrary }: {
         >
           <GripVertical size={12} />
         </button>
-        <aside className="conversation-preview" aria-label="实时画布预览">
+        <aside className={`conversation-preview${guiding ? ' is-guided' : ''}`} aria-label="实时画布预览">
           <div className="preview-heading">
             <div><span>当前画布</span><strong>可编辑草案</strong></div>
             <div className="preview-actions">
               <button type="button" className="compact-record-toggle" aria-expanded={compactRecordOpen} onClick={() => setCompactRecordOpen(true)}><PanelRightClose size={15} />创作记录</button>
               <button type="button" className={annotationVisible ? 'is-active' : ''} aria-pressed={annotationVisible} onClick={toggleAnnotation}><Pencil size={11} />临时标注</button>
-              <button type="button" className="open-editor" onClick={() => setActiveView('canvas')}><PenTool size={11} />编辑</button>
+              <button type="button" className={`open-editor${guiding ? ' is-guided' : ''}`} onClick={() => setActiveView('canvas')}><PenTool size={11} />编辑</button>
             </div>
           </div>
           <div className={`conversation-live-canvas${annotationEditable ? ' is-annotating' : ''}`} style={{ '--scene-reflection': scene.canvas.backgroundColor } as CSSProperties}>
