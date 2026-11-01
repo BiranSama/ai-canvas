@@ -45,3 +45,8 @@ publish:
   owner: BiranSama
   repo: ai-canvas
   releaseType: release
+releaseInfo:
+  releaseNotes: |
+    - AI-Canvas-…-Setup.exe 是安装版，装好后会自己检查并下载新版本。
+    - AI-Canvas-…-Portable.exe 是免安装版，不会自动更新，新版本请回到这里下载。
+    - 安装包还没有代码签名。第一次运行时 Windows 可能提示「Windows 已保护你的电脑」，点「更多信息」，再点「仍要运行」。
