@@ -28,6 +28,7 @@ test('explicit task relation and temporary try remain inspectable and isolated',
     await expect(window.getByRole('group', { name: '这条要求与当前任务的关系' })).toHaveCount(0)
     const newTask = window.getByRole('button', { name: '新任务', exact: true })
     await expect(newTask).toHaveAttribute('aria-pressed', 'false')
+    await expect(newTask).toBeEnabled()
     await newTask.evaluate((button) => button.click())
     await expect(newTask).toHaveAttribute('aria-pressed', 'true')
     await expect(window.getByRole('textbox', { name: '对话输入' })).toHaveAttribute('placeholder', '描述新的作品…')
