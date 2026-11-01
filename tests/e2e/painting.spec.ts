@@ -6,6 +6,7 @@ import sharp from 'sharp'
 import type { PaintOp, SceneElement } from '../../src/domain'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { applyPaintOps } from '../../src/shared/paint-ops'
+import { openEditor } from '../helpers/workbench-ui'
 
 async function launch(): Promise<{ app: ElectronApplication, page: Page }> {
   const userData = await mkdtemp(join(tmpdir(), 'paint-'))
@@ -45,7 +46,7 @@ async function artboardPoint(page: Page, x: number, y: number): Promise<{ x: num
 
 async function newCanvasWithLayer(page: Page): Promise<void> {
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByTestId('canvas-stage')).toBeVisible()
   await page.keyboard.press('Control+Shift+N')
   await expect.poll(async () => (await bootstrap(page)).scene.elements.map((element) => element.name)).toEqual(['图层 1'])
@@ -193,7 +194,7 @@ test('the bucket, the gradient, the transparency lock and Alt+Backspace paint wh
 
 async function newCanvas(page: Page): Promise<void> {
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByTestId('canvas-stage')).toBeVisible()
 }
 

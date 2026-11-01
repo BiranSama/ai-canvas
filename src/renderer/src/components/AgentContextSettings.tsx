@@ -85,7 +85,7 @@ export function AgentContextSettings({ onStatus }: { readonly onStatus: (message
       <article className="context-policy-card">
         <div>
           <ShieldCheck size={17} />
-          <span><strong>外发策略</strong><small>Owner Full 允许已配置 Provider；这里继续限定每轮哪些文字和图片可以离开本机。</small></span>
+          <span><strong>外发策略</strong><small>这里限定每轮哪些文字和图片可以发给你配置的服务。</small></span>
         </div>
         <label>
           <span className="visually-hidden">Agent 外发策略</span>
@@ -219,7 +219,7 @@ export function AgentContextSettings({ onStatus }: { readonly onStatus: (message
         <details className="context-audit-card">
           <summary><span><ChevronDown size={13} /><strong>外发记录</strong></span><small>{snapshot.outboundRecords.length} 条</small></summary>
           <div className="context-entry-list">
-            {snapshot.outboundRecords.length === 0 && <p>还没有外发记录；只有实际准备或调用 Provider 后才会出现。</p>}
+            {snapshot.outboundRecords.length === 0 && <p>还没有外发记录；真正调用服务后才会出现。</p>}
             {snapshot.outboundRecords.map((record) => (
               <div key={record.id}>
                 <span>{record.status}</span>

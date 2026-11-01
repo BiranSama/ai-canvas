@@ -273,7 +273,7 @@ describe('Agent execution flow projection', () => {
     ]
     const flow = executionFlow(snapshot(turn({ status: 'waiting_job' }), items), Date.now(), { expanded: true })
     expect(flow.stages.find((stage) => stage.kind === 'tool')).toMatchObject({
-      detail: '图片任务已创建并进入可追溯队列。', scopeLabel: '1 个元素', state: 'completed'
+      detail: '生图任务已创建并进入可追溯队列。', scopeLabel: '1 个元素', state: 'completed'
     })
     expect(JSON.stringify(flow)).not.toContain('修改已写入')
   })
@@ -295,7 +295,7 @@ describe('Agent execution flow projection', () => {
     expect(waiting.stages).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'decision', state: 'completed', label: '已确认下一步' }),
       expect.objectContaining({ kind: 'recovery', state: 'completed', label: '修正工具调用' }),
-      expect.objectContaining({ kind: 'generation', state: 'waiting', label: '等待图片任务' })
+      expect.objectContaining({ kind: 'generation', state: 'waiting', label: '等待生图任务' })
     ]))
 
     const completedItems = [...items, item('71000000-0000-4000-8000-000000000023', 4, 'completion_assessment', 'completed', {

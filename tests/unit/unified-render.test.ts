@@ -35,12 +35,12 @@ describe('unified render', () => {
   it('lays the render right above what it covers and keeps every text on top in its order', () => {
     // Background, a title, a decoration above the title, a placeholder and a caption at the top.
     const before = scene([shape(10, 0), text(11, 1), shape(12, 2), placeholder(13, 3), text(14, 4)])
-    const rendered = { ...shape(20, 0), type: 'image', name: '统一渲染 1', transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 },
+    const rendered = { ...shape(20, 0), type: 'image', name: '统一重绘 1', transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 },
       assetId: id(30), crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'cover', referenceRole: 'general' } as unknown as SceneElement
     const commands = unifiedPlacementCommands(before, rendered, [id(10), id(12)])
     const result = new CommandBus(before, { now: () => NOW }).execute({ id: id(40), origin: 'user', summary: '放入统一渲染', commands })
     if (!result.ok) throw new Error(JSON.stringify(result.error))
-    expect(result.scene.elements.map((element) => element.name)).toEqual(['形状10', '形状12', '统一渲染 1', '占位', '文字11', '文字14'])
+    expect(result.scene.elements.map((element) => element.name)).toEqual(['形状10', '形状12', '统一重绘 1', '占位', '文字11', '文字14'])
     // The covered layers stay as they were.
     expect(result.scene.elements.filter((element) => element.type === 'shape').every((element) => element.visible)).toBe(true)
   })

@@ -15,7 +15,7 @@ test('keeps the completed generation result and right-side actions inside 1024 b
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1024, height: 700 })
-    await window.getByRole('button', { name: '生成', exact: true }).click()
+    await window.getByRole('button', { name: '出图', exact: true }).click()
     await window.getByTestId('generation-prompt').fill('Compact editorial portrait with soft window light')
     await openGenerationOptions(window)
     await window.getByLabel('生成数量').selectOption('1')

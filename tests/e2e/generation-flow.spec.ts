@@ -1,4 +1,4 @@
-import { openGenerationOptions } from '../helpers/workbench-ui'
+import { openGenerationOptions, editPlacedResult } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -23,7 +23,7 @@ test('completes the persistent Mock generation flow and places a result on canva
   try {
     const window = await app.firstWindow()
     await window.waitForLoadState('domcontentloaded')
-    await window.locator('.view-switcher button').nth(2).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await expect(window.getByTestId('generation-submit')).toBeVisible()
     await expect(window.locator('.provider-boundary')).toContainText('本地离线档不联网')
     await openGenerationOptions(window)
@@ -33,8 +33,8 @@ test('completes the persistent Mock generation flow and places a result on canva
     await window.getByTestId('generation-prompt').fill('Rainy-night vinyl record, cool rim light, quiet editorial composition')
     await openGenerationOptions(window)
     await window.getByLabel('生成数量').selectOption('2')
-    await window.locator('.view-switcher button').nth(1).evaluate((button) => button.click())
-    await window.locator('.view-switcher button').nth(2).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await expect(window.getByTestId('generation-prompt')).toHaveValue('Rainy-night vinyl record, cool rim light, quiet editorial composition')
     await expect(window.getByLabel('生成数量')).toHaveValue('2')
     await window.getByTestId('generation-submit').click()
@@ -52,10 +52,11 @@ test('completes the persistent Mock generation flow and places a result on canva
 
     await window.getByTestId('generation-result').first().evaluate((button) => button.click())
     await window.getByTestId('insert-generation-result').evaluate((button) => button.click())
+    await editPlacedResult(window)
     await expect(window.getByTestId('canvas-stage')).toBeVisible()
     await expect(window.getByRole('listbox', { name: '图层' }).getByRole('option')).toHaveCount(1)
 
-    await window.locator('.view-switcher button').nth(2).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByRole('button', { name: /展开参数/ }).evaluate((button) => button.click())
     await openGenerationOptions(window)
     await window.getByLabel('模型情景').selectOption('mock-failure')

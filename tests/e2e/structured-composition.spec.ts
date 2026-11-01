@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('SD1 creates a shallow semantic Group and supports precise in-group editing', async ({ browserName }, testInfo) => {
   void browserName
@@ -20,7 +21,7 @@ test('SD1 creates a shallow semantic Group and supports precise in-group editing
     await window.getByRole('button', { name: '发送要求' }).click()
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
 
-    await window.getByRole('button', { name: '画布', exact: true }).click()
+    await openEditor(window)
     const layerList = window.getByRole('listbox', { name: '图层' })
     const groupRow = layerList.getByRole('option').filter({ hasText: '咖啡杯组' })
     await expect(groupRow).toHaveCount(1)

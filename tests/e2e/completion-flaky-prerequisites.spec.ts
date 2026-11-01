@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { readShapeHitState, waitForPaintedShape } from '../helpers/canvas-hit-readiness'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { DESKTOP_CHANNELS } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('IPC-only project creation after Renderer hydration reproduces the recovery test close refusal', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'recovery-gap-'))
@@ -63,6 +64,7 @@ test('a Main shape can exist before its hit surface is painted, reproducing the 
     })()` })
     await page.reload()
     await page.setViewportSize({ width: 2560, height: 1440 })
+    await openEditor(page)
     await page.getByRole('button', { name: '文字 T' }).click()
     await expect(page.getByRole('toolbar', { name: '所选元素快捷操作' })).toBeVisible()
     // A controlled delayed paint models a busy frame without changing Scene,

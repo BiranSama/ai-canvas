@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CommandBus, ELEMENT_SCHEMA_VERSION } from '../../src/domain'
 import { App } from '../../src/renderer/src/App'
 import { createNightVeilScene, NIGHT_VEIL_IDS } from '../../src/renderer/src/fixtures/night-veil'
-import { resetWorkspace, setWorkspaceSceneClientForTests, useWorkspaceStore } from '../../src/renderer/src/store/workspace-store'
+import { hydrateWorkspaceScene, resetWorkspace, setWorkspaceSceneClientForTests, useWorkspaceStore } from '../../src/renderer/src/store/workspace-store'
+import { defaultProjectWorkContext, projectWorkContextSchema } from '../../src/shared/project-work-context'
 import { createLocalWorkspaceSceneClient } from '../helpers/local-workspace-scene-client'
 
 vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
@@ -18,6 +19,8 @@ vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
 describe('canvas workspace shell', () => {
   beforeEach(() => {
     resetWorkspace()
+    // These are the editor's tests: it opens from the canvas's 编辑 button.
+    useWorkspaceStore.getState().setActiveView('canvas')
     setWorkspaceSceneClientForTests(createLocalWorkspaceSceneClient(useWorkspaceStore.getState().scene))
     Object.defineProperty(window, 'desktop', {
       configurable: true,
@@ -48,7 +51,10 @@ describe('canvas workspace shell', () => {
 
     expect(await screen.findByRole('img', { name: 'AI Canvas' })).toHaveAttribute('src', expect.stringContaining('icon.png'))
     expect(screen.getByRole('navigation', { name: '工作视图' })).toBeVisible()
-    expect(screen.getByRole('button', { name: '画布' })).toHaveAttribute('aria-current', 'page')
+    // 编辑 shows in the switcher only while it is open; 对话 and 出图 are always there.
+    expect(screen.getByRole('button', { name: '编辑' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: '对话' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '出图' })).toBeVisible()
     expect(screen.getByTestId('canvas-stage')).toBeVisible()
     expect(screen.getByRole('listbox', { name: '图层' })).toBeVisible()
     expect(screen.getByRole('textbox', { name: '创作输入' })).toBeVisible()
@@ -156,6 +162,7 @@ describe('canvas workspace shell', () => {
     if (!result.ok) throw result.error
     setWorkspaceSceneClientForTests(createLocalWorkspaceSceneClient(result.scene))
     resetWorkspace(result.scene)
+    useWorkspaceStore.getState().setActiveView('canvas')
     useWorkspaceStore.getState().setSelection([groupId])
     render(<App />)
     await screen.findByTestId('canvas-stage')
@@ -168,5 +175,17 @@ describe('canvas workspace shell', () => {
     expect(screen.queryByRole('status', { name: '组内编辑' })).not.toBeInTheDocument()
     expect(useWorkspaceStore.getState().editingGroupId).toBeNull()
     expect(useWorkspaceStore.getState().selectedIds).toEqual([groupId])
+  })
+
+  it('opens a project on 对话, even one left in the editor, and keeps 出图 when it was left there', () => {
+    const scene = useWorkspaceStore.getState().scene
+    const saved = (activeView: 'conversation' | 'canvas' | 'generate') => projectWorkContextSchema.parse({
+      ...defaultProjectWorkContext(scene.projectId), workspace: { activeView }
+    })
+    expect(defaultProjectWorkContext(scene.projectId).workspace.activeView).toBe('conversation')
+    hydrateWorkspaceScene(scene, 'A', undefined, saved('canvas'))
+    expect(useWorkspaceStore.getState().activeView).toBe('conversation')
+    hydrateWorkspaceScene(scene, 'A', undefined, saved('generate'))
+    expect(useWorkspaceStore.getState().activeView).toBe('generate')
   })
 })

@@ -1,4 +1,4 @@
-import { openGenerationOptions } from '../helpers/workbench-ui'
+import { openGenerationOptions, openEditor } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type Page } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -27,6 +27,7 @@ test('AC-R1-02 applies a free canvas ratio with three explicit atomic resize str
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1440, height: 900 })
+    await openEditor(window)
     for (let index = 0; index < 3; index += 1) await window.getByRole('button', { name: '形状', exact: true }).evaluate((button) => button.click())
     const original = await sceneState(window)
     expect(original.ratio).toEqual([4, 5])
@@ -63,7 +64,8 @@ test('AC-R1-09 submits a 7:5 Mock generation and preserves its result lineage on
   })
   try {
     const window = await app.firstWindow()
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await openEditor(window)
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('抽象光影封面，纸张质感与克制的色块')
     await openGenerationOptions(window)
     await window.getByLabel('自由生成比例').fill('7:5')

@@ -28,11 +28,11 @@ test('keeps settings, artwork export and project restart working in the packaged
     await enterPackagedWorkspace(window)
 
     await window.getByTestId('open-settings').click()
-    const settings = window.getByRole('dialog', { name: '供应商设置' })
+    const settings = window.getByRole('dialog', { name: '设置', exact: true })
     await expect(settings).toBeVisible()
     await expect(settings.locator('[data-provider-slot="llm"]')).toBeVisible()
     await expect(settings.locator('[data-provider-slot="image"]')).toBeVisible()
-    await settings.getByRole('button', { name: '关闭供应商设置' }).click()
+    await settings.getByRole('button', { name: '关闭设置' }).click()
 
     const exported = await window.evaluate(`(async () => {
       let captured = null

@@ -7,6 +7,7 @@ import type { GenerationProviderInfo } from '../../../shared/desktop-api'
 import type { GenerationResultFamily } from '../../../shared/generation-workflow'
 import { PRIMARY_IMAGE_PROVIDER_ID, type ProviderSettingsSnapshot } from '../../../shared/provider-settings'
 import { registerRuntimeAsset } from '../assets/runtime-assets'
+import { preferredPlacementTarget } from '../canvas/placement-target'
 import { useGenerationDraftStore } from '../store/generation-draft-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { useProjectScope } from '../store/use-project-scope'
@@ -63,6 +64,13 @@ function engineLabel(providers: readonly GenerationProviderInfo[], providerId: s
   return `${providerLabel} · ${modelLabel}`
 }
 
+const PLACED_FIT_COPY = {
+  'cut-out': '，抠出了主体，色调往周围靠',
+  feather: '，羽化了边缘，色调往周围靠',
+  transparent: '，保留了原图的透明处',
+  none: ''
+} as const
+
 export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
   const setActiveView = useWorkspaceStore((state) => state.setActiveView)
   const setSelection = useWorkspaceStore((state) => state.setSelection)
@@ -101,6 +109,8 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
   const [originalUrls, setOriginalUrls] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  /** What 放入画布 just did; 出图 stays open, so it says where the picture went. */
+  const [placedNotice, setPlacedNotice] = useState<string | null>(null)
   const [pendingConfirmation, setPendingConfirmation] = useState(false)
   const [referencePreview, setReferencePreview] = useState<GenerationReferencePreview | null>(null)
 
@@ -370,16 +380,29 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
       const dataUrl = await window.desktop.readGenerationAsset(result.assetId, false, projectId)
       if (!isCurrent()) return
       registerRuntimeAsset(result.assetId, dataUrl)
+      const { scene: current, selectedIds } = useWorkspaceStore.getState()
+      // A local edit draws its mask on the picture as it came, so it goes in on its own.
+      const preferredTargetId = localEdit ? undefined : preferredPlacementTarget(current, selectedIds)
       const receipt = await window.desktop.placeGenerationResult({
         projectId,
         resultId: result.id,
         placementId: globalThis.crypto.randomUUID(),
-        origin: 'user'
+        origin: 'user',
+        ...(preferredTargetId === undefined ? {} : { preferredTargetId })
       })
       if (!isCurrent()) return
       setSelection([receipt.elementId])
-      setActiveView('canvas')
-      if (localEdit) useWorkspaceStore.getState().setActiveTool('mask')
+      if (localEdit) {
+        setActiveView('canvas')
+        useWorkspaceStore.getState().setActiveTool('mask')
+        return
+      }
+      const placedInto = receipt.elementId === preferredTargetId
+        ? useWorkspaceStore.getState().scene.elements.find((element) => element.id === receipt.elementId)
+        : undefined
+      setPlacedNotice(placedInto === undefined
+        ? '已放到画布上。'
+        : `已放进「${placedInto.name}」的位置${PLACED_FIT_COPY[receipt.fit ?? 'none']}。`)
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : '无法把结果放入画布。')
     }
@@ -526,14 +549,14 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
                 ))}
                 <input aria-label="自由生成比例" maxLength={40} value={ratioInput} onChange={(event) => updateDraft({ ratioInput: event.currentTarget.value })} />
               </div>
-              <small className={ratioSupported ? '' : 'has-error'}>{parsedRatio.error ?? (ratioSupported && outputSize !== null ? `${parsedRatio.value?.width}:${parsedRatio.value?.height} → ${outputSize.width} × ${outputSize.height}` : `${activeProvider?.label ?? '当前供应商'}不支持这个比例`)}</small>
+              <small className={ratioSupported ? '' : 'has-error'}>{parsedRatio.error ?? (ratioSupported && outputSize !== null ? `${parsedRatio.value?.width}:${parsedRatio.value?.height} → ${outputSize.width} × ${outputSize.height}` : `${activeProvider?.label ?? '当前服务'}不支持这个比例`)}</small>
             </fieldset>
             <label className="generation-quantity"><span>数量</span><select aria-label="生成数量" value={count} onChange={(event) => updateDraft({ quantity: Number(event.currentTarget.value) })}>{[1, 2, 3, 4].filter((value) => value <= (activeProfile?.maxQuantity ?? 4)).map((value) => <option key={value} value={value}>{value} 张</option>)}</select></label>
-            <div className="generation-provider-control" aria-label="生成供应商">
+            <div className="generation-provider-control" aria-label="生图服务">
               <span>图片模型</span>
               <div>
                 <span>
-                  <strong>{configuredImageProvider?.label ?? '未配置图片模型'}</strong>
+                  <strong>{configuredImageProvider?.label ?? '未配置生图服务'}</strong>
                   <small>{taskProtocolBudgetBlocked
                     ? '异步任务式 Images · 请把每任务请求上限提高到至少 3'
                     : imageModuleConfigured
@@ -562,7 +585,7 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
                 type="button"
                 className={profileId === entry.profile.id ? 'is-active' : ''}
                 disabled={entry.status !== 'available'}
-                title={entry.reason ?? `${entry.profile.label} · ${entry.profile.simulated ? '本地离线' : '图片供应商'}`}
+                title={entry.reason ?? `${entry.profile.label} · ${entry.profile.simulated ? '本地离线' : '生图服务'}`}
                 onClick={() => {
                   updateDraft({ profileId: entry.profile.id, profileSelectionMade: true, quantity: entry.profile.defaultQuantity, model: entry.profile.modelId })
                   setPendingConfirmation(false)
@@ -644,7 +667,7 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
             </div>
           )}
           <details className="provider-boundary"><summary>本次请求与费用范围</summary><p>{providerSettings === null
-            ? '正在读取本地供应商边界…'
+            ? '正在读取设置…'
             : realImageAvailable
               ? `使用已保存的服务，每任务最多 ${providerSettings.executionPolicy.maxImagesPerJob} 张、${providerSettings.executionPolicy.maxRequestsPerJob} 个传输请求。价格未知时，预约额度不保证实际人民币扣费上限。`
               : taskProtocolBudgetBlocked
@@ -751,6 +774,14 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
             </section>
           )}
 
+          {placedNotice !== null && (
+            <div className="generation-placed" role="status" data-testid="generation-placed">
+              <Check size={14} />
+              <span>{placedNotice}</span>
+              <button type="button" onClick={() => setActiveView('canvas')}>去编辑</button>
+              <button type="button" className="quiet-choice" aria-label="关闭提示" onClick={() => setPlacedNotice(null)}>知道了</button>
+            </div>
+          )}
           {(activeJob !== null || latestProblem !== null || localError !== null) && (
             <div data-testid="generation-status" className={`generation-status${activeJob === null ? ' has-problem' : ''}`} aria-live="polite">
               {activeJob !== null ? <Clock3 size={15} /> : <AlertCircle size={15} />}

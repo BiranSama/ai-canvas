@@ -1,4 +1,4 @@
-import { openGenerationOptions } from '../helpers/workbench-ui'
+import { openGenerationOptions, openEditor } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,7 +19,7 @@ test('supports explicit offline operation, keyboard focus and IME composition', 
   try {
     const window = await app.firstWindow()
     await window.setViewportSize({ width: 1280, height: 800 })
-    await expect(window.getByRole('button', { name: '供应商设置' })).toBeVisible()
+    await expect(window.getByRole('button', { name: '设置', exact: true })).toBeVisible()
     const cdp = await app.context().newCDPSession(window)
     await cdp.send('Network.enable')
     await cdp.send('Network.emulateNetworkConditions', {
@@ -37,11 +37,11 @@ test('supports explicit offline operation, keyboard focus and IME composition', 
       button.focus()
       button.click()
     })
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
     await window.locator('.provider-setting-row').filter({ hasText: 'Seed 2.1' }).getByRole('button', { name: '编辑' }).evaluate((button) => button.click())
     await expect(window.getByLabel('火山方舟 · Seed 2.1 Turbo API Key')).toBeFocused()
     await window.keyboard.press('Escape')
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeHidden()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeHidden()
     await expect(settingsButton).toBeFocused()
 
     await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())
@@ -62,7 +62,7 @@ test('supports explicit offline operation, keyboard focus and IME composition', 
       return (await api.getConversationSnapshot()).messages.length
     })).toBeGreaterThan(0)
 
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('雨夜唱片封面，冷色轮廓光')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
@@ -99,8 +99,9 @@ test('maps reduced motion, reduced transparency and visible focus to stable CSS'
     expect(media.surfaceBackdrop).toBe('none')
     expect(Number.parseFloat(media.transitionDuration)).toBeLessThanOrEqual(0.00001)
 
-    const canvasButton = window.getByRole('button', { name: '画布', exact: true })
-    await canvasButton.focus()
+    // The current view's tab in the header carries the visible focus ring.
+    const currentView = window.getByRole('navigation', { name: '工作视图' }).locator('button[aria-current="page"]')
+    await currentView.focus()
     const focus = await window.evaluate(`(() => {
       const style = getComputedStyle(document.querySelector('.view-switcher button[aria-current="page"]'))
       return { style: style.outlineStyle, width: style.outlineWidth }
@@ -162,7 +163,7 @@ test('keeps filmstrip memory bounded by loading thumbnails before originals', as
   try {
     const window = await app.firstWindow()
     const before = await window.evaluate('(performance.memory && performance.memory.usedJSHeapSize) || 0') as number
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('四种雨夜唱片封面构图')
     await openGenerationOptions(window)
     await window.getByLabel('生成数量').selectOption('4')
@@ -194,6 +195,7 @@ test('recovers the committed scene and marks an in-flight job interrupted after 
   let second: ElectronApplication | null = null
   try {
     const firstWindow = await first.firstWindow()
+    await openEditor(firstWindow)
     await firstWindow.getByRole('button', { name: '形状' }).evaluate((button) => button.click())
     await expect.poll(async () => firstWindow.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop

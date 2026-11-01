@@ -6,7 +6,7 @@ import { basename, join, resolve } from 'node:path'
 import sharp from 'sharp'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import type { GenerationWorkContext } from '../../src/shared/project-work-context'
-import { captureWorkbench, hitWorkbenchControl as hit } from '../helpers/workbench-ui'
+import { captureWorkbench, hitWorkbenchControl as hit, openEditor } from '../helpers/workbench-ui'
 
 /** The AI repaint region tool lives in the AI 标注 slot's menu, opened with a right-click. */
 async function chooseRepaintRegion(page: Page): Promise<void> {
@@ -99,7 +99,7 @@ for (const kind of ['cover', 'product', 'copy'] as const) test(`complete ${kind}
     const start = await bootstrap(page)
     const startingJobCount = (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs())).length
     const originalCompare = start.workContext!.generation
-    await hit(page.getByRole('button', { name: '生成', exact: true }))
+    await hit(page.getByRole('button', { name: '出图', exact: true }))
     await expect(page.locator('.result-focus')).toHaveAttribute('data-result-a', originalCompare.compareAId!)
     await expect(page.locator('.result-focus')).toHaveAttribute('data-result-b', originalCompare.compareBId!)
     await hit(page.getByRole('button', { name: '操作 A', exact: true }))
@@ -107,7 +107,7 @@ for (const kind of ['cover', 'product', 'copy'] as const) test(`complete ${kind}
     await hit(page.getByRole('button', { name: '交换 A/B', exact: true }))
     await hit(page.getByRole('button', { name: '操作 B', exact: true }))
     await captureWorkbench(app, test.info().outputPath('01-same-work-compare.png'))
-    await hit(page.getByRole('button', { name: '画布', exact: true }))
+    await openEditor(page)
     await hit(page.getByRole('tab', { name: '图层', exact: true }))
     await page.locator(`[data-layer-id="${work.titleId}"] .layer-copy`).click()
     await expect(page.locator(`[data-layer-id="${work.titleId}"]`)).toHaveAttribute('aria-selected', 'true')
@@ -147,7 +147,7 @@ for (const kind of ['cover', 'product', 'copy'] as const) test(`complete ${kind}
     await hit(page.getByRole('button', { name: '对话', exact: true }))
     await page.getByLabel('对话输入', { exact: true }).fill(`只属于${kind}的后续要求：保留准确中文和主体。`)
     await captureWorkbench(app, test.info().outputPath('03-same-work-conversation.png'))
-    await hit(page.getByRole('button', { name: '生成', exact: true }))
+    await hit(page.getByRole('button', { name: '出图', exact: true }))
     await hit(page.locator('.generation-compact-summary'))
     await page.getByTestId('generation-prompt').fill(`只属于${kind}的生成草稿，保留标题与主体。`)
     await hit(page.locator('.generation-compact-summary'))
@@ -182,7 +182,7 @@ for (const kind of ['cover', 'product', 'copy'] as const) test(`complete ${kind}
     await expect(page.locator('.result-focus')).toHaveAttribute('data-result-b', saved.generation.compareBId!)
     await expect.poll(async () => (await bootstrap(page)).workContext!.conversationDraft).toBe(saved.conversationDraft)
 
-    await hit(page.getByRole('button', { name: '画布', exact: true }))
+    await openEditor(page)
     await hit(page.getByRole('tab', { name: '图层', exact: true }))
     await page.locator(`[data-layer-id="${work.imageId}"] .layer-copy`).click()
     await chooseRepaintRegion(page)
@@ -210,7 +210,7 @@ for (const kind of ['cover', 'product', 'copy'] as const) test(`complete ${kind}
     expect(calls).toHaveLength(1)
     expect(calls[0]!.mask).not.toBeNull()
     expect(await sharp(Buffer.from(calls[0]!.mask!, 'base64')).metadata()).toMatchObject({ width: 1200, height: 1500, hasAlpha: true })
-    await hit(page.getByRole('button', { name: '生成', exact: true }))
+    await hit(page.getByRole('button', { name: '出图', exact: true }))
     await expect(page.locator('.result-focus')).toBeVisible()
     await page.getByLabel('比较版本 B', { exact: true }).selectOption(edited.results[0]!.id)
     await expect(page.getByRole('button', { name: '操作 B', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -240,7 +240,7 @@ for (const kind of ['cover', 'product', 'copy'] as const) test(`complete ${kind}
     const sample = { left: 1000, top: 910, width: 32, height: 32 }
     expect(await sharp(bytes).extract(sample).removeAlpha().raw().toBuffer()).toEqual(await sharp(Buffer.from(source.split(',')[1]!, 'base64')).extract(sample).removeAlpha().raw().toBuffer())
     await cp(finalExport.path, test.info().outputPath(`${kind}-final-canvas.png`), { errorOnExist: true, force: false })
-    await hit(page.getByRole('button', { name: '生成', exact: true }))
+    await hit(page.getByRole('button', { name: '出图', exact: true }))
     const exportBefore = await downloadCount(app)
     await hit(page.getByRole('button', { name: /^导出结果 / }))
     await expect.poll(() => downloadCount(app)).toBe(exportBefore + 1)

@@ -39,6 +39,7 @@ async function renderWorkspace(selected: readonly string[] = []): Promise<void> 
   const scene = createNightVeilScene()
   setWorkspaceSceneClientForTests(createLocalWorkspaceSceneClient(scene))
   resetWorkspace(scene)
+  useWorkspaceStore.getState().setActiveView('canvas')
   useWorkspaceStore.getState().setSelection(selected)
   render(<App />)
   await screen.findByTestId('canvas-stage')

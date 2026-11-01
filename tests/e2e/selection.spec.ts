@@ -6,6 +6,7 @@ import sharp from 'sharp'
 import type { PaintOp, SceneElement } from '../../src/domain'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { applyPaintOps } from '../../src/shared/paint-ops'
+import { openEditor, editPlacedResult } from '../helpers/workbench-ui'
 
 async function launch(env: Record<string, string> = {}): Promise<{ app: ElectronApplication, page: Page }> {
   const userData = await mkdtemp(join(tmpdir(), 'select-'))
@@ -64,7 +65,7 @@ async function click(page: Page, x: number, y: number): Promise<void> {
 
 async function newCanvasWithLayer(page: Page): Promise<void> {
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByTestId('canvas-stage')).toBeVisible()
   await page.keyboard.press('Control+Shift+N')
   await expect.poll(async () => (await bootstrap(page)).scene.elements.map((candidate) => candidate.name)).toEqual(['图层 1'])
@@ -307,12 +308,15 @@ async function vasePicture(): Promise<string> {
 
 async function openPicture(page: Page, path: string): Promise<void> {
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByTestId('canvas-stage')).toBeVisible()
   const chooser = page.waitForEvent('filechooser')
   await page.keyboard.press('Control+o')
   await (await chooser).setFiles(path)
   await expect.poll(async () => (await bootstrap(page)).scene.canvas.outputWidth, { timeout: 15_000 }).toBe(640)
+  // A picture opened as a project opens in the editor.
+  await expect(page.getByRole('navigation', { name: '工作视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
+  await openEditor(page)
 }
 
 async function selectionBounds(page: Page): Promise<number[]> {
@@ -337,6 +341,7 @@ test('generative fill repaints the selection and comes back as a new layer maske
     expect(job.request.prompt).toContain('在选区里画出：一只纸鹤')
 
     await page.getByRole('button', { name: '放入画布' }).click()
+    await editPlacedResult(page)
     await expect.poll(async () => (await bootstrap(page)).scene.elements.map((candidate) => candidate.name)).toEqual(['图层 1', '生成式填充 1'])
     const filled = await image(page, '生成式填充 1')
     expect(filled.transform).toMatchObject({ x: 0, y: 0, width: 1, height: 1 })

@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { enterPackagedWorkspace, packagedTestEnvironment } from './packaged-test-helpers'
+import { editPlacedResult } from '../helpers/workbench-ui'
 
 /** The AI repaint region tool lives in the AI 标注 slot's menu, opened with a right-click. */
 async function chooseRepaintRegion(page: Page): Promise<void> {
@@ -25,11 +26,12 @@ test('draws a mask and completes a non-destructive edit in the packaged Windows 
   try {
     const window = await app.firstWindow()
     await enterPackagedWorkspace(window)
-    await window.getByRole('button', { name: '生成', exact: true }).click()
+    await window.getByRole('button', { name: '出图', exact: true }).click()
     await window.getByTestId('generation-prompt').fill('Stable source for a packaged local edit')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
     await window.getByTestId('insert-generation-result').click()
+    await editPlacedResult(window)
     await chooseRepaintRegion(window)
     const stage = await window.getByTestId('canvas-stage').boundingBox()
     if (stage === null) throw new Error('Canvas stage is missing.')

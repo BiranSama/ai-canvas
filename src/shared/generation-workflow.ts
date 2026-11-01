@@ -200,7 +200,16 @@ export const placeGenerationResultInputSchema = z.object({
   projectId: idSchema.optional(),
   resultId: idSchema,
   placementId: idSchema,
-  origin: z.enum(['user', 'agent']).default('user')
+  origin: z.enum(['user', 'agent']).default('user'),
+  /**
+   * Where the person would like a result made from a prompt to go (the
+   * placeholder or image they selected, or the one subject placeholder): it
+   * goes there and blends in as the Agent's does. Ignored for a result with a
+   * placement of its own (a local edit, a generative fill, a redraw in
+   * context, a unified redraw, a composition from the canvas) and when the
+   * target cannot take it; the result then goes where it went before.
+   */
+  preferredTargetId: idSchema.optional()
 })
 
 export const placeGenerationResultReceiptSchema = z.object({

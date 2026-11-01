@@ -1,4 +1,4 @@
-import { captureWorkbench } from '../helpers/workbench-ui'
+import { captureWorkbench, openEditor } from '../helpers/workbench-ui'
 import { _electron as electron, expect, test, type Locator, type Page } from '@playwright/test'
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -46,6 +46,7 @@ for (const size of sizes) for (const zoom of zooms) {
         scope.fetch = async () => { scope.__matrixRequests++; throw new Error('OFFLINE_ART_MATRIX') }
       })
       const page = await app.firstWindow()
+      await openEditor(page)
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900))
       await expect(page.getByTestId('canvas-stage')).toBeVisible()
       await hit(page.getByRole('button', { name: '文字 T', exact: true }))
@@ -53,7 +54,7 @@ for (const size of sizes) for (const zoom of zooms) {
       await page.getByLabel('文字内容', { exact: true }).fill('山海之间')
       await page.getByLabel('文字内容', { exact: true }).blur()
       await expect.poll(() => page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap()).scene.elements.some((element) => element.type === 'text' && element.content === '山海之间'))).toBe(true)
-      await hit(page.getByRole('button', { name: '生成', exact: true }))
+      await hit(page.getByRole('button', { name: '出图', exact: true }))
       await page.getByTestId('generation-prompt').fill('山海之间，安静的山与海，保留轻盈留白。离线布局验收作品。')
       await hit(page.locator('.generation-options > summary'))
       await page.getByLabel('生成数量', { exact: true }).selectOption('2')
@@ -68,8 +69,9 @@ for (const size of sizes) for (const zoom of zooms) {
       await expect.poll(() => page.evaluate('innerWidth') as Promise<number>).toBeCloseTo(size.width / zoom, -1)
       const captures: unknown[] = []
       const compared = { A: await page.locator('.result-focus').getAttribute('data-result-a'), B: await page.locator('.result-focus').getAttribute('data-result-b') }
-      for (const focus of ['对话', '画布', '生成']) {
-        await hit(page.getByRole('button', { name: focus, exact: true }))
+      for (const focus of ['对话', '编辑', '出图']) {
+        if (focus === '编辑') await openEditor(page)
+        else await hit(page.getByRole('button', { name: focus, exact: true }))
         if (focus === '对话') {
           const record = page.getByRole('button', { name: '创作记录', exact: true })
           if (await record.isVisible()) await hit(record)
@@ -80,18 +82,18 @@ for (const size of sizes) for (const zoom of zooms) {
           if (await close.isVisible()) await hit(close)
           await expect(page.getByTestId('canvas-stage')).toBeVisible()
         }
-        if (focus === '画布') {
+        if (focus === '编辑') {
           await hit(page.getByRole('button', { name: '选择 V', exact: true }))
           await hit(page.getByTestId('open-settings'))
-          const settings = page.getByRole('dialog', { name: '供应商设置', exact: true })
+          const settings = page.getByRole('dialog', { name: '设置', exact: true })
           await expect(settings).toBeInViewport({ ratio: 0.99 })
           await hit(settings.getByRole('button', { name: '外观', exact: true }))
-          await hit(settings.getByRole('button', { name: '关闭供应商设置', exact: true }))
+          await hit(settings.getByRole('button', { name: '关闭设置', exact: true }))
           await expect(page.getByTestId('open-settings')).toBeFocused()
           await hit(page.getByRole('button', { name: '草图', exact: true }))
           await hit(page.getByRole('button', { name: '选择 V', exact: true }))
         }
-        if (focus === '生成') {
+        if (focus === '出图') {
           await hit(page.getByRole('button', { name: '操作 B', exact: true }))
           await hit(page.getByRole('button', { name: '交换 A/B', exact: true }))
           await hit(page.getByRole('button', { name: '交换 A/B', exact: true }))

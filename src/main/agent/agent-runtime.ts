@@ -71,6 +71,15 @@ export interface AgentRuntimeOptions {
   readonly generationWorkflowRepository?: GenerationWorkflowRepository
   readonly loadGenerationJob?: (jobId: string) => Promise<GenerationJob>
   readonly activateGenerationJob?: (jobId: string) => Promise<void>
+  /**
+   * Draws the canvas as it stands, small, for a turn card's before/after;
+   * store() keeps the drawing as an asset. Null when it cannot be drawn.
+   */
+  readonly drawCanvas?: () => Promise<CanvasDrawing | null>
+}
+
+export interface CanvasDrawing {
+  store(): Promise<string | null>
 }
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'timed_out', 'interrupted'])
@@ -135,6 +144,9 @@ export class AgentRuntime {
   readonly #toolExecutor: AgentToolExecutorShadow | null
   readonly #persistentLoop: PersistentAgentLoop
   readonly #contextRepository: AgentContextRepository | null
+  readonly #drawCanvas: (() => Promise<CanvasDrawing | null>) | null
+  /** The canvas as each run found it, drawn when its planning starts and kept in memory until it finishes. */
+  readonly #beforeDrawings = new Map<string, Promise<CanvasDrawing | null>>()
   #closed = false
 
   constructor(options: AgentRuntimeOptions) {
@@ -147,6 +159,7 @@ export class AgentRuntime {
     this.#activityLedger = options.activityLedger ?? null
     this.#toolExecutor = options.toolExecutor ?? null
     this.#contextRepository = options.contextRepository ?? null
+    this.#drawCanvas = options.drawCanvas ?? null
     this.#persistentLoop = new PersistentAgentLoop({
       projectId: this.#projectId,
       repository: options.harnessRepository,
@@ -169,6 +182,16 @@ export class AgentRuntime {
   }
 
   /** A run takes as many tool steps as its turn's guard allows, so the guard is what stops it. */
+  /** Before and after pictures for a turn that changed the canvas; null for one that did not, or when the after cannot be drawn. */
+  async #turnSnapshots(runId: string, outcomes: readonly AgentToolOutcome[]): Promise<{ readonly before: string | null; readonly after: string } | null> {
+    const before = this.#beforeDrawings.get(runId) ?? Promise.resolve(null)
+    this.#beforeDrawings.delete(runId)
+    if (this.#drawCanvas === null || !outcomes.some((outcome) => outcome.ok && outcome.batchId !== null)) return null
+    const after = await (await this.#drawCanvas().catch(() => null))?.store().catch(() => null) ?? null
+    if (after === null) return null
+    return { before: await (await before)?.store().catch(() => null) ?? null, after }
+  }
+
   #runStepLimit(): number {
     return this.#maxSteps
   }
@@ -422,6 +445,9 @@ export class AgentRuntime {
   #persistentProjection(): AgentLoopProjection {
     return {
       onPlanningStarted: async ({ legacyRunId }) => {
+        // The canvas as this turn finds it, sent now or queued earlier, before any of its changes; drawn alongside,
+        // so planning never waits on it, and stored only if the turn changes the canvas.
+        if (this.#drawCanvas !== null && !this.#beforeDrawings.has(legacyRunId)) this.#beforeDrawings.set(legacyRunId, this.#drawCanvas().catch(() => null))
         await this.#repository.transition(legacyRunId, { status: 'planning', startedAt: this.#now() })
         await this.#activityLedger?.transitionRunActivity(legacyRunId, 'plan', 'plan.running', 'running', {
           progress: null,
@@ -557,12 +583,16 @@ export class AgentRuntime {
             }
           })
         }
-        await this.#repository.appendAssistantMessage(
+        const message = await this.#repository.appendAssistantMessage(
           legacyRunId,
           plainReply ? 'text' : 'receipt',
           assessment.summary,
           receipt
         )
+        // Drawn after the reply is stored and before the turn is announced, so the card shows them when it refreshes.
+        const snapshots = plainReply ? null : await this.#turnSnapshots(legacyRunId, outcomes)
+        if (snapshots !== null) await this.#repository.attachReceiptSnapshots(message.id, snapshots)
+        else this.#beforeDrawings.delete(legacyRunId)
         if (!plainReply) await this.#activityLedger?.create({
           projectId: this.#projectId,
           runId: legacyRunId,
@@ -590,6 +620,7 @@ export class AgentRuntime {
         }, legacyRunId)
       },
       onTerminal: async ({ legacyRunId, status, code, message }) => {
+        this.#beforeDrawings.delete(legacyRunId)
         const legacyStatus: AgentRun['status'] = status === 'interrupted'
           ? 'interrupted'
           : status === 'cancelled'

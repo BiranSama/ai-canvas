@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { waitForPaintedShape } from '../helpers/canvas-hit-readiness'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('Stage E edits shapes in place and preserves controlled blend semantics offline', async ({ browserName }, testInfo) => {
   void browserName
@@ -16,6 +17,7 @@ test('Stage E edits shapes in place and preserves controlled blend semantics off
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.bringToFront()
     await window.setViewportSize({ width: 1440, height: 900 })
     await window.addStyleTag({ content: '*, *::before, *::after { animation: none !important; transition: none !important; }' })

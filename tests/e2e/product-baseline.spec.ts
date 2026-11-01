@@ -2,6 +2,7 @@ import { _electron as electron, expect, test, type Page } from '@playwright/test
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { openEditor } from '../helpers/workbench-ui'
 
 const historicalStageCopy = /(^|[^a-z0-9])(?:MVP|R1|R2|AH1|G2|G3)(?=$|[^a-z0-9])/i
 const rawDevelopmentCopy = /(^|[^a-z0-9])mock(?=$|[^a-z0-9])|not supported in/i
@@ -41,25 +42,27 @@ test('normal product surfaces stay free of historical stage and raw development 
     await expectProductSurface(window)
 
     await window.getByRole('button', { name: '打开设置' }).evaluate((button) => button.click())
-    const settings = window.getByRole('dialog', { name: '供应商设置' })
+    const settings = window.getByRole('dialog', { name: '设置', exact: true })
     await expect(settings).toBeVisible()
-    for (const section of ['供应商', 'Agent 上下文', '生成档位', '项目与存储', '外观', '隐私与高级']) {
+    for (const section of ['服务', '偏好', '项目记忆', '用量', '项目与存储', '外观', '高级']) {
       await settings.getByRole('button', { name: section, exact: true }).evaluate((button) => button.click())
       await expectProductSurface(window)
     }
-    await settings.getByRole('button', { name: '关闭供应商设置' }).evaluate((button) => button.click())
+    await settings.getByRole('button', { name: '关闭设置' }).evaluate((button) => button.click())
 
     await window.getByRole('button', { name: '新建项目' }).evaluate((button) => button.click())
     await expect(window.getByTestId('canvas-stage')).toBeVisible({ timeout: 10_000 })
     await expectProductSurface(window)
 
-    for (const view of ['对话', '画布', '生成']) {
+    for (const view of ['对话', '出图']) {
       await window.getByRole('button', { name: view, exact: true }).evaluate((button) => button.click())
       await expectProductSurface(window)
     }
+    await openEditor(window)
+    await expectProductSurface(window)
 
     await window.getByTestId('open-settings').evaluate((button) => button.click())
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
     await expectProductSurface(window)
     expect(externalRequests).toEqual([])
   } finally {

@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
-import { captureWorkbench, hitWorkbenchControl as hit } from '../helpers/workbench-ui'
+import { captureWorkbench, hitWorkbenchControl as hit, openEditor } from '../helpers/workbench-ui'
 
 for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
   test(`readable ${theme} instruments across all focuses, reduced motion and solid fallback`, async () => {
@@ -23,16 +23,16 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
       await page.getByLabel('对话输入', { exact: true }).fill('创建一张 4:5 的山海封面，主体是一座远山，标题写“山海之间”，保留大面积留白，先不要生成图片。')
       await hit(page.getByRole('button', { name: '发送要求', exact: true }))
       await expect(page.getByTestId('operation-receipt')).toBeVisible()
-      await hit(page.getByRole('button', { name: '生成', exact: true }))
+      await hit(page.getByRole('button', { name: '出图', exact: true }))
       await page.getByTestId('generation-prompt').fill('山海之间，远山与留白')
       await hit(page.getByTestId('generation-submit'))
       await expect(page.getByTestId('generation-result')).toHaveCount(1)
-      await hit(page.getByRole('button', { name: '供应商设置', exact: true }))
-      const settings = page.getByRole('dialog', { name: '供应商设置', exact: true })
+      await hit(page.getByRole('button', { name: '设置', exact: true }))
+      const settings = page.getByRole('dialog', { name: '设置', exact: true })
       await hit(settings.getByRole('button', { name: '外观', exact: true }))
       await hit(settings.locator(`[data-appearance-preview="${theme}"]`))
       await expect(page.locator('html')).toHaveAttribute('data-appearance-theme', theme)
-      await hit(settings.getByRole('button', { name: '关闭供应商设置', exact: true }))
+      await hit(settings.getByRole('button', { name: '关闭设置', exact: true }))
       const scene = (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene
       const captures: unknown[] = []
       const cdp = await page.context().newCDPSession(page)
@@ -48,9 +48,10 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
           })
           await expect(page.locator('html')).toHaveAttribute('data-reduced-transparency', 'true')
         }
-        for (const focus of ['对话', '画布', '生成']) {
-          await hit(page.getByRole('button', { name: focus, exact: true }))
-          if (focus === '生成') await hit(page.locator('.generation-compact-summary'))
+        for (const focus of ['对话', '编辑', '出图']) {
+          if (focus === '编辑') await openEditor(page)
+          else await hit(page.getByRole('button', { name: focus, exact: true }))
+          if (focus === '出图') await hit(page.locator('.generation-compact-summary'))
           const measured = await page.evaluate(`({ width: innerWidth, height: innerHeight, dpr: devicePixelRatio,
             reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
             reducedTransparency: matchMedia('(prefers-reduced-transparency: reduce)').matches,
@@ -61,15 +62,15 @@ for (const theme of ['pearl', 'dusk', 'obsidian'] as const) {
               .filter(n=>n.checkVisibility()).map(n=>({ text:n.textContent, color:getComputedStyle(n).color })) })`)
           if (reduced) expect((measured as { surfaces: { filter: string }[] }).surfaces.every((surface) => surface.filter === 'none')).toBe(true)
           captures.push({ focus, reduced, measured, native: await captureWorkbench(app, test.info().outputPath(`${theme}-${reduced ? 'reduced-150' : 'regular-100'}-${focus}.png`)) })
-          if (focus === '生成') await hit(page.locator('.generation-compact-summary'))
+          if (focus === '出图') await hit(page.locator('.generation-compact-summary'))
         }
       }
-      await hit(page.getByRole('button', { name: '供应商设置', exact: true }))
+      await hit(page.getByRole('button', { name: '设置', exact: true }))
       await hit(settings.getByRole('button', { name: '外观', exact: true }))
       await hit(settings.locator('[data-glass-preview="solid"]'))
       await expect(page.locator('html')).toHaveAttribute('data-glass-material', 'solid')
       captures.push({ settings: true, native: await captureWorkbench(app, test.info().outputPath(`${theme}-settings-small.png`)) })
-      await hit(settings.getByRole('button', { name: '关闭供应商设置', exact: true }))
+      await hit(settings.getByRole('button', { name: '关闭设置', exact: true }))
       expect((await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene).toEqual(scene)
       expect(await app.evaluate(() => (globalThis as typeof globalThis & { __materialRequests: number }).__materialRequests)).toBe(0)
       await writeFile(test.info().outputPath('material-facts.json'), JSON.stringify({ theme, userData, captures, scene, actualProviderRequests: 0 }, null, 2))

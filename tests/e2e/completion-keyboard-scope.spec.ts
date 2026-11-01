@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 let app: ElectronApplication
 let page: Page
@@ -17,7 +18,7 @@ test.beforeEach(async () => {
   page = await app.firstWindow()
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await expect(page.getByTestId('canvas-stage')).toBeVisible()
   await page.getByRole('button', { name: '形状', exact: true }).click()
   await expect.poll(async () => (await mainScene()).elements.length).toBe(1)
@@ -34,8 +35,8 @@ async function mainScene() {
 test('settings isolate every background canvas command and return focus on Escape', async () => {
   const before = await mainScene()
   await page.getByTestId('open-settings').click()
-  const dialog = page.getByRole('dialog', { name: '供应商设置' })
-  await expect(dialog.getByRole('button', { name: '关闭供应商设置' })).toBeFocused()
+  const dialog = page.getByRole('dialog', { name: '设置', exact: true })
+  await expect(dialog.getByRole('button', { name: '关闭设置' })).toBeFocused()
   await dialog.getByRole('button', { name: '外观', exact: true }).click()
   for (const key of ['Delete', 'Backspace', 'Control+x', 'Control+v', 'Control+z', 'Control+y', 'ArrowLeft', 't', 'b']) {
     await page.keyboard.press(key)
@@ -46,7 +47,7 @@ test('settings isolate every background canvas command and return focus on Escap
     expect(await dialog.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
   }
   const optical = dialog.locator('summary', { hasText: '光学与动态' })
-  await dialog.getByRole('button', { name: '关闭供应商设置' }).focus()
+  await dialog.getByRole('button', { name: '关闭设置' }).focus()
   for (let i = 0; i < 50 && !await optical.evaluate((element) => element === element.ownerDocument.activeElement); i++) await page.keyboard.press('Tab')
   await expect(optical).toBeFocused()
   await page.keyboard.press('Enter')

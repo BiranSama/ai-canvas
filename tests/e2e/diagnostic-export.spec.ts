@@ -24,8 +24,8 @@ test('Diagnostic Export v1 stays explicit, bounded, Main-only and offline', asyn
       if (/^https?:/i.test(request.url())) externalRequests.push(request.url())
     })
     await window.getByTestId('open-settings').evaluate((button) => button.click())
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
-    await window.getByRole('button', { name: '隐私与高级' }).evaluate((button) => button.click())
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
+    await window.getByRole('button', { name: '高级' }).evaluate((button) => button.click())
     await expect(window.getByTestId('export-diagnostics')).toBeVisible()
     for (const viewport of [
       { width: 1024, height: 700 },

@@ -1068,6 +1068,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     setViewport(nextZoom, clampPan({ pan: nextPan, viewport: size, centeredArtboard }))
   }, [baseArtboard.height, baseArtboard.width, setViewport, size])
 
+  /** The view the last fit set, so a window resize can tell whether the person has zoomed or panned since. */
+  const lastFitRef = useRef<{ readonly zoom: number; readonly pan: CanvasPoint } | null>(null)
   const viewFit = useCallback((): void => {
     const safeWidth = Math.max(120, size.width - safeFitInsets.left - safeFitInsets.right)
     const safeHeight = Math.max(120, size.height - safeFitInsets.top - safeFitInsets.bottom)
@@ -1076,11 +1078,19 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       x: safeFitInsets.left + safeWidth / 2,
       y: safeFitInsets.top + safeHeight / 2
     }
-    setClampedViewport(nextZoom, {
-      x: safeCenter.x - size.width / 2,
-      y: safeCenter.y - size.height / 2
+    const nextPan = clampPan({
+      pan: { x: safeCenter.x - size.width / 2, y: safeCenter.y - size.height / 2 },
+      viewport: size,
+      centeredArtboard: {
+        x: (size.width - baseArtboard.width * nextZoom) / 2,
+        y: (size.height - baseArtboard.height * nextZoom) / 2,
+        width: baseArtboard.width * nextZoom,
+        height: baseArtboard.height * nextZoom
+      }
     })
-  }, [baseArtboard.height, baseArtboard.width, safeFitInsets.bottom, safeFitInsets.left, safeFitInsets.right, safeFitInsets.top, setClampedViewport, size.height, size.width])
+    lastFitRef.current = { zoom: nextZoom, pan: nextPan }
+    setViewport(nextZoom, nextPan)
+  }, [baseArtboard.height, baseArtboard.width, safeFitInsets.bottom, safeFitInsets.left, safeFitInsets.right, safeFitInsets.top, setViewport, size])
 
   const beginElementDrag = useCallback((elementId: string): void => {
     if (!dragActiveRef.current) {
@@ -1463,6 +1473,22 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     initiallyFittedProjectRef.current = scene.projectId
     viewFit()
   }, [islandLayouts.composer, islandLayouts.inspector, islandLayouts.tools, preview, scene.projectId, size.height, size.width, viewFit])
+
+  // A window resize fits again while the view is still the last fit, the panels and composer kept clear.
+  // The fit waits a moment so the panels have settled into the new window first; moving a panel alone never refits.
+  const viewFitRef = useRef(viewFit)
+  useEffect(() => { viewFitRef.current = viewFit }, [viewFit])
+  const previousSizeRef = useRef(size)
+  useEffect(() => {
+    const previous = previousSizeRef.current
+    previousSizeRef.current = size
+    if (preview || (previous.width === size.width && previous.height === size.height)) return
+    const last = lastFitRef.current
+    const { zoom: currentZoom, pan: currentPan } = useWorkspaceStore.getState()
+    if (last === null || Math.abs(currentZoom - last.zoom) > 1e-6 || Math.abs(currentPan.x - last.pan.x) > 0.5 || Math.abs(currentPan.y - last.pan.y) > 0.5) return
+    const timer = window.setTimeout(() => viewFitRef.current(), 120)
+    return () => window.clearTimeout(timer)
+  }, [preview, size])
 
   useEffect(() => {
     if (preview) return

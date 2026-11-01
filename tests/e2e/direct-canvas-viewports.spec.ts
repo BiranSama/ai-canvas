@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import { waitForPaintedShape } from '../helpers/canvas-hit-readiness'
+import { openEditor } from '../helpers/workbench-ui'
 
 const VIEWPORTS = [
   { width: 1024, height: 700 },
@@ -24,6 +25,7 @@ for (const viewport of VIEWPORTS) {
     })
     try {
       const window = await app.firstWindow()
+      await openEditor(window)
       await window.setViewportSize(viewport)
       await window.addStyleTag({ content: '*, *::before, *::after { animation: none !important; transition: none !important; }' })
       await expect(window.getByTestId('canvas-stage')).toBeVisible()

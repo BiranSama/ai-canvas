@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { enterPackagedWorkspace, packagedTestEnvironment } from './packaged-test-helpers'
+import { openEditor } from '../helpers/workbench-ui'
 
 const executablePath = process.env.AI_CANVAS_PACKAGED_PATH
 
@@ -23,7 +24,7 @@ test('runs the persistent conversation-to-canvas agent inside the packaged Windo
     await window.getByRole('textbox', { name: '对话输入' }).fill('创建一张 4:5 的香水海报，标题是 NIGHT VEIL，瓶子放中央偏下，瓶后有柔和轮廓光。先不要生成图片。')
     await window.getByRole('button', { name: '发送要求' }).click()
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
-    await window.getByRole('button', { name: '画布', exact: true }).click()
+    await openEditor(window)
     await expect(window.getByRole('listbox', { name: '图层' }).getByRole('option')).toHaveCount(8)
   } finally {
     await app.close()

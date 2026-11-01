@@ -3,6 +3,7 @@ import { mkdtemp, readdir, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('AC-R2-01/02 opens from the path-free project library and keeps Glass Island layout outside Scene', async () => {
   test.setTimeout(60_000)
@@ -24,6 +25,7 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
     await expect(window.getByText(join(userData, 'projects'), { exact: true })).toHaveCount(0)
     await window.getByRole('button', { name: /新建项目/ }).click({ force: true })
     await expect(window.getByRole('button', { name: '项目菜单：未命名创作' })).toBeVisible()
+    await openEditor(window)
 
     const packages = (await readdir(join(userData, 'projects'))).filter((name) => name.endsWith('.aicanvas') && name !== 'Untitled.aicanvas')
     expect(packages).toEqual(['未命名创作.aicanvas'])
@@ -82,6 +84,8 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
     await expect(window.getByRole('button', { name: '打开项目：未命名创作' })).toBeVisible()
     await window.getByRole('button', { name: '最近' }).evaluate((button: { click(): void }) => button.click())
     await window.getByRole('button', { name: '打开项目：未命名创作' }).click({ force: true })
+    // A project reopens on 对话; the islands belong to the editor.
+    await openEditor(window)
     await expect(window.locator('[data-island-id="inspector"]')).toHaveAttribute('data-island-mode', 'docked-top')
     expect(externalRequests).toEqual([])
   } finally {

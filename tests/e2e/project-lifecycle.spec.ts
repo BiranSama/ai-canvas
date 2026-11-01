@@ -3,6 +3,7 @@ import { mkdtemp, readdir, rm, stat, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 async function launch(userData: string): Promise<ElectronApplication> {
   return electron.launch({
@@ -40,6 +41,7 @@ test('creates, imports, saves as, opens and restarts a persistent desktop projec
     await window.getByRole('menuitem', { name: '新建空白项目' }).evaluate((button) => button.click())
     await expect(window.getByRole('button', { name: '项目菜单：Poster A' })).toBeVisible()
 
+    await openEditor(window)
     const fileInput = window.locator('input[type="file"]').last()
     await fileInput.setInputFiles(resolve('tests/visual/__screenshots__/m3-canvas-1024x700.png'))
     await expect(window.getByRole('listbox', { name: '图层' }).getByText('导入图片')).toBeVisible({ timeout: 10_000 })
@@ -62,12 +64,14 @@ test('creates, imports, saves as, opens and restarts a persistent desktop projec
     await window.getByRole('button', { name: '项目菜单：Poster B' }).evaluate((button) => button.click())
     await window.getByRole('menuitem', { name: '新建空白项目' }).evaluate((button) => button.click())
     await expect(window.getByRole('button', { name: '项目菜单：Scratch' })).toBeVisible()
+    await openEditor(window)
     await expect(window.getByRole('listbox', { name: '图层' }).getByText('导入图片')).toHaveCount(0)
 
     await nextOpenDialog(app, projectB)
     await window.getByRole('button', { name: '项目菜单：Scratch' }).evaluate((button) => button.click())
     await window.getByRole('menuitem', { name: '打开项目' }).evaluate((button) => button.click())
     await expect(window.getByRole('button', { name: '项目菜单：Poster B' })).toBeVisible()
+    await openEditor(window)
     await expect(window.getByRole('listbox', { name: '图层' }).getByText('导入图片')).toBeVisible()
 
     await app.close()
@@ -77,6 +81,7 @@ test('creates, imports, saves as, opens and restarts a persistent desktop projec
     app = await launch(userData)
     window = await app.firstWindow()
     await expect(window.getByRole('button', { name: '项目菜单：Poster B' })).toBeVisible()
+    await openEditor(window)
     await expect(window.getByRole('listbox', { name: '图层' }).getByText('导入图片')).toBeVisible({ timeout: 10_000 })
     const missing = await window.evaluate(async (assetId) => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop
@@ -88,6 +93,7 @@ test('creates, imports, saves as, opens and restarts a persistent desktop projec
       }
     }, imported.assetId!)
     expect(missing).toBe(true)
+    await openEditor(window)
     await window.locator('input[type="file"]').last().setInputFiles(resolve('tests/visual/__screenshots__/m3-canvas-1024x700.png'))
     await expect(window.locator('.canvas-tool-problem')).toContainText('已重新关联')
     const relinked = await window.evaluate(async (assetId) => {

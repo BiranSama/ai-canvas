@@ -2,7 +2,7 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { captureWorkbench, hitWorkbenchControl as hit, openConversationRecord } from '../helpers/workbench-ui'
+import { captureWorkbench, hitWorkbenchControl as hit, openConversationRecord, openEditor } from '../helpers/workbench-ui'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 
 for (const width of [1024, 1440]) {
@@ -12,6 +12,7 @@ for (const width of [1024, 1440]) {
     try {
       await app.evaluate(() => { globalThis.fetch = async () => { throw new Error('OFFLINE_ASTRA_REVIEW') } })
       const page = await app.firstWindow()
+      await openEditor(page)
       await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0]!.setContentSize(width, width === 1024 ? 700 : 900), width)
       await expect(page.getByTestId('canvas-stage')).toBeVisible()
       await hit(page.getByRole('button', { name: '文字 T', exact: true }))
@@ -50,21 +51,22 @@ for (const width of [1024, 1440]) {
   })
 }
 
-for (const width of [1024, 1440]) for (const choice of ['执行这一步', '先停在这里', '停止当前操作']) {
+for (const width of [1024, 1440]) for (const choice of ['确认生成', '先保留画布', '停止当前操作']) {
   test(`decision choice ${choice} is readable and genuinely executes at ${width}`, async () => {
     const userData = await mkdtemp(join(tmpdir(), 'astra-decision-'))
     const app = await electron.launch({ args: ['.', `--user-data-dir=${userData}`], cwd: resolve('.'), env: { ...process.env, AI_CANVAS_E2E: '1' } })
     try {
       await app.evaluate(() => { globalThis.fetch = async () => { throw new Error('OFFLINE_ASTRA_REVIEW') } })
       const page = await app.firstWindow()
+      await openEditor(page)
       await app.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0]!.setContentSize(width, width === 1024 ? 700 : 900), width)
       await expect(page.getByTestId('canvas-stage')).toBeVisible()
       await hit(page.getByRole('button', { name: '对话', exact: true }))
       await openConversationRecord(page)
-      await hit(page.getByRole('group', { name: 'Agent 模式' }).getByRole('button', { name: '审阅', exact: true }))
-      await page.getByLabel('对话输入', { exact: true }).fill('创建一张4:5的山海海报，标题为山海之间，先不要生成图片。')
+      // The generation question is the decision a turn stops on now that there is no review mode.
+      await page.getByLabel('对话输入', { exact: true }).fill('创建一张4:5的山海海报，标题为山海之间。')
       await hit(page.getByRole('button', { name: '发送要求', exact: true }))
-      const card = page.getByRole('group', { name: '先确认这项修改' })
+      const card = page.getByRole('group', { name: '要现在生成图片吗？' })
       await expect(card).toBeVisible()
       const buttons = card.getByRole('button')
       await expect(buttons).toHaveCount(3)
@@ -78,8 +80,11 @@ for (const width of [1024, 1440]) for (const choice of ['执行这一步', '先�
       await captureWorkbench(app, test.info().outputPath(`decision-${width}.png`))
       await hit(card.getByRole('button', { name: choice, exact: true }))
       await expect(card).toBeHidden()
-      await expect.poll(async () => (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene.revision).toBe(choice === '执行这一步' ? 1 : 0)
-      expect(await page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs()).length)).toBe(0)
+      // The plan waits on the question as a whole: 确认生成 lays it out and starts a picture; the other two leave the canvas as it was.
+      await expect.poll(async () => page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.listGenerationJobs()).length)).toBe(choice === '确认生成' ? 1 : 0)
+      const revision = (await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap())).scene.revision
+      if (choice === '确认生成') expect(revision).toBeGreaterThanOrEqual(1)
+      else expect(revision).toBe(0)
     } finally { await app.close() }
   })
 }
@@ -90,11 +95,12 @@ test('manual obsidian solid material keeps result action labels readable', async
   try {
     await app.evaluate(() => { globalThis.fetch = async () => { throw new Error('OFFLINE_ASTRA_REVIEW') } })
     const page = await app.firstWindow()
+    await openEditor(page)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1920, 1080))
     await expect(page.getByTestId('canvas-stage')).toBeVisible()
     await page.evaluate(() => (globalThis as unknown as { desktop: DesktopApi }).desktop.setAppearanceSettings({ theme: 'obsidian', glassMaterial: 'solid', motion: 'reduced', opticalQuality: 'balanced', sceneReflection: 'artwork' }))
     await expect(page.locator('html')).toHaveAttribute('data-glass-material', 'solid')
-    await hit(page.getByRole('button', { name: '生成', exact: true }))
+    await hit(page.getByRole('button', { name: '出图', exact: true }))
     await page.getByTestId('generation-prompt').fill('一张安静的山海作品')
     await hit(page.getByTestId('generation-submit'))
     await expect(page.getByTestId('generation-result')).toHaveCount(1)
@@ -126,6 +132,7 @@ test('view controls yield to a composer docked at each edge in a small window', 
   try {
     await app.evaluate(() => { globalThis.fetch = async () => { throw new Error('OFFLINE_ASTRA_REVIEW') } })
     const page = await app.firstWindow()
+    await openEditor(page)
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1024, 700))
     await expect(page.getByTestId('canvas-stage')).toBeVisible()
     for (const direction of ['Down', 'Right', 'Up', 'Left']) {
@@ -147,6 +154,7 @@ for (const viewport of [{ width: 1024, height: 700, zoom: 1 }, { width: 1440, he
     try {
       await app.evaluate(() => { globalThis.fetch = async () => { throw new Error('OFFLINE_ASTRA_REVIEW') } })
       const page = await app.firstWindow()
+      await openEditor(page)
       await app.evaluate(({ BrowserWindow }, size) => {
         const window = BrowserWindow.getAllWindows()[0]!
         window.setContentSize(size.width, size.height); window.webContents.setZoomFactor(size.zoom)

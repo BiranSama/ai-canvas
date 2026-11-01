@@ -110,7 +110,7 @@ export function AgentContextSheet({ harness, knowledge, onClose }: AgentContextS
                   <p>{record.providerId ?? '本地'} · {record.imageCount} 图 · {record.textBytes} B</p>
                 </article>
               ))}
-              {outbound.length === 0 && <p className="context-sheet-empty">尚无 Provider 外发记录；每次外发都会在这里留下范围与状态。</p>}
+              {outbound.length === 0 && <p className="context-sheet-empty">还没有外发记录；每次外发都会在这里留下范围与状态。</p>}
               {excluded.slice(0, 3).map((entry) => (
                 <article key={entry.id}><span>{DISPOSITION_COPY[entry.disposition]}</span><p>{shortText(entry.reason)}</p></article>
               ))}

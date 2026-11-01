@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 async function dragGripTo(window: Page, islandId: 'tools' | 'inspector' | 'composer', x: number, y: number): Promise<void> {
   const island = window.locator(`[data-island-id="${islandId}"]`)
@@ -28,6 +29,7 @@ test('Glass Islands use real pointer interactions for resize, four-edge docking,
     await expect(window.getByRole('heading', { name: '项目' })).toBeVisible()
     await window.getByRole('button', { name: /新建项目/ }).click({ force: true })
     await expect(window.getByRole('button', { name: '项目菜单：未命名创作' })).toBeVisible()
+    await openEditor(window)
 
     const workspace = window.locator('.canvas-workspace')
     const workspaceBox = await workspace.boundingBox()
@@ -106,6 +108,8 @@ test('Glass Islands use real pointer interactions for resize, four-edge docking,
     const restoredWindow = await app.firstWindow()
     await expect(restoredWindow.getByRole('heading', { name: '项目' })).toBeVisible()
     await restoredWindow.getByRole('button', { name: '打开项目：未命名创作' }).click({ force: true })
+    // A project reopens on 对话; the islands belong to the editor.
+    await openEditor(restoredWindow)
     await expect(restoredWindow.locator('[data-island-id="inspector"]')).toHaveAttribute('data-island-mode', 'orb')
     const reloadedOrb = restoredWindow.locator('[data-island-id="inspector"]')
     await expect.poll(async () => {

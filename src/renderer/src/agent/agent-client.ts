@@ -1,6 +1,7 @@
 import type { Scene } from '../../../domain'
 import type { AgentRequest, EphemeralAnnotation, SceneSummary } from '../../../shared/agent'
 import { useWorkspaceStore } from '../store/workspace-store'
+import type { ReferenceAttachment } from '../store/creation-session-store'
 
 export function summarizeScene(scene: Scene): SceneSummary {
   return {
@@ -58,7 +59,8 @@ export async function createAgentRequest(
   text: string,
   autoGenerate: boolean,
   scope: 'selection' | 'canvas' = 'selection',
-  ephemeralAnnotation: EphemeralAnnotation | null = null
+  ephemeralAnnotation: EphemeralAnnotation | null = null,
+  references: readonly ReferenceAttachment[] = []
 ): Promise<AgentRequest> {
   const { scene, selectedIds } = useWorkspaceStore.getState()
   const scopedIds = scope === 'canvas' ? [] : selectedIds
@@ -78,9 +80,11 @@ export async function createAgentRequest(
     selectedIds: [...scopedIds],
     selectedElements,
     attachments: [
-      ...selectionAttachments.slice(0, ephemeralAnnotation === null ? 20 : 19),
-      ...(ephemeralAnnotation === null ? [] : [{ kind: 'selection' as const, id: ephemeralAnnotation.id, name: '本轮临时圈选' }])
-    ],
+      ...references.map((reference) => ({ kind: 'asset' as const, id: reference.assetId, name: `${reference.name} · 附件` })),
+      ...selectionAttachments
+    ].slice(0, ephemeralAnnotation === null ? 20 : 19).concat(
+      ephemeralAnnotation === null ? [] : [{ kind: 'selection' as const, id: ephemeralAnnotation.id, name: '本轮临时圈选' }]
+    ),
     ephemeralAnnotation,
     autoGenerate,
     activeGenerationJobId

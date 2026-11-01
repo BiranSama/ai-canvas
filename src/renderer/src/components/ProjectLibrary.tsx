@@ -15,6 +15,7 @@ import type { RuntimeInfo } from '../../../shared/desktop-api'
 import type { RecentProjectSummary, WorkspaceBootstrap } from '../../../shared/project'
 import appIconUrl from '../../../../build/icon.png'
 import { isOpenableFile, OPENABLE_FILE_ACCEPT, openFileAsProject } from '../project/open-file-project'
+import { useWorkspaceStore } from '../store/workspace-store'
 import { showAppNotice } from './app-notice'
 import { projectLibraryLocationLabel } from './project-library-label'
 import { ProviderSettingsSheet } from './ProviderSettingsSheet'
@@ -170,10 +171,15 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
   }
 
   const openFile = (file: File): void => {
+    let openedProject = false
     void run(async () => {
       const opened = await openFileAsProject(file)
       if (opened?.notice != null) showAppNotice(opened.notice)
+      openedProject = opened?.bootstrap != null
       return opened?.bootstrap ?? null
+    }).then(() => {
+      // A file opened as a project, a PSD or a picture, is there to be worked on, so it opens in the editor.
+      if (openedProject) useWorkspaceStore.getState().setActiveView('canvas')
     })
   }
 

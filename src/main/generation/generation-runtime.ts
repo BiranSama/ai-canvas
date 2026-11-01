@@ -61,6 +61,7 @@ import {
 } from '../../shared/reference'
 import {
   AgentRuntime,
+  type CanvasDrawing,
   AgentContextRepository,
   AgentHarnessRepository,
   ActivityLedgerRepository,
@@ -99,7 +100,7 @@ import { ArkHttpClient } from '../security/ark-http-client'
 import { KrillHttpTransport } from '../security/krill-http-transport'
 import { ProviderUsageLedger } from '../security/provider-usage-ledger'
 import { ProviderConnectionValidator } from '../security/provider-connection-validator'
-import { DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
+import { asksBeforeGenerating, DEFAULT_PROVIDER_EXECUTION_POLICY, defaultImageProviderConfig, imageProviderConfigs, PRIMARY_IMAGE_PROVIDER_ID, resolveImageProtocolEndpoint, resolveLlmEndpoint } from '../../shared/provider-settings'
 import type {
   ConfigurableProviderId,
   ProviderExecutionPolicy,
@@ -232,7 +233,10 @@ function configuredImageCapabilities(
   }
 }
 
-class ProductGenerationPolicy extends GenerationPolicy {
+/** The longer side of a turn's before/after pictures, in pixels. */
+const TURN_SNAPSHOT_SIZE = 480
+
+export class ProductGenerationPolicy extends GenerationPolicy {
   readonly #policy: () => ProviderExecutionPolicy
 
   constructor(policy: () => ProviderExecutionPolicy) {
@@ -246,9 +250,8 @@ class ProductGenerationPolicy extends GenerationPolicy {
       if (tool.kind === 'canvas_generation' || tool.kind === 'canvas_edit') return tool.providerId !== 'mock'
       return false
     })
-    const policy = this.#policy()
-    if (hasRealGeneration && policy.approvalMode === 'confirm_each') return true
-    if (hasRealGeneration && request.autoGenerate && !policy.autoGenerate) return true
+    // 「生图前先问我」 as the settings show it: on, every real generation asks, an explicit 「生成」 included.
+    if (hasRealGeneration && asksBeforeGenerating(this.#policy())) return true
     return super.requiresConfirmation(request, plan)
   }
 }
@@ -696,6 +699,7 @@ export class GenerationRuntime {
       generationWorkflowRepository: workflowRepository,
       loadGenerationJob: (jobId) => repository.getJob(jobId),
       activateGenerationJob: (jobId) => workflowCoordinator.activate(jobId),
+      drawCanvas: () => this.#drawCanvas(project, sceneService.state().scene),
       executePersistentTool: (tool, context) => this.#executePersistentAgentTool(tool, context, toolExecutor, sceneService, outboundContextService),
       refreshPersistentRequest: async (request) => {
         const generationResults = (await repository.listJobs(project.workspace.metadata.id))
@@ -1195,6 +1199,23 @@ export class GenerationRuntime {
   }
 
   /** Stores an image Main made itself (a render, a mask, a cut-out layer) as a project asset. */
+  /** The canvas as it exports, drawn small for a turn card's before/after; null when it cannot be drawn. */
+  async #drawCanvas(owner: OpenProjectResult, scene: Scene): Promise<CanvasDrawing | null> {
+    try {
+      const rendered = await new CompositeReferenceRenderer(async (assetId) => {
+        try {
+          return (await owner.workspace.assets.resolveAsset(assetId)).filePath
+        } catch {
+          return null
+        }
+      }).render({ ...scene, canvas: { ...scene.canvas, transparent: false } }, 'final')
+      const small = await sharp(rendered.buffer).resize(TURN_SNAPSHOT_SIZE, TURN_SNAPSHOT_SIZE, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+      return { store: async () => (await this.#importDerivedImage(owner, small, 'reference', `turn-snapshot:${randomUUID()}`)).id }
+    } catch {
+      return null
+    }
+  }
+
   async #importDerivedImage(owner: OpenProjectResult, bytes: Buffer, sourceType: AssetMetadata['sourceType'], sourceId: string): Promise<AssetMetadata> {
     const stagingDirectory = join(this.#userDataDirectory, 'derived-staging')
     await mkdir(stagingDirectory, { recursive: true })
@@ -2174,7 +2195,15 @@ export class GenerationRuntime {
     const layer = inContextLayerJob(match.job.request.parameters)
     const layerTarget = layer === null || targetElementId !== undefined ? undefined
       : current.elements.find((element) => element.id === layer.targetElementId && (element.type === 'image' || element.type === 'placeholder'))
-    const target = layerTarget ?? (targetElementId === undefined ? undefined : current.elements.find((element) => element.id === targetElementId))
+    // Only a picture made from a prompt looks for a place. A local edit, a fill, a redraw in context,
+    // a unified redraw or a composition from the canvas each has its own placement and keeps it.
+    const plainResult = typeof match.job.request.parameters.mode !== 'string'
+    const preferred = targetElementId !== undefined || input.preferredTargetId === undefined || !plainResult
+      ? undefined
+      : current.elements.find((element) => element.id === input.preferredTargetId && (element.type === 'image' || element.type === 'placeholder')
+        && !element.locked && !current.elements.some((other) => (other.id === element.groupId && other.locked)
+          || (other.type === 'mask' && other.targetElementId === element.id && other.mode === 'protect')))
+    const target = layerTarget ?? preferred ?? (targetElementId === undefined ? undefined : current.elements.find((element) => element.id === targetElementId))
     if (targetElementId !== undefined && (target === undefined || (target.type !== 'image' && target.type !== 'placeholder'))) {
       throw new AgentToolExecutorError('TOOL_SCOPE_DENIED', '要替换的图片或占位已经不存在，未修改画布。', true)
     }
@@ -2241,7 +2270,7 @@ export class GenerationRuntime {
       id: input.placementId,
       version: ELEMENT_SCHEMA_VERSION,
       type: 'image',
-      name: fill !== null ? `生成式填充 ${match.result.variantIndex + 1}` : unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一渲染 ${match.result.variantIndex + 1}`,
+      name: fill !== null ? `生成式填充 ${match.result.variantIndex + 1}` : unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一重绘 ${match.result.variantIndex + 1}`,
       description: unified === null
         ? `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`
         : `由 ${match.job.providerId}/${match.job.model} 统一重绘；原来的图层保留在它下面，隐藏它就能看到。`,
@@ -2271,7 +2300,7 @@ export class GenerationRuntime {
       batch: {
         id: input.placementId,
         origin: input.origin,
-        summary: unified !== null ? '放入统一渲染' : fill !== null ? '放入生成式填充' : target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
+        summary: unified !== null ? '放入统一重绘' : fill !== null ? '放入生成式填充' : target === undefined ? '将生成结果放入画布' : `将生成结果放入${target.name}`,
         commands: unified !== null ? unifiedPlacementCommands(current, element, unified.coveredElementIds) : target === undefined ? [{ kind: 'element.add', element }] : [
           { kind: 'element.set-image', elementId: target.id, assetId: asset.id, provenance: element.provenance! },
           ...(subjectFit === null ? [] : [{ kind: 'element.update' as const, elementId: target.id, changes: { mask: subjectFit.mask, effects: subjectFit.effects } }]),

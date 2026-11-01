@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import Database from 'better-sqlite3'
-import type { DesktopApi } from '../../src/shared/desktop-api'
 
 test('explicit task relation and temporary try remain inspectable and isolated', async () => {
   test.setTimeout(60_000)
@@ -19,26 +18,24 @@ test('explicit task relation and temporary try remain inspectable and isolated',
     await window.waitForLoadState('domcontentloaded')
     await window.getByRole('button', { name: '对话', exact: true }).evaluate((button) => button.click())
 
-    await expect(window.getByRole('button', { name: '新建创作任务' })).toHaveAttribute('aria-pressed', 'true')
+    // The first message starts a task by itself, so there is nothing to choose yet.
+    await expect(window.getByRole('button', { name: '新任务', exact: true })).toHaveCount(0)
     await window.getByRole('textbox', { name: '对话输入' }).fill('创建一张 4:5 的蓝色产品海报，主体是玻璃杯，先不要生成图片。')
     await window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())
     await expect(window.getByTestId('operation-receipt')).toBeVisible({ timeout: 10_000 })
-    const revisionAfterFormal = await window.evaluate(async () => {
-      const renderer = globalThis as typeof globalThis & { readonly desktop: DesktopApi }
-      return (await renderer.desktop.getWorkspaceBootstrap()).scene.revision
-    })
 
-    await window.getByRole('button', { name: '临时试一个方向' }).evaluate((button) => button.click())
-    await window.getByRole('textbox', { name: '对话输入' }).fill('创建一张 1:1 的暖金咖啡海报，只作为临时方向，先不要生成图片。')
+    // After that, 新任务 by the title makes the next message a separate task; the composer itself stays free of switches.
+    await expect(window.getByRole('group', { name: '这条要求与当前任务的关系' })).toHaveCount(0)
+    const newTask = window.getByRole('button', { name: '新任务', exact: true })
+    await expect(newTask).toHaveAttribute('aria-pressed', 'false')
+    await expect(newTask).toBeEnabled()
+    await newTask.evaluate((button) => button.click())
+    await expect(newTask).toHaveAttribute('aria-pressed', 'true')
+    await expect(window.getByRole('textbox', { name: '对话输入' })).toHaveAttribute('placeholder', '描述新的作品…')
+    await window.getByRole('textbox', { name: '对话输入' }).fill('创建一张 1:1 的暖金咖啡海报，先不要生成图片。')
     await window.getByRole('button', { name: '发送要求' }).evaluate((button) => button.click())
-    await expect(window.getByTestId('temporary-try-resolution')).toBeVisible({ timeout: 10_000 })
-    const revisionWhilePending = await window.evaluate(async () => {
-      const renderer = globalThis as typeof globalThis & { readonly desktop: DesktopApi }
-      return (await renderer.desktop.getWorkspaceBootstrap()).scene.revision
-    })
-    expect(revisionWhilePending).toBe(revisionAfterFormal)
-    await window.getByRole('button', { name: '放弃', exact: true }).evaluate((button) => button.click())
-    await expect(window.getByTestId('temporary-try-resolution')).toHaveCount(0)
+    await expect(window.getByTestId('operation-receipt')).toHaveCount(1, { timeout: 10_000 })
+    await expect(newTask).toHaveAttribute('aria-pressed', 'false')
 
     const database = new Database(join(userData, 'projects', 'Untitled.aicanvas', 'project.db'), { readonly: true })
     const turns = database.prepare(`
@@ -48,9 +45,9 @@ test('explicit task relation and temporary try remain inspectable and isolated',
     database.close()
     expect(turns).toEqual([
       expect.objectContaining({ task_relation: 'new_task', dispatch_mode: 'apply_now', temporary_state: null }),
-      expect.objectContaining({ task_relation: 'temporary_try', dispatch_mode: 'apply_now', temporary_state: 'rejected' })
+      expect.objectContaining({ task_relation: 'new_task', dispatch_mode: 'apply_now', temporary_state: null })
     ])
-    expect(turns[1]?.base_task_id).toBe(turns[0]?.task_id)
+    expect(turns[1]?.task_id).not.toBe(turns[0]?.task_id)
   } finally {
     if (app !== null) await app.close()
     await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })

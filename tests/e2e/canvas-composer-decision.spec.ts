@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 // Nothing in the request says the picture's shape, so the Agent stops on an aspect-ratio decision.
 const REQUEST_WITHOUT_RATIO = '做一张咖啡店开业的广告画面，标题“晨光咖啡”，中间放一杯拿铁，暖色调。先不要生成图片。'
@@ -24,6 +25,7 @@ test('the canvas composer asks the decision the Agent is actually waiting on', a
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.setViewportSize({ width: 1440, height: 900 })
     const input = window.getByRole('textbox', { name: '创作输入' })
     await input.fill(REQUEST_WITHOUT_RATIO)
@@ -54,6 +56,7 @@ test('after the ratio is chosen, the composer asks whether to generate instead o
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.setViewportSize({ width: 1440, height: 900 })
     const input = window.getByRole('textbox', { name: '创作输入' })
     await input.fill('做一张咖啡店开业的广告画面，标题“晨光咖啡”，中间放一杯拿铁，暖色调。')
@@ -80,6 +83,7 @@ test('a poster asked for with its title, subject and colours is laid out without
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.setViewportSize({ width: 1440, height: 900 })
     const input = window.getByRole('textbox', { name: '创作输入' })
     // The request from issue #8: everything but the ratio is given, and a poster stands upright.

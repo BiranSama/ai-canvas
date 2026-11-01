@@ -1,4 +1,4 @@
-import { AlertCircle, BarChart3, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Layers3, Palette, Pencil, Server, ShieldCheck, Trash2, X } from 'lucide-react'
+import { AlertCircle, BarChart3, BookOpen, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Palette, Pencil, Server, ShieldCheck, SlidersHorizontal, Trash2, Wrench, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useModalScope } from '../interaction/use-modal-scope'
 import type {
@@ -11,11 +11,12 @@ import type {
 import type { RuntimeInfo } from '../../../shared/desktop-api'
 import type { AgentEngineSetting } from '../../../shared/agent-engine'
 import type { DiagnosticExportResult } from '../../../shared/diagnostics'
-import type { GenerationProfileSnapshot } from '../../../shared/generation'
 import type { LlmPricing } from '../../../shared/model-usage'
 import { describeImageModel } from '../../../shared/image-model-profiles'
 import {
+  asksBeforeGenerating,
   MAX_IMAGE_PROVIDERS,
+  withAskBeforeGenerating,
   PRIMARY_IMAGE_PROVIDER_ID,
   providerPublicConfigSchema,
   resolveImageEndpoint,
@@ -55,11 +56,11 @@ const IMAGE_PROTOCOL_LABELS: Record<ImageProtocol, string> = {
   'ark-seedream': '火山方舟 Seedream',
   'openai-images': 'OpenAI Images 兼容',
   'task-images': '异步任务式 Images',
-  unconfigured: '请选择图片协议'
+  unconfigured: '请选择接口类型'
 }
 
 const LLM_REASONING_LABELS: Record<LlmReasoningEffort, string> = {
-  auto: '供应商默认',
+  auto: '厂商默认',
   none: '关闭思考',
   minimal: '最轻量',
   low: '低',
@@ -114,10 +115,8 @@ const OPTICAL_QUALITY_LABELS: Record<OpticalQuality, string> = {
   performance: '流畅优先'
 }
 
-function budgetStatus(snapshot: ProviderSettingsSnapshot): string {
-  const policy = snapshot.executionPolicy
-  const approval = policy.approvalMode === 'confirm_each' ? '逐次确认' : '本次会话授权'
-  return `每个图片任务最多 ${policy.maxRequestsPerJob} 个网络请求、${policy.maxImagesPerJob} 张图，预约额度 ¥${policy.maxCostCnyPerJob.toFixed(2)}，${approval}。Agent 每一轮估算花到 ¥${policy.maxCostCnyPerTurn.toFixed(2)} 就暂停，可以接着做；估算按文字模型和生图服务里填的单价，没填单价的部分不计入。价格未知时，预约不保证实际人民币扣费上限。`
+function policyStatus(policy: ProviderExecutionPolicy): string {
+  return `${asksBeforeGenerating(policy) ? '生图前先问你' : '生图不再先问'}；Agent 每一轮估算花到 ¥${policy.maxCostCnyPerTurn.toFixed(2)} 就暂停，可以接着做。`
 }
 
 export function ProviderSettingsSheet({
@@ -131,15 +130,14 @@ export function ProviderSettingsSheet({
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const [snapshot, setSnapshot] = useState<ProviderSettingsSnapshot | null>(null)
   const [policyDraft, setPolicyDraft] = useState<ProviderExecutionPolicy | null>(null)
-  const [profileSnapshot, setProfileSnapshot] = useState<GenerationProfileSnapshot | null>(null)
   const [drafts, setDrafts] = useState<ProviderDrafts>({})
   const [secrets, setSecrets] = useState<Partial<Record<ConfigurableProviderId, string>>>({})
   const [removingImageService, setRemovingImageService] = useState<string | null>(null)
   const [busy, setBusy] = useState<ConfigurableProviderId | null>(null)
   const [expandedProvider, setExpandedProvider] = useState<ConfigurableProviderId | null>(initialProviderId)
-  const [section, setSection] = useState<'providers' | 'agent' | 'usage' | 'profiles' | 'projects' | 'appearance' | 'privacy'>('providers')
+  const [section, setSection] = useState<'providers' | 'preferences' | 'agent' | 'usage' | 'projects' | 'appearance' | 'advanced'>('providers')
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
-  const [status, setStatus] = useState('正在读取本地授权与预算状态…')
+  const [status, setStatus] = useState('正在读取设置…')
   const [libraryBusy, setLibraryBusy] = useState(false)
   const [migrationSummary, setMigrationSummary] = useState<string | null>(null)
   const [connectionConfirming, setConnectionConfirming] = useState(false)
@@ -159,7 +157,7 @@ export function ProviderSettingsSheet({
       provider.id,
       providerPublicConfigSchema.parse(provider)
     ])) as ProviderDrafts)
-    useCreationSessionStore.getState().setProviderAutoGenerationAllowed(value.executionPolicy.autoGenerate)
+    useCreationSessionStore.getState().setAskBeforeGenerating(asksBeforeGenerating(value.executionPolicy))
   }
 
   const publishSnapshot = (value: ProviderSettingsSnapshot): void => {
@@ -170,8 +168,8 @@ export function ProviderSettingsSheet({
   useEffect(() => {
     void window.desktop.getProviderSettings().then((value) => {
       receiveSnapshot(value)
-      setStatus(budgetStatus(value))
-    }).catch(() => setStatus('无法读取本地供应商设置。'))
+      setStatus(policyStatus(value.executionPolicy))
+    }).catch(() => setStatus('无法读取设置。'))
     void window.desktop.getRuntimeInfo().then(setRuntime).catch(() => undefined)
     const desktop = window.desktop as Partial<typeof window.desktop>
     if (desktop.getAppearanceSettings !== undefined) {
@@ -180,7 +178,6 @@ export function ProviderSettingsSheet({
         applyAppearanceSnapshot(value)
       }).catch(() => setAppearance(defaultAppearanceSnapshot()))
     }
-    void window.desktop.listGenerationProfiles().then(setProfileSnapshot).catch(() => undefined)
     if (desktop.getAgentEngine !== undefined) void desktop.getAgentEngine().then(setAgentEngine).catch(() => undefined)
   }, [onClose])
 
@@ -219,12 +216,11 @@ export function ProviderSettingsSheet({
     setBusy(providerId)
     try {
       publishSnapshot(await window.desktop.setProviderConfig(draft))
-      setProfileSnapshot(await window.desktop.listGenerationProfiles())
       setConnectionResult(null)
       setConnectionConfirming(false)
-      setStatus('公开配置已版本化保存；未发起网络请求。')
+      setStatus('已保存，没有发出任何网络请求。')
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '未能保存公开配置。')
+      setStatus(error instanceof Error ? error.message : '没有保存成功。')
     } finally {
       setBusy(null)
     }
@@ -269,11 +265,26 @@ export function ProviderSettingsSheet({
     if (policyDraft === null || busy !== null) return
     setBusy('image-provider')
     try {
-      publishSnapshot(await window.desktop.setProviderExecutionPolicy(policyDraft))
-      setProfileSnapshot(await window.desktop.listGenerationProfiles())
-      setStatus('执行边界已保存；新的任务会在联网前按此策略预留请求、图片与费用。')
+      const saved = await window.desktop.setProviderExecutionPolicy(policyDraft)
+      publishSnapshot(saved)
+      setStatus(`已保存。${policyStatus(saved.executionPolicy)}`)
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '未能保存执行边界。')
+      setStatus(error instanceof Error ? error.message : '没有保存成功。')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // The switch saves at once, from what is saved, so a half-typed number elsewhere neither blocks nor rides along.
+  const saveAskBeforeGenerating = async (ask: boolean): Promise<void> => {
+    if (snapshot === null || busy !== null) return
+    setBusy('image-provider')
+    try {
+      const saved = await window.desktop.setProviderExecutionPolicy(withAskBeforeGenerating(snapshot.executionPolicy, ask))
+      publishSnapshot(saved)
+      setStatus(ask ? '已打开：Agent 每次生图前都会先问你。' : '已关闭：Agent 需要生图就直接生成；你说了「先不要生成」时仍会问。')
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '没有保存成功。')
     } finally {
       setBusy(null)
     }
@@ -301,8 +312,7 @@ export function ProviderSettingsSheet({
       const value = await window.desktop.addImageProvider()
       publishSnapshot(value)
       setExpandedProvider(value.providers.at(-1)?.id ?? null)
-      setProfileSnapshot(await window.desktop.listGenerationProfiles())
-      setStatus('已添加生图服务：选好协议、填写地址和模型并保存 Key 后就能用。')
+      setStatus('已添加生图服务：选好接口类型、填写地址和模型并保存 Key 后就能用。')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '未能添加生图服务。')
     } finally {
@@ -317,7 +327,6 @@ export function ProviderSettingsSheet({
       publishSnapshot(await window.desktop.removeImageProvider(providerId))
       setRemovingImageService(null)
       setExpandedProvider(null)
-      setProfileSnapshot(await window.desktop.listGenerationProfiles())
       setStatus('已删除这个生图服务和它的 Key；用它生成过的图片不受影响。')
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '未能删除生图服务。')
@@ -402,53 +411,51 @@ export function ProviderSettingsSheet({
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose()
     }}>
-      <section ref={modalRef} tabIndex={-1} className="provider-settings-sheet" role="dialog" aria-label="供应商设置" aria-modal="true">
+      <section ref={modalRef} tabIndex={-1} className="provider-settings-sheet" role="dialog" aria-label="设置" aria-modal="true">
         <header>
           <div>
-            <span className="settings-kicker">本地创作系统</span>
             <h1 id="provider-settings-title">设置</h1>
-            <p>语言模型与图片模型是两个可替换模块。先看当前引擎，需要时再展开协议、地址、能力与本机凭据。</p>
+            <p>先连上文字模型和生图服务，其余按需要再调。</p>
           </div>
-          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="关闭供应商设置" onClick={onClose}><X size={17} /></button>
+          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="关闭设置" onClick={onClose}><X size={17} /></button>
         </header>
         <div className="settings-layout">
           <nav className="settings-navigation" aria-label="设置分类">
-            <button type="button" className={section === 'providers' ? 'is-active' : ''} onClick={() => setSection('providers')}><Server size={15} />供应商</button>
-            <button type="button" className={section === 'agent' ? 'is-active' : ''} onClick={() => setSection('agent')}><BrainCircuit size={15} />Agent 上下文</button>
+            <button type="button" className={section === 'providers' ? 'is-active' : ''} onClick={() => setSection('providers')}><Server size={15} />服务</button>
+            <button type="button" className={section === 'preferences' ? 'is-active' : ''} onClick={() => setSection('preferences')}><SlidersHorizontal size={15} />偏好</button>
+            <button type="button" className={section === 'agent' ? 'is-active' : ''} onClick={() => setSection('agent')}><BookOpen size={15} />项目记忆</button>
             <button type="button" className={section === 'usage' ? 'is-active' : ''} onClick={() => setSection('usage')}><BarChart3 size={15} />用量</button>
-            <button type="button" className={section === 'profiles' ? 'is-active' : ''} onClick={() => setSection('profiles')}><Layers3 size={15} />生成档位</button>
             <button type="button" className={section === 'projects' ? 'is-active' : ''} onClick={() => setSection('projects')}><FolderOpen size={15} />项目与存储</button>
             <button type="button" className={section === 'appearance' ? 'is-active' : ''} onClick={() => setSection('appearance')}><Palette size={15} />外观</button>
-            <button type="button" className={section === 'privacy' ? 'is-active' : ''} onClick={() => setSection('privacy')}><ShieldCheck size={15} />隐私与高级</button>
+            <button type="button" className={section === 'advanced' ? 'is-active' : ''} onClick={() => setSection('advanced')}><Wrench size={15} />高级</button>
           </nav>
           <div className="provider-settings-list">
           {section === 'agent' && <AgentContextSettings onStatus={setStatus} />}
           {section === 'usage' && <UsageSettings />}
-          {section !== 'providers' && section !== 'agent' && section !== 'usage' && (
+          {section === 'preferences' && snapshot !== null && policyDraft !== null && (
+            <section className="settings-section-summary settings-preferences">
+              <h2>偏好</h2>
+              <label className="settings-switch-row">
+                <input aria-label="生图前先问我" type="checkbox" checked={asksBeforeGenerating(snapshot.executionPolicy)} disabled={busy !== null} onChange={(event) => void saveAskBeforeGenerating(event.currentTarget.checked)} />
+                <span>
+                  <strong>生图前先问我</strong>
+                  <small>打开时，Agent 每次生成图片前都会先问你。关掉后，Agent 需要生图就直接生成；你说了「先不要生成」时仍然会问。</small>
+                </span>
+              </label>
+              <div className="settings-field-row">
+                <label>
+                  <span><strong>每轮费用上限（元）</strong><small>按文字模型和生图服务里填的单价估算，没填单价的部分不计入。到了就暂停，可以接着做。</small></span>
+                  <input aria-label="每轮费用上限" type="number" min={0.1} max={10000} step={0.5} value={policyDraft.maxCostCnyPerTurn} onChange={(event) => {
+                    const value = Number(event.currentTarget.value)
+                    setPolicyDraft((current) => current === null ? null : { ...current, maxCostCnyPerTurn: value })
+                  }} />
+                </label>
+                <button type="button" className="settings-save" disabled={busy !== null || policyDraft.maxCostCnyPerTurn === snapshot.executionPolicy.maxCostCnyPerTurn} onClick={() => void saveExecutionPolicy()}>保存</button>
+              </div>
+            </section>
+          )}
+          {section !== 'providers' && section !== 'preferences' && section !== 'agent' && section !== 'usage' && (
             <section className="settings-section-summary">
-              {section === 'profiles' && <>
-                <span className="settings-kicker">生成档位与预算</span>
-                <h2>生成档位</h2>
-                <p>本地档用于离线预演；配置图片服务后，可按其能力选择多候选探索、单张生成和局部编辑。任务仍受项目授权和预算约束。</p>
-                <div className="profile-summary-list">
-                  {profileSnapshot?.profiles.map((entry) => (
-                    <div key={entry.profile.id} data-profile-id={entry.profile.id}>
-                      <span className="profile-setting-name">
-                        <strong>{entry.profile.label}</strong>
-                        <small>{entry.profile.simulated ? '本地离线' : entry.profile.modelId}</small>
-                      </span>
-                      <span className={`provider-state${entry.status === 'available' ? ' is-configured' : ''}`} title={entry.reason ?? undefined}>
-                        {entry.status === 'available' ? <Check size={11} /> : <KeyRound size={11} />}
-                        {entry.status === 'available'
-                          ? entry.profile.simulated
-                            ? `可用 · 本地模拟 · 实际 ¥0.00`
-                            : '可用 · 费用未知；有可靠回执时显示实际金额'
-                          : entry.reason ?? '当前配置不支持'}
-                      </span>
-                    </div>
-                  )) ?? <div><strong>正在读取档位…</strong></div>}
-                </div>
-              </>}
               {section === 'projects' && <><span className="settings-kicker">项目库</span><h2>项目与存储</h2><p>新项目无需选择路径，会自动建立唯一的 .aicanvas 项目包。更改以后位置和迁移已有项目是两个独立动作。</p><div className="storage-location-card"><FolderOpen size={17} /><span><small>当前项目库</small><strong>{runtime?.projectLibraryPath ?? '正在读取…'}</strong></span></div><div className="storage-location-actions"><button type="button" disabled={libraryBusy} onClick={() => void changeLibrary('future')}><FolderInput size={14} />只更改以后的位置</button><button type="button" disabled={libraryBusy} onClick={() => void changeLibrary('migrate')}><FolderOpen size={14} />复制并迁移现有项目</button></div><small className="storage-safety-note">迁移会逐项复制和校验，全部通过后才切换；软件不会删除原项目库。</small>{migrationSummary !== null && <div className="migration-summary" role="status">{migrationSummary}</div>}</>}
               {section === 'appearance' && <>
                 <span className="settings-kicker">光学工作室</span><h2>外观</h2>
@@ -491,9 +498,28 @@ export function ProviderSettingsSheet({
                   </div>
                 </details>
               </>}
-              {section === 'privacy' && <>
-                <span className="settings-kicker">本地与隐私</span>
-                <h2>隐私与高级</h2>
+              {section === 'advanced' && <>
+                <h2>高级</h2>
+                {snapshot !== null && policyDraft !== null && <div className="settings-job-limits" aria-label="生图任务限制">
+                  <strong>生图任务限制</strong>
+                  <small>每个生图任务最多发多少个网络请求、出几张图、预留多少钱。价格没填时，预留的钱不代表实际扣费上限。</small>
+                  <div className="settings-job-limit-fields">
+                    <label><span>请求数</span><input aria-label="每任务最大请求数" type="number" min={1} max={100} value={policyDraft.maxRequestsPerJob} onChange={(event) => {
+                      const value = Number(event.currentTarget.value)
+                      setPolicyDraft((current) => current === null ? null : { ...current, maxRequestsPerJob: value })
+                    }} /></label>
+                    <label><span>张数</span><input aria-label="每任务最大图片数" type="number" min={1} max={16} value={policyDraft.maxImagesPerJob} onChange={(event) => {
+                      const value = Number(event.currentTarget.value)
+                      setPolicyDraft((current) => current === null ? null : { ...current, maxImagesPerJob: value })
+                    }} /></label>
+                    <label><span>预留（元）</span><input aria-label="每任务预约额度" type="number" min={0} max={10000} step={1} value={policyDraft.maxCostCnyPerJob} onChange={(event) => {
+                      const value = Number(event.currentTarget.value)
+                      setPolicyDraft((current) => current === null ? null : { ...current, maxCostCnyPerJob: value })
+                    }} /></label>
+                    <button type="button" className="settings-save" disabled={busy !== null} onClick={() => void saveExecutionPolicy()}>保存</button>
+                  </div>
+                </div>}
+                <h3>隐私</h3>
                 <p>密钥由操作系统安全存储，不写入项目、界面记录或诊断内容。图片和文字只发往你保存的服务地址；作品修改保留撤销记录。</p>
                 <div className="privacy-lock-card"><ShieldCheck size={19} /><span><strong>按本机授权范围访问</strong><small>不开放任意系统目录、命令执行、凭据明文或无边界自动付费</small></span></div>
                 <div className="diagnostic-export-card">
@@ -530,40 +556,6 @@ export function ProviderSettingsSheet({
             </section>
           )}
           {section === 'providers' && <>
-          {snapshot !== null && policyDraft !== null && (
-            <aside className="provider-budget-card" aria-label="Provider 执行边界">
-              <label><span>图片任务请求数</span><input aria-label="每任务最大请求数" type="number" min={1} max={100} value={policyDraft.maxRequestsPerJob} onChange={(event) => {
-                const value = Number(event.currentTarget.value)
-                setPolicyDraft((current) => current === null ? null : { ...current, maxRequestsPerJob: value })
-              }} /></label>
-              <label><span>图片任务张数</span><input aria-label="每任务最大图片数" type="number" min={1} max={16} value={policyDraft.maxImagesPerJob} onChange={(event) => {
-                const value = Number(event.currentTarget.value)
-                setPolicyDraft((current) => current === null ? null : { ...current, maxImagesPerJob: value })
-              }} /></label>
-              <label><span>预约额度（元）</span><input aria-label="每任务预约额度" type="number" min={0} max={10000} step={1} value={policyDraft.maxCostCnyPerJob} onChange={(event) => {
-                const value = Number(event.currentTarget.value)
-                setPolicyDraft((current) => current === null ? null : { ...current, maxCostCnyPerJob: value })
-              }} /></label>
-              <div className="provider-policy-actions">
-                <label className="provider-auto-generation-policy"><input aria-label="允许 Agent 自动发起图片任务" type="checkbox" checked={policyDraft.autoGenerate} onChange={(event) => {
-                  const checked = event.currentTarget.checked
-                  setPolicyDraft((current) => current === null ? null : { ...current, autoGenerate: checked })
-                }} /><span><strong>允许自动图片任务</strong><small>这是全局权限上限；每一轮是否继续生成，由创作输入单独决定。</small></span></label>
-                <select aria-label="真实任务确认方式" value={policyDraft.approvalMode} onChange={(event) => {
-                  const approvalMode = event.currentTarget.value as ProviderExecutionPolicy['approvalMode']
-                  setPolicyDraft((current) => current === null ? null : { ...current, approvalMode })
-                }}><option value="confirm_each">逐次确认</option><option value="session">本次会话授权</option></select>
-                <label className="provider-agent-steps" title="按文字模型和生图服务里填的单价估算；到了就暂停，可以接着做。">每轮费用上限（元）
-                  <input aria-label="Agent 每轮费用上限" type="number" min={0.1} max={10000} step={0.5} value={policyDraft.maxCostCnyPerTurn} onChange={(event) => {
-                    const value = Number(event.currentTarget.value)
-                    setPolicyDraft((current) => current === null ? null : { ...current, maxCostCnyPerTurn: value })
-                  }} />
-                </label>
-                <button type="button" disabled={busy !== null} onClick={() => void saveExecutionPolicy()}>保存执行边界</button>
-              </div>
-              <p>{budgetStatus({ ...snapshot, executionPolicy: policyDraft })}</p>
-            </aside>
-          )}
           {snapshot?.providers.map((provider, index) => {
             const draft = drafts[provider.id]
             if (draft === undefined) return null
@@ -576,9 +568,9 @@ export function ProviderSettingsSheet({
                 <div className="provider-setting-copy">
                   <span className="provider-slot-mark" aria-hidden="true">{provider.kind === 'llm' ? <BrainCircuit size={17} /> : <ImageIcon size={17} />}</span>
                   <div>
-                    <span className="provider-slot-label">{provider.kind === 'llm' ? '语言模型' : '图片模型'}{isDefaultImage && imageServices > 1 && <em className="provider-default-mark">默认</em>}</span>
+                    <span className="provider-slot-label">{provider.kind === 'llm' ? '文字模型' : '生图服务'}{isDefaultImage && imageServices > 1 && <em className="provider-default-mark">默认</em>}</span>
                     <strong>{draft.label}</strong>
-                    <small>{draft.kind === 'llm' ? `${LLM_PROTOCOL_LABELS[draft.protocol]} · ${LLM_REASONING_LABELS[draft.reasoningEffort]}思考` : `${IMAGE_PROTOCOL_LABELS[draft.protocol]} · 能力由协议与下方声明共同决定`}</small>
+                    <small>{draft.kind === 'llm' ? `${LLM_PROTOCOL_LABELS[draft.protocol]} · ${LLM_REASONING_LABELS[draft.reasoningEffort]}思考` : IMAGE_PROTOCOL_LABELS[draft.protocol]}</small>
                   </div>
                   <span className="provider-model-summary">{draft.defaultModel || '未指定模型'}</span>
                   <div className="provider-summary-actions">
@@ -596,7 +588,7 @@ export function ProviderSettingsSheet({
                     const value = event.currentTarget.value
                     updateDraft(provider.id, (current) => ({ ...current, label: value }))
                   }} /></label>
-                  {draft.kind === 'llm' && <label><span>调用协议</span><select aria-label="LLM Provider 调用协议" value={draft.protocol} onChange={(event) => {
+                  {draft.kind === 'llm' && <label><span>接口类型</span><select aria-label="LLM Provider 调用协议" value={draft.protocol} onChange={(event) => {
                     const protocol = event.currentTarget.value as LlmProtocol
                     updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, protocol } : current)
                   }}>
@@ -605,7 +597,7 @@ export function ProviderSettingsSheet({
                     <option value="openai-chat-completions">Chat Completions 兼容</option>
                     <option value="anthropic-messages">Anthropic Messages 兼容</option>
                   </select></label>}
-                  {draft.kind === 'image' && <label><span>调用协议</span><select aria-label="Image Provider 调用协议" value={draft.protocol} onChange={(event) => {
+                  {draft.kind === 'image' && <label><span>接口类型</span><select aria-label="Image Provider 调用协议" value={draft.protocol} onChange={(event) => {
                     const protocol = event.currentTarget.value as ImageProtocol
                     updateDraft(provider.id, (current) => current.kind === 'image' ? {
                       ...current,
@@ -616,12 +608,12 @@ export function ProviderSettingsSheet({
                       ])) as typeof current.capabilities
                     } : current)
                   }}>
-                    <option value="unconfigured">请选择协议（不会联网）</option>
+                    <option value="unconfigured">请选择接口类型（不会联网）</option>
                     <option value="ark-seedream">火山方舟 Seedream</option>
                     <option value="openai-images">OpenAI Images 兼容</option>
                     <option value="task-images">异步任务式 Images</option>
                   </select></label>}
-                  <label className="provider-endpoint"><span>Base URL（也支持完整接口地址）</span><input aria-label={`${prefix} API 地址`} placeholder="https://…/v1" value={draft.baseUrl} onChange={(event) => {
+                  <label className="provider-endpoint"><span>接口地址（也可以填完整地址）</span><input aria-label={`${prefix} API 地址`} placeholder="https://…/v1" value={draft.baseUrl} onChange={(event) => {
                     const value = event.currentTarget.value
                     updateDraft(provider.id, (current) => ({ ...current, baseUrl: value }))
                   }} /></label>
@@ -631,28 +623,9 @@ export function ProviderSettingsSheet({
                     const hint = describeImageModel(draft.protocol, draft.defaultModel)
                     return hint === null ? null : <p className="provider-model-hint" data-testid="image-model-hint"><strong>这个模型</strong>{hint}</p>
                   })()}
-                  <label><span>默认模型</span><input aria-label={`${prefix} 默认模型`} placeholder="未指定" value={draft.defaultModel} onChange={(event) => {
+                  <label><span>模型</span><input aria-label={`${prefix} 默认模型`} placeholder="未指定" value={draft.defaultModel} onChange={(event) => {
                     const value = event.currentTarget.value
                     updateDraft(provider.id, (current) => ({ ...current, defaultModel: value }))
-                  }} /></label>
-                  {draft.kind === 'llm' && <label><span>思考强度</span><select aria-label="LLM Provider 思考强度" value={draft.reasoningEffort} onChange={(event) => {
-                    const reasoningEffort = event.currentTarget.value as LlmReasoningEffort
-                    updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, reasoningEffort } : current)
-                  }}>{Object.entries(LLM_REASONING_LABELS)
-                    // The agent always thinks; an older saved "off" still shows so it can be changed.
-                    .filter(([value]) => value !== 'none' || draft.reasoningEffort === 'none')
-                    .map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
-                  {draft.kind === 'llm' && <label><span>图像理解细节</span><select aria-label="LLM Provider 图像细节" disabled={!draft.capabilities.vision} value={draft.imageDetail} onChange={(event) => {
-                    const imageDetail = event.currentTarget.value as LlmImageDetail
-                    updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, imageDetail } : current)
-                  }}>{Object.entries(LLM_IMAGE_DETAIL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
-                  {draft.kind === 'llm' && <label><span>输出上限 tokens</span><input aria-label="LLM Provider 输出上限" type="number" min={256} max={131072} step={256} value={draft.maxOutputTokens} onChange={(event) => {
-                    const maxOutputTokens = Number(event.currentTarget.value)
-                    updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, maxOutputTokens } : current)
-                  }} /></label>}
-                  <label><span>{draft.kind === 'image' ? '图片任务总时限（秒）' : '单次请求上限（秒）'}</span><input aria-label={`${prefix} 超时`} type="number" min={1} max={900} step={1} value={draft.timeoutMs / 1000} onChange={(event) => {
-                    const value = Number(event.currentTarget.value) * 1000
-                    updateDraft(provider.id, (current) => ({ ...current, timeoutMs: value }))
                   }} /></label>
                   {draft.kind === 'image' && <label><span>每张价格（元，可选）</span><input aria-label={`${prefix} 每张价格`} type="number" min={0} max={10000} step={0.01} placeholder="未设置则费用显示为未知" value={draft.pricePerImageCny ?? ''} onChange={(event) => {
                     const raw = event.currentTarget.value
@@ -660,20 +633,56 @@ export function ProviderSettingsSheet({
                   }} /></label>}
                 </div>
 
-                <p className="provider-time-policy" data-testid={`${provider.id}-effective-timeout`}>已保存：{provider.timeoutMs / 1000} 秒。{draft.kind === 'image'
+                {draft.kind === 'llm' && <details className="provider-transport-advanced" data-testid="llm-pricing">
+                  <summary><span>价格</span><small>{draft.pricing === null ? '未设置 · 回执只显示用量' : '用于估算每轮费用'}</small></summary>
+                  <div className="provider-public-grid">
+                    {LLM_PRICE_FIELDS.map(([field, label]) => <label key={field}><span>{label}（元 / 百万 tokens）</span><input aria-label={`LLM Provider ${label}价格`} type="number" min={0} max={10000} step={0.01}
+                      placeholder={field === 'cachedInputPerMillionCny' ? '同输入' : '未设置'} value={draft.pricing?.[field] ?? ''} onChange={(event) => {
+                        const raw = event.currentTarget.value
+                        updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: withLlmPrice(current.pricing, field, raw === '' ? null : Number(raw)) } : current)
+                      }} /></label>)}
+                  </div>
+                  <p className="provider-transport-note">按厂商价目填写。回执里的金额是按用量算的估算，以厂商账单为准。{draft.pricing !== null && <button type="button" onClick={() => {
+                    updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: null } : current)
+                  }}>清除价格</button>}</p>
+                </details>}
+
+                <details className="provider-transport-advanced provider-advanced" data-testid={`${provider.id}-advanced`}>
+                  <summary><span>高级</span><small>思考、超时、传输与能力；一般不用改</small></summary>
+                  <div className="provider-public-grid">
+                    {draft.kind === 'llm' && <label><span>思考强度</span><select aria-label="LLM Provider 思考强度" value={draft.reasoningEffort} onChange={(event) => {
+                      const reasoningEffort = event.currentTarget.value as LlmReasoningEffort
+                      updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, reasoningEffort } : current)
+                    }}>{Object.entries(LLM_REASONING_LABELS)
+                      // The agent always thinks; an older saved "off" still shows so it can be changed.
+                      .filter(([value]) => value !== 'none' || draft.reasoningEffort === 'none')
+                      .map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                    {draft.kind === 'llm' && <label><span>看图细节</span><select aria-label="LLM Provider 图像细节" disabled={!draft.capabilities.vision} value={draft.imageDetail} onChange={(event) => {
+                      const imageDetail = event.currentTarget.value as LlmImageDetail
+                      updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, imageDetail } : current)
+                    }}>{Object.entries(LLM_IMAGE_DETAIL_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                    {draft.kind === 'llm' && <label><span>输出长度上限</span><input aria-label="LLM Provider 输出上限" type="number" min={256} max={131072} step={256} value={draft.maxOutputTokens} onChange={(event) => {
+                      const maxOutputTokens = Number(event.currentTarget.value)
+                      updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, maxOutputTokens } : current)
+                    }} /></label>}
+                    <label><span>{draft.kind === 'image' ? '生图任务总时限（秒）' : '单次请求上限（秒）'}</span><input aria-label={`${prefix} 超时`} type="number" min={1} max={900} step={1} value={draft.timeoutMs / 1000} onChange={(event) => {
+                      const value = Number(event.currentTarget.value) * 1000
+                      updateDraft(provider.id, (current) => ({ ...current, timeoutMs: value }))
+                    }} /></label>
+                  </div>
+                  <p className="provider-time-policy" data-testid={`${provider.id}-effective-timeout`}>已保存：{provider.timeoutMs / 1000} 秒。{draft.kind === 'image'
                   ? '自任务首次开始起计时，包含准备、轮询和下载，排队不计入。单次网络请求也受此上限及任务剩余时间约束。重启保留原截止时间；新配置只影响新任务。'
                   : '每次请求自开始后计时；连接、首个响应和响应空闲还有各自上限。本轮剩余时间更短时会先停止请求。新配置不延长已经开始的 Agent 轮次。'}</p>
 
-                {draft.kind === 'llm' && <details className="provider-transport-advanced">
-                  <summary><span>传输与分层超时</span><small>高级 · 保存前严格校验</small></summary>
+                {draft.kind === 'llm' && <>
                   <div className="provider-public-grid">
                     <label><span>响应方式</span><select aria-label="LLM Provider 响应方式" value={draft.transport.mode} onChange={(event) => {
                       const mode = event.currentTarget.value as LlmTransportMode
                       updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, transport: { ...current.transport, mode } } : current)
                     }}>
                       <option value="auto">自动（按已保存能力）</option>
-                      <option value="stream">流式 SSE</option>
-                      <option value="buffered">完整 JSON 响应</option>
+                      <option value="stream">流式</option>
+                      <option value="buffered">一次性返回</option>
                     </select></label>
                     {([
                       ['connectTimeoutMs', '连接上限（秒）', 60_000],
@@ -710,25 +719,10 @@ export function ProviderSettingsSheet({
                     ].some((value) => value > draft.timeoutMs)
                       ? '局部超时不能大于单次请求总上限；请修改后再保存。'
                       : draft.transport.mode === 'auto'
-                        ? `能力声明为${draft.capabilities.streaming ? '支持' : '不支持'}流式，因此会使用${draft.capabilities.streaming ? '流式 SSE' : '完整 JSON 响应'}。失败后不会自动切换并重发 POST。`
+                        ? `能力声明为${draft.capabilities.streaming ? '支持' : '不支持'}流式，因此会使用${draft.capabilities.streaming ? '流式' : '一次性返回'}。失败后不会自动切换并重发 POST。`
                         : '响应方式在发送前唯一确定；失败后不会自动换协议或重复 POST。'}
                   </p>
-                </details>}
-
-                {draft.kind === 'llm' && <details className="provider-transport-advanced" data-testid="llm-pricing">
-                  <summary><span>价格</span><small>{draft.pricing === null ? '未设置 · 回执只显示用量' : '用于估算每轮费用'}</small></summary>
-                  <div className="provider-public-grid">
-                    {LLM_PRICE_FIELDS.map(([field, label]) => <label key={field}><span>{label}（元 / 百万 tokens）</span><input aria-label={`LLM Provider ${label}价格`} type="number" min={0} max={10000} step={0.01}
-                      placeholder={field === 'cachedInputPerMillionCny' ? '同输入' : '未设置'} value={draft.pricing?.[field] ?? ''} onChange={(event) => {
-                        const raw = event.currentTarget.value
-                        updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: withLlmPrice(current.pricing, field, raw === '' ? null : Number(raw)) } : current)
-                      }} /></label>)}
-                  </div>
-                  <p className="provider-transport-note">按供应商价目填写。回执里的金额是按 token 用量算的估算，以供应商账单为准。{draft.pricing !== null && <button type="button" onClick={() => {
-                    updateDraft(provider.id, (current) => current.kind === 'llm' ? { ...current, pricing: null } : current)
-                  }}>清除价格</button>}</p>
-                </details>}
-
+                </>}
                 <div className="provider-capabilities" aria-label={`${prefix} 能力`}>
                   {draft.kind === 'llm' ? <>
                     <label><input type="checkbox" checked={draft.capabilities.streaming} onChange={(event) => {
@@ -758,8 +752,13 @@ export function ProviderSettingsSheet({
                     }} />{label}</label>
                     })}
                   </>}
+                </div>
+
+                </details>
+
+                <div className="provider-config-actions">
                   <button type="button" onClick={() => validateLocal(provider.id)}>本地检查</button>
-                  <button type="button" className="settings-save" disabled={busy !== null} onClick={() => void saveConfig(provider.id)}>保存公开配置</button>
+                  <button type="button" className="settings-save" disabled={busy !== null} onClick={() => void saveConfig(provider.id)}>保存</button>
                 </div>
 
                 <div className="provider-secret-controls">
@@ -783,7 +782,7 @@ export function ProviderSettingsSheet({
                   </button>
                   {provider.configured && <button type="button" className="settings-delete" aria-label={`删除 ${provider.label} 凭据`} disabled={busy !== null} onClick={() => void removeSecret(provider.id)}><Trash2 size={14} /></button>}
                 </div>
-                <small className="provider-secret-note">更改公开配置不会读取、清除或迁移现有 Key；切换供应商时请在此主动替换凭据。思考强度与图像细节只有在目标协议支持时才会生效。</small>
+                <small className="provider-secret-note">Key 由系统加密保存在本机。改上面的设置不会动已保存的 Key；换厂商时请在这里换 Key。</small>
                 {draft.kind === 'llm' && (() => {
                   const saved = providerPublicConfigSchema.parse(provider)
                   const draftSaved = JSON.stringify(draft) === JSON.stringify(saved)

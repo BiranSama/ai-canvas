@@ -1,6 +1,30 @@
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { writeFile } from 'node:fs/promises'
 
+/**
+ * Opens the editor the way a person does: 对话, then the canvas's 编辑 button.
+ * The header lists 编辑 only while it is open.
+ */
+export async function openEditor(page: Page) {
+  const views = page.getByRole('navigation', { name: '工作视图' })
+  const editor = views.getByRole('button', { name: '编辑', exact: true })
+  if (await editor.count() === 0 || await editor.getAttribute('aria-current') !== 'page') {
+    await views.getByRole('button', { name: '对话', exact: true }).evaluate((button: { click(): void }) => button.click())
+    await page.locator('.preview-actions .open-editor').evaluate((button: { click(): void }) => button.click())
+  }
+  await expect(editor).toHaveAttribute('aria-current', 'page')
+  // The editor's header and canvas attach their key handlers after they paint; let two frames pass.
+  await page.evaluate('new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))')
+}
+
+/** 出图 stays open after 放入画布; this goes on to the editor from the notice it shows. */
+export async function editPlacedResult(page: Page) {
+  const placed = page.getByTestId('generation-placed')
+  await expect(placed).toBeVisible({ timeout: 10_000 })
+  await placed.getByRole('button', { name: '去编辑', exact: true }).evaluate((button: { click(): void }) => button.click())
+  await expect(page.getByRole('navigation', { name: '工作视图' }).getByRole('button', { name: '编辑', exact: true })).toHaveAttribute('aria-current', 'page')
+}
+
 /** Follow the current disclosure flow before interacting with request options. */
 export async function openGenerationOptions(page: Page) {
   const parameters = page.locator('.generation-compact-summary')

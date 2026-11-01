@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test('Direct Canvas supports inline editing, viewport conventions, clipboard and focus mode offline', async ({ browserName }, testInfo) => {
   void browserName
@@ -15,6 +16,7 @@ test('Direct Canvas supports inline editing, viewport conventions, clipboard and
   })
   try {
     const window = await app.firstWindow()
+    await openEditor(window)
     await window.bringToFront()
     await window.setViewportSize({ width: 1280, height: 800 })
     const stage = window.getByTestId('canvas-stage')
@@ -487,6 +489,7 @@ test('header actions and project-card actions stay separate and More opens a rea
     await window.setViewportSize(viewports[0]!)
     await window.locator('.new-project-main').click({ force: true })
     await expect(window.getByRole('button', { name: '项目菜单：未命名创作' })).toBeVisible({ timeout: 10_000 })
+    await openEditor(window)
     const settings = window.getByTestId('open-settings')
     const exportControl = window.locator('.export-control')
     for (const viewport of viewports) {
@@ -499,8 +502,8 @@ test('header actions and project-card actions stay separate and More opens a rea
     }
     await window.setViewportSize(viewports[0]!)
     await settings.evaluate((button: { click(): void }) => button.click())
-    await expect(window.getByRole('dialog', { name: '供应商设置' })).toBeVisible()
-    await window.getByRole('button', { name: '关闭供应商设置' }).click()
+    await expect(window.getByRole('dialog', { name: '设置', exact: true })).toBeVisible()
+    await window.getByRole('button', { name: '关闭设置' }).click()
 
     await window.getByRole('button', { name: '返回项目库' }).click()
     const favorite = window.getByRole('button', { name: /收藏项目：未命名创作/ })

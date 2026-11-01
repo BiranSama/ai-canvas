@@ -171,4 +171,42 @@ describe('AH1 S7 generation result actions', () => {
     expect(element.effects?.shadow).toEqual(shadow)
     await runtime.close()
   }, 30_000)
+
+  it('puts a result placed by hand where the person points, blended like the Agent\'s, and in the middle when that place cannot take it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ai-canvas-manual-place-'))
+    roots.push(root)
+    const runtime = await GenerationRuntime.create(root)
+    const fixture = makeAllElementTypesScene().elements
+    const backdrop = { ...fixture.find((element) => element.id === IDS.shape)!, zIndex: 0 }
+    const slot = fixture.find((element) => element.id === IDS.placeholder)!
+    const placeholder = { ...slot, groupId: null, zIndex: 1 }
+    const locked = { ...placeholder, id: IDS.group, locked: true, zIndex: 2 }
+    const laid = await runtime.executeSceneCommands({ expectedSceneRevision: runtime.getWorkspaceBootstrap().scene.revision, batch: {
+      id: randomUUID(), origin: 'user', summary: '布局', commands: [
+        { kind: 'element.add', element: backdrop }, { kind: 'element.add', element: placeholder }, { kind: 'element.add', element: locked }
+      ]
+    } })
+    expect(laid.ok).toBe(true)
+    const completed = await waitForCompleted(runtime, (await runtime.enqueue(request())).id)
+    const placed = await runtime.placeGenerationResult({ resultId: completed.results[0]!.id, placementId: randomUUID(), origin: 'user', preferredTargetId: IDS.placeholder })
+    expect(placed).toMatchObject({ elementId: IDS.placeholder, fit: 'feather' })
+    const element = runtime.getWorkspaceBootstrap().scene.elements.find((candidate) => candidate.id === IDS.placeholder)!
+    expect(element).toMatchObject({ type: 'image', transform: placeholder.transform, effects: expect.objectContaining({ feather: SUBJECT_FEATHER }) })
+
+    // A result with a placement of its own, such as a local edit, does not go looking for a place.
+    const edited = await waitForCompleted(runtime, (await runtime.enqueue({ ...request(), prompt: 'An edited picture', parameters: { mode: 'local-edit' } })).id)
+    const editPlacement = randomUUID()
+    const editPlaced = await runtime.placeGenerationResult({ resultId: edited.results[0]!.id, placementId: editPlacement, origin: 'user', preferredTargetId: IDS.placeholder })
+    expect(editPlaced).toMatchObject({ elementId: editPlacement })
+    expect(editPlaced.fit).toBeUndefined()
+
+    // A locked place is left alone: the picture goes in the middle, as before.
+    const second = await waitForCompleted(runtime, (await runtime.enqueue({ ...request(), prompt: 'Another object for a locked frame' })).id)
+    const placementId = randomUUID()
+    const free = await runtime.placeGenerationResult({ resultId: second.results[0]!.id, placementId, origin: 'user', preferredTargetId: IDS.group })
+    expect(free).toMatchObject({ elementId: placementId })
+    expect(free.fit).toBeUndefined()
+    expect(runtime.getWorkspaceBootstrap().scene.elements.find((candidate) => candidate.id === IDS.group)).toMatchObject({ type: 'placeholder', locked: true })
+    await runtime.close()
+  }, 30_000)
 })

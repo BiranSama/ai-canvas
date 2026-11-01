@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { openEditor } from '../helpers/workbench-ui'
 
 test.setTimeout(65000)
 let app: ElectronApplication
@@ -25,6 +26,7 @@ test.afterEach(async () => { if (app?.windows().length) { await network(); await
 test('reviews the real canvas before submission and continues only the selected image result', async () => {
   const root = await mkdtemp(join(tmpdir(), 'ref-ui-'))
   await launch(root); await page.locator('.new-project-main').click()
+  await openEditor(page)
   await page.getByRole('button', { name: '形状', exact: true }).click()
   const initial = await bootstrap()
   await page.getByRole('button', { name: '生成画布', exact: true }).click()
@@ -59,7 +61,7 @@ test('reviews the real canvas before submission and continues only the selected 
 test('keeps a changed canvas reference stale until refreshed and persists a deliberate text-only choice', async () => {
   const root = await mkdtemp(join(tmpdir(), 'stale-ref-ui-'))
   await launch(root); await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   const reference = page.getByTestId('generation-reference-control')
   await expect(reference).toContainText('仅使用文字要求')
   await expect(reference.getByRole('radio')).toHaveCount(0)
@@ -67,10 +69,10 @@ test('keeps a changed canvas reference stale until refreshed and persists a deli
   await reference.getByRole('button', { name: '当前画布', exact: true }).click()
   const before = await bootstrap()
   await expect(reference).toContainText(`版本 ${before.scene.revision}`)
-  await page.getByRole('button', { name: '画布', exact: true }).click()
+  await openEditor(page)
   await page.getByRole('button', { name: '形状', exact: true }).click()
   await expect.poll(async () => (await bootstrap()).scene.revision).toBeGreaterThan(before.scene.revision)
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   await expect(reference).toContainText('画布已修改')
   await expect(page.getByTestId('generation-submit')).toBeDisabled()
   await reference.getByRole('button', { name: '刷新参考预览', exact: true }).click()
@@ -92,7 +94,7 @@ test('imports exactly the selected reference image without placing it on the can
   const file = join(root, 'chosen.png')
   await sharp({ create: { width: 180, height: 240, channels: 4, background: '#b8bfaa' } }).png().toFile(file)
   await launch(join(root, 'userData')); await page.locator('.new-project-main').click()
-  await page.getByRole('button', { name: '生成', exact: true }).click()
+  await page.getByRole('button', { name: '出图', exact: true }).click()
   const before = await bootstrap()
   const reference = page.getByTestId('generation-reference-control')
   const chooser = page.waitForEvent('filechooser')

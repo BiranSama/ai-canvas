@@ -85,15 +85,19 @@ test('persistent Main loop publishes replayable events and advances queue_next w
         'interrupted', 'completed', 'completed_with_notes', 'needs_user_review', 'blocked',
         'budget_limited', 'usage_limited', 'failed', 'cancelled'
       ])
+      // A turn is marked done before its last events are written; wait for both assessments too.
+      const assessed = (await renderer.desktop.replayAgentEvents(0, 10_000)).filter((event) => event.type === 'turn.assessed').length
       return {
         activeTurnId: snapshot.thread.activeTurnId,
         terminal: snapshot.turns.length === 2 && snapshot.turns.every((turn) => terminal.has(turn.status)),
-        queue: snapshot.queue.map((entry) => entry.status)
+        queue: snapshot.queue.map((entry) => entry.status),
+        assessed
       }
     }), { timeout: 15_000 }).toEqual({
       activeTurnId: null,
       terminal: true,
-      queue: ['completed']
+      queue: ['completed'],
+      assessed: 2
     })
 
     const evidence = await launched.window.evaluate(async () => {

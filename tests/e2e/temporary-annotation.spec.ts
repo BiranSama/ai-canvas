@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { DesktopApi } from '../../src/shared/desktop-api'
+import { editPlacedResult } from '../helpers/workbench-ui'
 
 test('AC-R2-06 keeps one-turn annotation transient, clears the next turn, and explicitly saves in one undo', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-annotation-'))
@@ -124,11 +125,12 @@ test('AC-R2-06 retains a failed edit annotation and retries the exact request sa
         return original(event, input)
       })
     })
-    await window.getByRole('button', { name: '生成', exact: true }).evaluate((button) => button.click())
+    await window.getByRole('button', { name: '出图', exact: true }).evaluate((button) => button.click())
     await window.getByTestId('generation-prompt').fill('Source image for transient annotation retry')
     await window.getByTestId('generation-submit').click()
     await expect(window.getByTestId('generation-result')).toHaveCount(1, { timeout: 15_000 })
     await window.getByTestId('insert-generation-result').evaluate((button) => button.click())
+    await editPlacedResult(window)
     await expect.poll(async () => window.evaluate(async () => {
       const api = (globalThis as typeof globalThis & { readonly desktop: DesktopApi }).desktop
       return (await api.getWorkspaceBootstrap()).scene.elements.some((element) => element.type === 'image')

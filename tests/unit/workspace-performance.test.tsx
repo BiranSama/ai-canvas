@@ -19,6 +19,7 @@ describe('100 element workspace fixture', () => {
     const scene = createHundredElementScene()
     setWorkspaceSceneClientForTests(createLocalWorkspaceSceneClient(scene))
     resetWorkspace(scene)
+    useWorkspaceStore.getState().setActiveView('canvas')
     Object.defineProperty(window, 'desktop', {
       configurable: true,
       value: {
@@ -44,6 +45,7 @@ describe('100 element workspace fixture', () => {
   afterEach(() => {
     setWorkspaceSceneClientForTests(null)
     resetWorkspace()
+    useWorkspaceStore.getState().setActiveView('canvas')
   })
 
   it('renders and edits a 100 element layer projection within the local projection smoke budget', async () => {

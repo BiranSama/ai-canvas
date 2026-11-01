@@ -105,10 +105,10 @@ const TOOL_DISPLAY: Readonly<Record<string, ToolDisplayInfo>> = {
   'result.place_on_canvas': { label: '将生成结果放入画布', categoryLabel: '结果' },
   scene_batch: { label: '批量更新画布', categoryLabel: '画布' },
   read_scene: { label: '读取画布状态', categoryLabel: '画布' },
-  generation: { label: '创建图片生成任务', categoryLabel: '图片任务' },
-  canvas_generation: { label: '创建画布图片任务', categoryLabel: '图片任务' },
-  canvas_edit: { label: '按标注修改图片', categoryLabel: '图片任务' },
-  cancel_generation: { label: '停止图片任务', categoryLabel: '图片任务' },
+  generation: { label: '创建图片生成任务', categoryLabel: '生图任务' },
+  canvas_generation: { label: '创建画布生图任务', categoryLabel: '生图任务' },
+  canvas_edit: { label: '按标注修改图片', categoryLabel: '生图任务' },
+  cancel_generation: { label: '停止生图任务', categoryLabel: '生图任务' },
   memory_candidate: { label: '提出项目记忆候选', categoryLabel: '项目记忆' },
   directive_create: { label: '写入已确认的项目规则', categoryLabel: '项目规则' },
   place_generation_result: { label: '将生成结果放入画布', categoryLabel: '结果' }
@@ -177,12 +177,12 @@ function supplementalActivityStages(activities: readonly AgentActivity[]): Agent
 
 function providerEventStage(event: AgentEvent, payload: AgentProviderAttemptEventV1): AgentExecutionStage {
   const copy = {
-    reserved: ['检查模型与工具', '本轮模型请求已在 Main 中预留；尚未连接供应商。'],
+    reserved: ['检查模型与工具', '本轮模型请求已经预留，还没有连上文字模型。'],
     connecting: ['连接文字模型', '正在连接已配置的文字模型；尚未收到响应。'],
     headers: ['等待首个响应', '模型响应已建立，正在等待第一项可验证内容。'],
     first_event: ['接收创作方案', '已收到第一项合法模型事件；参数完整前不会执行。'],
     receiving: ['接收创作方案', '正在接收结构化画布操作；尚未把未完成参数交给工具。'],
-    completed: ['创作方案接收完成', '供应商已明确完成本次响应，正在进入本地校验。'],
+    completed: ['创作方案接收完成', '文字模型已经答完，正在本地检查。'],
     failed: ['文字模型请求未完成', '请求已停在明确失败节点；应用没有自动提交第二个 POST。'],
     cancelled: ['文字模型请求已停止', '当前请求已经停止，未开始的操作不会继续。']
   } as const
@@ -314,7 +314,7 @@ function outcomeFor(call: AgentItem, results: readonly AgentItem[]): { readonly 
 function scopeFor(outcome: Record<string, unknown> | null): string | null {
   const affected = Array.isArray(outcome?.affectedElementIds) ? outcome.affectedElementIds.length : 0
   if (affected > 0) return `${affected} 个元素`
-  if (typeof outcome?.jobId === 'string' && outcome.jobId.length > 0) return '1 个图片任务'
+  if (typeof outcome?.jobId === 'string' && outcome.jobId.length > 0) return '1 个生图任务'
   if (typeof outcome?.batchId === 'string' && outcome.batchId.length > 0) return '当前作品'
   return null
 }
@@ -328,7 +328,7 @@ function toolStage(call: AgentItem, results: readonly AgentItem[]): AgentExecuti
   const affected = Array.isArray(outcome?.affectedElementIds) ? outcome.affectedElementIds.length : 0
   const detail = finalStatus === 'completed'
     ? typeof outcome?.jobId === 'string' && outcome.jobId.length > 0
-      ? '图片任务已创建并进入可追溯队列。'
+      ? '生图任务已创建并进入可追溯队列。'
       : affected > 0
         ? `修改已写入 ${affected} 个元素。`
         : typeof outcome?.batchId === 'string' && outcome.batchId.length > 0
@@ -484,9 +484,9 @@ function generationStage(item: AgentItem): AgentExecutionStage {
     id: `generation-${item.id}`,
     kind: 'generation',
     state: statusState(item.status),
-    label: item.status === 'waiting' ? '等待图片任务' : item.status === 'failed' ? '图片任务未完成' : '图片任务已返回',
-    detail: item.status === 'waiting' ? '图片任务已创建，正在等待真实结果。' : jobStatus.length > 0 ? `任务状态：${jobStatus}` : '图片任务状态已记录。',
-    categoryLabel: '图片任务',
+    label: item.status === 'waiting' ? '等待生图任务' : item.status === 'failed' ? '生图任务未完成' : '生图任务已返回',
+    detail: item.status === 'waiting' ? '生图任务已创建，正在等待真实结果。' : jobStatus.length > 0 ? `任务状态：${jobStatus}` : '生图任务状态已记录。',
+    categoryLabel: '生图任务',
     scopeLabel: '1 个任务',
     durationMs: null,
     sourceItemId: item.id
@@ -592,7 +592,7 @@ function flowCopy(
   if (turn.status === 'building_context') return { headline: '正在准备作品上下文', summary: '只整理这次创作需要的画布与项目信息。', statusLabel: '准备中' }
   if (turn.status === 'running') return { headline: '正在处理当前作品', summary: '工具调用与画布变化会在这里逐项出现。', statusLabel: '执行中' }
   if (turn.status === 'waiting_decision') return { headline: '需要你的决定', summary: '回答下面的问题，Agent 会接着做；你不答它不会往下走。', statusLabel: '等待决定' }
-  if (turn.status === 'waiting_job') return { headline: '正在等待图片结果', summary: '图片任务已经创建；不会重复提交未知请求。', statusLabel: '等待图片' }
+  if (turn.status === 'waiting_job') return { headline: '正在等待图片结果', summary: '生图任务已经创建；不会重复提交未知请求。', statusLabel: '等待图片' }
   if (COMPLETED_TURN_STATUSES.has(turn.status)) {
     return {
       headline: turn.status === 'needs_user_review' ? '结果等待检查' : '本轮已完成',
