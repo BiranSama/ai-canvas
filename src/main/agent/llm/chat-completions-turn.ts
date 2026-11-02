@@ -146,7 +146,7 @@ export class ChatCompletionsTurnProtocol implements LlmTurnProtocol {
 
   #messages(messages: readonly LlmTranscriptMessage[]): readonly Record<string, unknown>[] {
     const loopStart = currentLoopStart(messages)
-    const target = { wire: this.wire, dialectId: this.dialect.id, model: this.model }
+    const target = { wire: this.wire, dialectId: this.dialect.id, model: this.model, origin: this.#baseUrl }
     return messages.flatMap((message, index): Record<string, unknown>[] => {
       if (message.role === 'user') {
         const onlyText = message.parts.every((part) => part.type === 'text')
@@ -224,7 +224,7 @@ export class ChatCompletionsTurnProtocol implements LlmTurnProtocol {
     return {
       responseId: parsed.id ?? null,
       parts,
-      native: { wire: this.wire, dialectId: this.dialect.id, model: this.model, payload: replay },
+      native: { wire: this.wire, dialectId: this.dialect.id, model: this.model, origin: this.#baseUrl, payload: replay },
       stopReason: stopReasonFor(choice.finish_reason, toolCalls.length > 0, (message.refusal ?? '') !== ''),
       usage: chatUsage(parsed.usage)
     }

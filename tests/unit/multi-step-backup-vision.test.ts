@@ -146,3 +146,21 @@ it('keeps the priced cost for the cost cap when the vision model has no price', 
   expect(trace.costCny).toBeNull()
   expect(trace.pricedCostCny).toBeCloseTo(0.022, 6)
 })
+
+it('counts a look the vision model failed, and skips one once the spending cap is reached', async () => {
+  const failing = model('vision-model', () => { throw new ArkHttpError('PROVIDER_UPSTREAM_ERROR', '看图服务出错', 503, 'application/json') }, { sees: true })
+  const looks = model('main-model', (_body, count) => count === 1
+    ? { id: 'm1', status: 'completed', output: [{ type: 'function_call', id: 'fc_1', call_id: 'look1', name: 'look', arguments: '{}', status: 'completed' }], usage }
+    : { id: 'm2', status: 'completed', output: reply('好了。'), usage }, { vision: failing })
+  const counted = await planner(looks, true).next(input(), new AbortController().signal)
+  expect(counted.modelTurns).toBe(3)
+
+  const unused = model('vision-model', () => ({ id: 'v1', status: 'completed', output: reply('不该到这里'), usage }), { sees: true })
+  const priced = model('main-model', (_body, count) => count === 1
+    ? { id: 'm1', status: 'completed', output: [{ type: 'function_call', id: 'fc_1', call_id: 'look1', name: 'look', arguments: '{}', status: 'completed' }], usage }
+    : { id: 'm2', status: 'completed', output: reply('好了。'), usage }, { vision: unused, pricing: { inputPerMillionCny: 10, cachedInputPerMillionCny: null, outputPerMillionCny: 10 } })
+  // ¥0.011 left before the first call, which spends all of it.
+  const capped = await planner(priced, true).next({ ...input(), costLeftCny: 0.011 }, new AbortController().signal)
+  expect(unused.requests).toHaveLength(0)
+  expect(JSON.stringify((capped.step.trace as ModelTrace).results)).toContain('这一轮的费用上限已到')
+})

@@ -47,6 +47,8 @@ export const llmNativeReplaySchema = z.object({
   wire: llmWireProtocolSchema,
   dialectId: z.string().min(1).max(64),
   model: z.string().min(1).max(160),
+  /** The address the step came from; steps saved before it was kept have none and are not replayed. */
+  origin: z.string().max(2_048).optional(),
   payload: z.unknown()
 }).strict()
 export type LlmNativeReplay = z.infer<typeof llmNativeReplaySchema>

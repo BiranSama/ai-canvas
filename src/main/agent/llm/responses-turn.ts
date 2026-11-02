@@ -128,7 +128,7 @@ export class ResponsesTurnProtocol implements LlmTurnProtocol {
   }
 
   #items(messages: readonly LlmTranscriptMessage[]): readonly Item[] {
-    const target = { wire: this.wire, dialectId: this.dialect.id, model: this.model }
+    const target = { wire: this.wire, dialectId: this.dialect.id, model: this.model, origin: this.#baseUrl }
     const inlineImages = this.capabilities.vision && this.dialect.responses.toolResultImages === 'inline'
     return messages.flatMap((message): Item[] => {
       if (message.role === 'user') {
@@ -230,7 +230,7 @@ export class ResponsesTurnProtocol implements LlmTurnProtocol {
     return {
       responseId: parsed.id ?? null,
       parts,
-      native: { wire: this.wire, dialectId: this.dialect.id, model: this.model, payload: parsed.output },
+      native: { wire: this.wire, dialectId: this.dialect.id, model: this.model, origin: this.#baseUrl, payload: parsed.output },
       stopReason,
       usage: responsesUsage(parsed.usage)
     }

@@ -219,15 +219,18 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       describeImage: model.protocol.capabilities.vision || model.vision === undefined || model.vision === null ? null : async (image, question) => {
         const helper = model.vision!
         if (modelTurns >= callLimit) throw new Error('这一轮的模型调用次数已用完')
+        if (input.costLeftCny != null && pass.pricedCostCny >= input.costLeftCny) throw new Error('这一轮的费用上限已到')
+        // A look through the vision model is a model call of this turn, priced at the vision model's rates;
+        // it counts as one once sent, whether or not the vision model answers.
+        const previousCalls = pass.calls
+        modelTurns += 1
+        pass.calls += 1
         const turn = await this.#callOnce(helper, {
           system: VISION_HELPER_SYSTEM,
           messages: [{ role: 'user', parts: [{ type: 'text', text: question }, { type: 'image', image }] }],
           tools: [],
           maxOutputTokens: Math.min(2_048, helper.maxOutputTokens)
-        }, signal, context, pass.calls, true)
-        // A look through the vision model is a model call of this turn, priced at the vision model's rates.
-        modelTurns += 1
-        pass.calls += 1
+        }, signal, context, previousCalls, true)
         if (turn.usage !== null) pass.usage.push(turn.usage)
         addCost(turn.usage, helper.pricing)
         return turnText(turn)
