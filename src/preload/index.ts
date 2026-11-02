@@ -97,6 +97,7 @@ const desktopApi: DesktopApi = Object.freeze({
   setProviderSecret: (input: ProviderSecretInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretSet, input),
   deleteProviderSecret: (providerId: ConfigurableProviderId) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretDelete, providerId),
   addImageProvider: () => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageAdd),
+  checkProvider: (providerId: ConfigurableProviderId) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerCheck, providerId),
   addTextHelper: (role: TextHelperRole) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerTextHelperAdd, role),
   removeTextHelper: (role: TextHelperRole) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerTextHelperRemove, role),
   removeImageProvider: (providerId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageRemove, providerId),

@@ -1458,8 +1458,22 @@ export class GenerationRuntime {
     return llm.baseUrl !== '' && llm.defaultModel !== '' && llm.capabilities.toolCalling && await this.#secrets.has('openai-compatible-llm')
   }
 
-  validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
-    return this.#providerConnection.validate(input)
+  async validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
+    const result = await this.#providerConnection.validate(input)
+    // The main model's card shows how its latest test went, from here or from 测试.
+    await this.#providerSettings.recordCheck(result.providerId, {
+      ok: result.ok,
+      checkedAt: result.checkedAt,
+      latencyMs: null,
+      summary: result.ok ? '连上了，能调用工具。' : `${result.failure.title}：${result.failure.nextAction}`.slice(0, 400)
+    }).catch(() => undefined)
+    return result
+  }
+
+  /** 测试 on a service's card; its outcome is kept on the card until the service changes. */
+  async checkProvider(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot> {
+    const check = await this.#providerConnection.check(providerId)
+    return this.#providerSettings.recordCheck(providerId, check)
   }
 
   setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot> {

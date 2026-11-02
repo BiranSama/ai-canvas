@@ -1,14 +1,24 @@
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import {
+  configurableProviderIdSchema,
+  imageProviderConfigs,
+  MAIN_TEXT_MODEL_ID,
+  resolveImageEndpoint,
+  textHelperRoleOf,
+  type ImageProviderConfig,
+  type ProviderCheck,
   providerConnectionTestInputSchema,
   providerConnectionTestResultSchema,
   resolveLlmEndpoint,
   type ProviderConfigFile,
   type ProviderConnectionTestInput,
+  type MainTextModelConfig,
   type ProviderConnectionTestResult,
-  type ProviderPublicConfig
+  type TextHelperConfig
 } from '../../shared/provider-settings'
+
+type TextModelConfig = MainTextModelConfig | TextHelperConfig
 import { createConfiguredLlmProtocol, createConfiguredTurnProtocol } from '../agent/llm-protocol-factory'
 import { turnText, turnToolCalls, type LlmAssistantTurn, type LlmTurnInput } from '../agent/llm/transcript'
 import { ArkHttpClient, ArkHttpError } from './ark-http-client'
@@ -111,10 +121,14 @@ export class ProviderConnectionValidator {
 
   async validate(inputValue: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
     const input = providerConnectionTestInputSchema.parse(inputValue)
-    const config = await this.#options.config.read()
-    const llm = config.providers[0]
-    const base = {
-      providerId: 'openai-compatible-llm' as const,
+    const llm = (await this.#options.config.read()).providers[0]
+    if (input.scope === 'agent_loop') return this.#validateAgentLoop(llm, this.#base(llm))
+    return this.#validateToolCalling(llm)
+  }
+
+  #base(llm: TextModelConfig): Omit<ProviderConnectionTestResult, 'ok' | 'requestsUsed' | 'toolCallingVerified' | 'failure' | 'agentLoop'> {
+    return {
+      providerId: llm.id,
       providerLabel: llm.label,
       protocol: llm.protocol,
       model: llm.defaultModel,
@@ -123,9 +137,127 @@ export class ProviderConnectionValidator {
       generatedImages: 0 as const,
       costCeilingCny: CONNECTION_COST_CEILING_CNY
     }
+  }
 
+  /**
+   * 测试 on a service's card: the main and backup models must call a tool,
+   * the vision model must say what colour a small square is, and an image
+   * service must accept its key on a request that cannot make a picture.
+   */
+  async check(idValue: string): Promise<ProviderCheck> {
+    const id = configurableProviderIdSchema.parse(idValue)
+    const config = await this.#options.config.read()
+    const started = Date.now()
+    const done = (ok: boolean, summary: string): ProviderCheck => ({
+      ok,
+      checkedAt: new Date().toISOString(),
+      latencyMs: Date.now() - started,
+      summary: summary.slice(0, 400)
+    })
+    const role = textHelperRoleOf(id)
+    if (id === MAIN_TEXT_MODEL_ID || role === 'backup') {
+      const llm = id === MAIN_TEXT_MODEL_ID ? config.providers[0] : config.textHelpers.backup
+      if (llm === null) return done(false, '还没有设置备用模型。')
+      const result = await this.#validateToolCalling(llm)
+      return result.ok ? done(true, '连上了，能调用工具。') : done(false, `${result.failure.title}：${result.failure.detail} ${result.failure.nextAction}`)
+    }
+    if (role === 'vision') {
+      const helper = config.textHelpers.vision
+      if (helper === null) return done(false, '还没有设置看图模型。')
+      const seen = await this.#validateVision(helper)
+      return seen === null ? done(true, '连上了，能看图。') : done(false, seen)
+    }
+    const image = imageProviderConfigs(config).find((candidate) => candidate.id === id)
+    if (image === undefined) return done(false, '这个生图服务已经不存在。')
+    const problem = await this.#validateImageKey(image)
+    return problem === null ? done(true, '地址和 Key 可用。测试没有生成图片，也不收费。') : done(false, problem)
+  }
+
+  /** Null when the model named the colour of a small red square; otherwise what went wrong. */
+  async #validateVision(llm: TextHelperConfig): Promise<string | null> {
+    try {
+      if (llm.baseUrl === '' || llm.defaultModel === '') throw new ArkHttpError('PROVIDER_CONFIG_INCOMPLETE', '请先保存完整的地址、模型名和接口类型。')
+      const protocol = createConfiguredTurnProtocol(llm)
+      const request = protocol.buildTurnRequest({
+        system: '你在帮 AI Canvas 验证看图能力。只用一个词回答图片的颜色。',
+        messages: [{ role: 'user', parts: [
+          { type: 'text', text: '这张图是什么颜色？' },
+          { type: 'image', image: { mimeType: 'image/png', base64: RED_SQUARE_PNG } }
+        ] }],
+        tools: [],
+        maxOutputTokens: Math.max(1_024, Math.min(4_096, llm.maxOutputTokens))
+      }, false)
+      const http = new ArkHttpClient({
+        secrets: this.#options.secrets,
+        authorization: this.#options.authorization,
+        allowedBaseUrls: [llm.baseUrl],
+        ...(this.#options.fetcher === undefined ? {} : { fetcher: this.#options.fetcher })
+      })
+      const turn = protocol.parseTurnResponse(await http.postLlmJson({
+        ...request,
+        secretId: llm.id,
+        providerId: llm.id,
+        providerLabel: llm.label,
+        authorizationScopeId: `provider-connection:${randomUUID()}`,
+        expectedImages: 0,
+        costCeilingCny: CONNECTION_COST_CEILING_CNY,
+        signal: new AbortController().signal,
+        timeoutMs: llm.timeoutMs,
+        connectTimeoutMs: llm.transport.connectTimeoutMs,
+        firstEventTimeoutMs: llm.transport.firstEventTimeoutMs,
+        idleTimeoutMs: llm.transport.idleTimeoutMs
+      }))
+      return /红|red/i.test(turnText(turn)) ? null : '连上了，但模型没有认出图片里的颜色，可能不能看图。换一个能看图的模型。'
+    } catch (error) {
+      const failure = failurePresentation(error)
+      return `${failure.title}：${failure.detail} ${failure.nextAction}`
+    }
+  }
+
+  /**
+   * Null when the service takes the key. The request names the model and
+   * nothing else: with no prompt there is nothing to draw, so the service
+   * answers 400 once it has accepted the key, and 401 or 403 when it has not.
+   */
+  async #validateImageKey(image: ImageProviderConfig): Promise<string | null> {
+    if (image.protocol === 'unconfigured' || image.baseUrl === '' || image.defaultModel === '') return '请先选接口类型，填好地址和模型名并保存。'
+    const http = new ArkHttpClient({
+      secrets: this.#options.secrets,
+      authorization: this.#options.authorization,
+      allowedBaseUrls: [image.baseUrl],
+      ...(this.#options.fetcher === undefined ? {} : { fetcher: this.#options.fetcher })
+    })
+    try {
+      await http.postJson({
+        url: resolveImageEndpoint(image, 'generate'),
+        body: { model: image.defaultModel },
+        secretId: image.id,
+        providerId: image.id,
+        providerLabel: image.label,
+        authorizationScopeId: `provider-connection:${randomUUID()}`,
+        expectedImages: 0,
+        costCeilingCny: 0,
+        signal: new AbortController().signal,
+        timeoutMs: Math.min(image.timeoutMs, 30_000)
+      })
+      return null
+    } catch (error) {
+      if (!(error instanceof ArkHttpError)) return '测试没有完成，请稍后再试。'
+      const status = error.status
+      if (status === 400 || status === 422) return null
+      if (status === 401 || status === 403) return `Key 没有被接受（HTTP ${status}）。到厂商控制台确认 Key 是否有效、是否开通了这个模型。`
+      if (status === 404) return '地址不对（HTTP 404）。核对接口地址和接口类型。'
+      if (status === 429) return null
+      if (status !== null && status >= 500) return `服务暂时出错（HTTP ${status}），稍后再试。`
+      if (error.code === 'PROVIDER_KEY_MISSING') return '还没有保存 Key。'
+      return error.message
+    }
+  }
+
+  /** One small request that must come back as a structured tool call. */
+  async #validateToolCalling(llm: TextModelConfig): Promise<ProviderConnectionTestResult> {
+    const base = this.#base(llm)
     let requestReserved = false
-    if (input.scope === 'agent_loop') return this.#validateAgentLoop(llm, base)
     try {
       if (llm.baseUrl === '' || llm.defaultModel === '') {
         throw new ArkHttpError('PROVIDER_CONFIG_INCOMPLETE', '请先保存完整的 Base URL、模型 ID 和协议。')
@@ -168,8 +300,8 @@ export class ProviderConnectionValidator {
       })
       const liveRequest = {
         ...request,
-        secretId: 'openai-compatible-llm',
-        providerId: 'openai-compatible-llm',
+        secretId: llm.id,
+        providerId: llm.id,
         providerLabel: llm.label,
         authorizationScopeId: `provider-connection:${randomUUID()}`,
         expectedImages: 0,
@@ -217,7 +349,7 @@ export class ProviderConnectionValidator {
    * small image when the model is declared to see images).
    */
   async #validateAgentLoop(
-    llm: Extract<ProviderPublicConfig, { kind: 'llm' }>,
+    llm: TextModelConfig,
     base: Omit<ProviderConnectionTestResult, 'ok' | 'requestsUsed' | 'toolCallingVerified' | 'failure' | 'agentLoop'>
   ): Promise<ProviderConnectionTestResult> {
     let requestsUsed = 0
@@ -242,8 +374,8 @@ export class ProviderConnectionValidator {
         const request = protocol.buildTurnRequest(input, stream)
         const live = {
           ...request,
-          secretId: 'openai-compatible-llm',
-          providerId: 'openai-compatible-llm',
+          secretId: llm.id,
+          providerId: llm.id,
           providerLabel: llm.label,
           authorizationScopeId: `provider-connection:${scopeId}:${step}`,
           expectedImages: 0,

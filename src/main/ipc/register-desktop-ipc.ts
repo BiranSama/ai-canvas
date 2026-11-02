@@ -274,6 +274,7 @@ export function registerDesktopIpc(
     return (await generationRuntime).deleteProviderSecret(providerSecretDeleteSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.providerImageAdd, async () => (await generationRuntime).addImageProvider())
+  ipcMain.handle(DESKTOP_CHANNELS.providerCheck, async (_event, input: unknown) => (await generationRuntime).checkProvider(providerSecretDeleteSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.providerTextHelperAdd, async (_event, input: unknown) => (await generationRuntime).addTextHelper(textHelperRoleSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.providerTextHelperRemove, async (_event, input: unknown) => (await generationRuntime).removeTextHelper(textHelperRoleSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.providerImageRemove, async (_event, input: unknown) => {

@@ -438,7 +438,7 @@ const providerConnectionFailureSchema = z.object({
 })
 
 const providerConnectionTestBaseSchema = z.object({
-  providerId: z.literal('openai-compatible-llm'),
+  providerId: z.union([z.literal(MAIN_TEXT_MODEL_ID), textHelperIdSchema]),
   providerLabel: z.string().trim().min(1).max(80),
   protocol: llmProtocolSchema,
   model: z.string().trim().max(160),
