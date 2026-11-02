@@ -133,3 +133,80 @@ export function applyLlmVendor(config: LlmConfig, preset: LlmVendorPreset, model
     capabilities: { ...config.capabilities, streaming: true, toolCalling: true, vision: preset.vision }
   }
 }
+
+type ImageConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
+
+/** An image service as a person picks it; the capabilities are what this app can use of it. */
+export interface ImageVendorPreset {
+  readonly id: string
+  readonly label: string
+  readonly baseUrl: string
+  readonly protocol: ImageConfig['protocol']
+  readonly model: string
+  readonly capabilities: ImageConfig['capabilities']
+}
+
+export const IMAGE_VENDOR_PRESETS: readonly ImageVendorPreset[] = [
+  {
+    id: 'ark-seedream',
+    label: '火山方舟 Seedream',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    protocol: 'ark-seedream',
+    model: 'doubao-seedream-5-0-260128',
+    capabilities: { textToImage: true, imageReferences: true, maskEditing: true, multipleReferences: true, transparentOutput: false }
+  },
+  {
+    id: 'openai-images',
+    label: 'OpenAI 图片',
+    baseUrl: 'https://api.openai.com/v1',
+    protocol: 'openai-images',
+    model: 'gpt-image-1',
+    capabilities: { textToImage: true, imageReferences: true, maskEditing: true, multipleReferences: true, transparentOutput: true }
+  },
+  {
+    id: 'grok-imagine',
+    label: 'Grok Imagine',
+    baseUrl: 'https://api.x.ai/v1',
+    protocol: 'openai-images',
+    model: 'grok-imagine-image',
+    capabilities: { textToImage: true, imageReferences: false, maskEditing: false, multipleReferences: false, transparentOutput: false }
+  },
+  {
+    id: 'custom-openai-images',
+    label: '其他（OpenAI 图片兼容）',
+    baseUrl: '',
+    protocol: 'openai-images',
+    model: '',
+    capabilities: { textToImage: true, imageReferences: false, maskEditing: false, multipleReferences: false, transparentOutput: false }
+  },
+  {
+    id: 'custom-task-images',
+    label: '其他（异步任务接口）',
+    baseUrl: '',
+    protocol: 'task-images',
+    model: '',
+    capabilities: { textToImage: true, imageReferences: false, maskEditing: false, multipleReferences: false, transparentOutput: false }
+  }
+]
+
+/** The preset a saved image service reads as: by address and interface; the custom ones by interface alone; null when it is not set up. */
+export function matchImageVendor(config: Pick<ImageConfig, 'baseUrl' | 'protocol'>): ImageVendorPreset | null {
+  if (config.protocol === 'unconfigured') return null
+  let host = ''
+  try { host = new URL(config.baseUrl).hostname.toLowerCase() } catch { /* not filled in yet */ }
+  const known = IMAGE_VENDOR_PRESETS.find((preset) => preset.baseUrl !== '' && preset.protocol === config.protocol && new URL(preset.baseUrl).hostname === host)
+  return known ?? IMAGE_VENDOR_PRESETS.find((preset) => preset.baseUrl === '' && preset.protocol === config.protocol) ?? null
+}
+
+/** The saved image service with a vendor's address, interface, model and capabilities; a custom vendor keeps what was typed. */
+export function applyImageVendor(config: ImageConfig, preset: ImageVendorPreset): ImageConfig {
+  const custom = preset.baseUrl === ''
+  return {
+    ...config,
+    label: custom ? config.label : preset.label,
+    baseUrl: custom ? config.baseUrl : preset.baseUrl,
+    protocol: preset.protocol,
+    defaultModel: custom ? config.defaultModel : preset.model,
+    capabilities: preset.capabilities
+  }
+}

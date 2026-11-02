@@ -8,6 +8,7 @@ import { useGenerationDraftStore } from '../store/generation-draft-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { useProjectScope } from '../store/use-project-scope'
 import { preferredImageProvider } from '../generation/preferred-provider'
+import { showAppNotice } from './app-notice'
 import { selectionAnnotation } from '../selection/selection-annotation'
 import { useSelectionStore } from '../selection/selection-store'
 
@@ -164,6 +165,7 @@ export function CreationBar(): React.JSX.Element {
     try {
       const scene = useWorkspaceStore.getState().scene
       const provider = await preferredImageProvider('generate')
+      if (provider.note !== null) showAppNotice(provider.note)
       if (!isCurrent()) return
       updateGenerationDraft({
         prompt: value.trim() || scene.canvas.globalStyle || '根据当前画布结构生成一张完整图片',
@@ -193,6 +195,7 @@ export function CreationBar(): React.JSX.Element {
       const jobs = await window.desktop.listGenerationJobs()
       const parentResult = jobs.flatMap((job) => job.results).find((result) => result.assetId === editTarget.assetId)
       const provider = await preferredImageProvider('edit')
+      if (provider.note !== null) showAppNotice(provider.note)
       await window.desktop.editFromCanvas({
         scene,
         targetElementId: editTarget.id,

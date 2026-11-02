@@ -642,7 +642,6 @@ export class PersistentAgentLoop {
   readonly #generationPolicy: GenerationPolicy
   readonly #turnCostCap: () => number | null
   readonly #imagePriceCny: (providerId: string) => number | null
-  readonly #budget: AgentRunBudget
   readonly #budgetOverride: AgentRunBudget | null
   readonly #permissionProfileId: string
   readonly #providerIds: readonly string[]
@@ -681,10 +680,19 @@ export class PersistentAgentLoop {
     this.#turnCostCap = options.turnCostCap ?? (() => null)
     this.#imagePriceCny = options.imagePriceCny ?? (() => null)
     this.#budgetOverride = options.budget ?? null
-    this.#budget = options.budget ?? (options.planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
     this.#permissionProfileId = options.permissionProfileId ?? ownerFullPermissionProfile().id
     this.#providerIds = [...(options.providerIds ?? ['image-provider'])]
     this.#now = options.now ?? (() => new Date().toISOString())
+  }
+
+  /** Whether a turn is served step by step (a new one when turnId is null); a started turn keeps the engine it started on. */
+  #stepwiseFor(turnId: string | null, items: readonly AgentItem[]): boolean {
+    return this.#planner.stepwiseFor?.(turnId, items) ?? this.#planner.stepwise === true
+  }
+
+  /** The budget of a turn with no goal, for the engine serving it. */
+  #budgetFor(turnId: string | null, items: readonly AgentItem[]): AgentRunBudget {
+    return this.#budgetOverride ?? (this.#stepwiseFor(turnId, items) ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
   }
 
   async initialize(): Promise<{ readonly thread: AgentThread; readonly recovered: number }> {
@@ -870,7 +878,7 @@ export class PersistentAgentLoop {
     const decisionPayload = payload<StoredDecisionPayload>(decision)
     if (!decisionPayload.proposal.options.some((option) => option.id === optionId)) throw new Error('Decision option does not exist.')
     // A stepwise planner hears the refusal as the call's result and carries on.
-    if (decisionPayload.proposal.kind === 'generation_confirmation' && optionId === 'keep_canvas' && this.#planner.stepwise !== true) {
+    if (decisionPayload.proposal.kind === 'generation_confirmation' && optionId === 'keep_canvas' && !this.#stepwiseFor(turnId, items)) {
       await this.#repository.transitionItem(decision.id, 'completed', { ...decisionPayload, optionId })
       const legacyRunId = turn.inputMessageId ?? ''
       await this.#projection.onDecisionResolved?.({ legacyRunId, proposal: decisionPayload.proposal, optionId })
@@ -940,7 +948,7 @@ export class PersistentAgentLoop {
       commands
     }
     const goal = turn.goalId === null ? null : await this.#repository.getGoal(turn.goalId)
-    if (turn.sceneWriteBatchesUsed + 1 > (goal?.budget.maxSceneWriteBatches ?? this.#budget.maxSceneWriteBatches)) {
+    if (turn.sceneWriteBatchesUsed + 1 > (goal?.budget.maxSceneWriteBatches ?? this.#budgetFor(turn.id, await this.#repository.listTurnItems(turn.id)).maxSceneWriteBatches)) {
       throw new Error('The temporary try exceeds the current Scene write budget.')
     }
     const controller = new AbortController()
@@ -1113,8 +1121,8 @@ export class PersistentAgentLoop {
       const legacyRunId = turn.inputMessageId
       if (legacyRunId === null) throw new Error('Agent turn has no compatibility run identifier.')
       const activeGoal = turn.goalId === null ? null : await this.#repository.getGoal(turn.goalId)
-      const turnBudget = activeGoal?.budget ?? this.#budget
       let items = await this.#repository.listTurnItems(turnId)
+      const turnBudget = activeGoal?.budget ?? this.#budgetFor(turnId, items)
       const merged = mergeInputs(items)
       for (const itemId of merged.pendingIds) await this.#repository.transitionItem(itemId, 'completed')
       items = await this.#repository.listTurnItems(turnId)
@@ -1434,7 +1442,7 @@ export class PersistentAgentLoop {
           requestCorrelationId
         } satisfies StoredPlanItem
       })
-      const stepwise = this.#planner.stepwise === true
+      const stepwise = this.#stepwiseFor(turnId, items)
       // A stepwise planner's one-tool plans are steps, not replacement plans; the
       // activity list grows per call instead.
       const projectionIndex = stepwise ? items.filter((item) => item.type === 'tool_call').length : null
@@ -2097,7 +2105,8 @@ export class PersistentAgentLoop {
   }
 
   async #createGoal(threadId: string, request: AgentRequest, mode: AgentMode): Promise<AgentGoalContract> {
-    const stepwise = this.#planner.stepwise === true
+    // A new request's turn takes the engine preferred now, whatever an earlier turn left behind.
+    const stepwise = this.#stepwiseFor(null, [])
     const budget = this.#budgetOverride ?? (mode === 'auto'
       ? stepwise ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET
       : mode === 'review'

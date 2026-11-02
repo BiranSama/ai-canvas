@@ -23,7 +23,8 @@ import type {
   ProviderConnectionTestInput,
   ProviderExecutionPolicyInput,
   ProviderPublicConfigInput,
-  ProviderSecretInput
+  ProviderSecretInput,
+  TextHelperRole
 } from '../shared/provider-settings'
 import type { AssetImportInput, PixelImportInput, ProjectCreateInput, ProjectFavoriteInput, ProjectLibraryChangeMode } from '../shared/project'
 import type { SceneChangedEvent, SceneExecuteInput, SceneHistoryInput } from '../shared/scene-authority'
@@ -96,6 +97,9 @@ const desktopApi: DesktopApi = Object.freeze({
   setProviderSecret: (input: ProviderSecretInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretSet, input),
   deleteProviderSecret: (providerId: ConfigurableProviderId) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerSecretDelete, providerId),
   addImageProvider: () => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageAdd),
+  checkProvider: (providerId: ConfigurableProviderId) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerCheck, providerId),
+  addTextHelper: (role: TextHelperRole) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerTextHelperAdd, role),
+  removeTextHelper: (role: TextHelperRole) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerTextHelperRemove, role),
   removeImageProvider: (providerId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageRemove, providerId),
   setDefaultImageProvider: (providerId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageDefaultSet, providerId),
   listRecentProjects: () => ipcRenderer.invoke(DESKTOP_CHANNELS.projectRecent),

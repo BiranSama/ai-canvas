@@ -37,3 +37,21 @@ it('reads a saved text model back as its vendor by address', () => {
   expect(matchLlmVendor({ baseUrl: '' })).toBeNull()
   expect(llmVendorPreset('missing').id).toBe('ark')
 })
+
+it('fills an image service from a vendor and reads it back', async () => {
+  const { applyImageVendor, IMAGE_VENDOR_PRESETS, matchImageVendor } = await import('../../src/shared/vendor-presets')
+  const { imageProviderConfigSchema, newImageProviderConfig } = await import('../../src/shared/provider-settings')
+  const blank = newImageProviderConfig('image-provider-a1b2')
+  expect(matchImageVendor(blank)).toBeNull()
+  for (const preset of IMAGE_VENDOR_PRESETS) {
+    const filled = applyImageVendor(blank, preset)
+    expect(imageProviderConfigSchema.safeParse(filled).success, preset.id).toBe(true)
+    if (preset.baseUrl !== '') expect(matchImageVendor(filled)?.id).toBe(preset.id)
+  }
+  const openai = applyImageVendor(blank, IMAGE_VENDOR_PRESETS.find((preset) => preset.id === 'openai-images')!)
+  expect(openai).toMatchObject({ label: 'OpenAI 图片', baseUrl: 'https://api.openai.com/v1', protocol: 'openai-images', defaultModel: 'gpt-image-1', capabilities: { transparentOutput: true } })
+  // A custom vendor keeps what was typed and is read back by its interface.
+  const typed = { ...openai, baseUrl: 'https://images.example.test/v1', defaultModel: 'house-image' }
+  expect(matchImageVendor(typed)?.id).toBe('custom-openai-images')
+  expect(applyImageVendor(typed, IMAGE_VENDOR_PRESETS.find((preset) => preset.id === 'custom-task-images')!)).toMatchObject({ baseUrl: 'https://images.example.test/v1', defaultModel: 'house-image', protocol: 'task-images' })
+})

@@ -10,7 +10,9 @@ function settings(llmConfigured: boolean): ProviderSettingsSnapshot {
     providers: [{ ...llm, configured: llmConfigured }, { ...image, configured: false }],
     defaultImageProviderId: 'image-provider',
     realCallsAuthorized: false,
-    executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy
+    executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy,
+    textHelpers: { vision: null, backup: null },
+    checks: {}
   }
 }
 

@@ -134,7 +134,7 @@ export class AnthropicMessagesTurnProtocol implements LlmTurnProtocol {
   }
 
   #messages(messages: readonly LlmTranscriptMessage[]): WireMessage[] {
-    const target = { wire: this.wire, dialectId: this.dialect.id, model: this.model }
+    const target = { wire: this.wire, dialectId: this.dialect.id, model: this.model, origin: this.#baseUrl }
     const inlineImages = this.capabilities.vision && this.dialect.anthropic.toolResultImages === 'inline'
     const wire: WireMessage[] = []
     const push = (role: WireMessage['role'], content: Block[]): void => {
@@ -210,7 +210,7 @@ export class AnthropicMessagesTurnProtocol implements LlmTurnProtocol {
     return {
       responseId: parsed.id ?? null,
       parts,
-      native: { wire: this.wire, dialectId: this.dialect.id, model: this.model, payload: parsed.content },
+      native: { wire: this.wire, dialectId: this.dialect.id, model: this.model, origin: this.#baseUrl, payload: parsed.content },
       stopReason: stopReasonFor(parsed.stop_reason),
       usage: anthropicUsage(parsed.usage)
     }

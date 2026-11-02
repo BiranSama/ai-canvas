@@ -15,7 +15,9 @@ function snapshot(defaultImageProviderId: string, withAdded: boolean): ProviderS
     ],
     defaultImageProviderId,
     realCallsAuthorized: true,
-    executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy
+    executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy,
+    textHelpers: { vision: null, backup: null },
+    checks: {}
   }
 }
 

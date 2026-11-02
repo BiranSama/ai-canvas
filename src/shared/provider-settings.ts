@@ -5,7 +5,18 @@ import { llmPricingSchema } from './model-usage'
 export const PRIMARY_IMAGE_PROVIDER_ID = 'image-provider'
 export const MAX_IMAGE_PROVIDERS = 8
 export const imageProviderIdSchema = z.string().regex(/^image-provider(?:-[a-z0-9]{1,24})?$/)
-export const configurableProviderIdSchema = z.union([z.literal('openai-compatible-llm'), imageProviderIdSchema])
+export const MAIN_TEXT_MODEL_ID = 'openai-compatible-llm'
+/**
+ * Text models that help the main one: one that looks at pictures when the
+ * main model cannot, and one a request moves to when the main model is
+ * rate limited or down.
+ */
+export const TEXT_HELPER_IDS = { vision: 'text-model-vision', backup: 'text-model-backup' } as const
+export type TextHelperRole = keyof typeof TEXT_HELPER_IDS
+export const TEXT_HELPER_ROLES = Object.keys(TEXT_HELPER_IDS) as readonly TextHelperRole[]
+export const textHelperIdSchema = z.enum([TEXT_HELPER_IDS.vision, TEXT_HELPER_IDS.backup])
+export const textHelperRoleSchema = z.enum(['vision', 'backup'])
+export const configurableProviderIdSchema = z.union([z.literal(MAIN_TEXT_MODEL_ID), textHelperIdSchema, imageProviderIdSchema])
 
 export const llmProtocolSchema = z.enum([
   'ark-responses',
@@ -99,11 +110,13 @@ const llmProviderConfigV4Schema = legacyLlmProviderConfigSchema.extend({
   protocol: llmProtocolSchema
 })
 
-export const llmProviderConfigSchema = llmProviderConfigV4Schema.extend({
+const llmProviderFieldsSchema = llmProviderConfigV4Schema.extend({
   transport: llmTransportSettingsSchema,
   /** Optional prices for the per-turn cost estimate; null shows tokens only. */
   pricing: llmPricingSchema.nullable().default(null)
-}).superRefine((value, context) => {
+})
+
+function transportWithinTimeout(value: { readonly timeoutMs: number; readonly transport: z.infer<typeof llmTransportSettingsSchema> }, context: z.RefinementCtx): void {
   const timeoutFields = [
     ['transport.connectTimeoutMs', value.transport.connectTimeoutMs],
     ['transport.firstEventTimeoutMs', value.transport.firstEventTimeoutMs],
@@ -117,7 +130,12 @@ export const llmProviderConfigSchema = llmProviderConfigV4Schema.extend({
       message: '局部超时不能大于单次请求总上限。'
     })
   }
-})
+}
+
+export const llmProviderConfigSchema = llmProviderFieldsSchema.superRefine(transportWithinTimeout)
+
+/** A vision or backup text model: the same settings as the main one, under its own id and key. */
+export const textHelperConfigSchema = llmProviderFieldsSchema.extend({ id: textHelperIdSchema }).superRefine(transportWithinTimeout)
 
 const legacyImageProviderConfigSchema = providerPublicFieldsSchema.extend({
   id: z.literal('image-provider'),
@@ -140,8 +158,28 @@ export const imageProviderConfigSchema = legacyImageProviderConfigSchema.extend(
 
 export const providerPublicConfigSchema = z.union([
   llmProviderConfigSchema,
+  textHelperConfigSchema,
   imageProviderConfigSchema
 ])
+
+/** How a service's latest 测试 went; cleared when its address, interface, model or key changes. */
+export const providerCheckSchema = z.object({
+  ok: z.boolean(),
+  checkedAt: z.string().datetime(),
+  latencyMs: z.number().int().min(0).max(3_600_000).nullable(),
+  /** One line in the person's words: what worked, or what failed and what to do. */
+  summary: z.string().trim().min(1).max(400)
+}).strict()
+
+const textHelpersSchema = z.object({
+  vision: textHelperConfigSchema.nullable().default(null),
+  backup: textHelperConfigSchema.nullable().default(null)
+}).superRefine((helpers, context) => {
+  for (const role of ['vision', 'backup'] as const) {
+    const helper = helpers[role]
+    if (helper !== null && helper.id !== TEXT_HELPER_IDS[role]) context.addIssue({ code: 'custom', path: [role, 'id'], message: 'A helper text model keeps its role\'s id.' })
+  }
+})
 
 const providerExecutionPolicyFields = {
   approvalMode: z.enum(['confirm_each', 'session']),
@@ -249,7 +287,15 @@ const providerConfigFileV6Schema = z.object({ version: z.literal(6), ...currentP
 /** Version 7 has the same shape; its time limits are at least the ones above. */
 const providerConfigFileV7Schema = z.object({ version: z.literal(7), ...currentProviderConfigFields }).superRefine(defaultImageIsSaved)
 
-export const PROVIDER_CONFIG_VERSION = 7
+/** Version 8 adds the vision and backup text models and each service's latest 测试. */
+const providerConfigFileV8Schema = z.object({
+  version: z.literal(8),
+  ...currentProviderConfigFields,
+  textHelpers: textHelpersSchema.default({ vision: null, backup: null }),
+  checks: z.record(configurableProviderIdSchema, providerCheckSchema).default({})
+}).superRefine(defaultImageIsSaved)
+
+export const PROVIDER_CONFIG_VERSION = 8
 
 export function inferLlmProtocol(baseUrl: string): z.infer<typeof llmProtocolSchema> {
   if (baseUrl === '') return 'openai-responses'
@@ -343,14 +389,20 @@ function asV7(file: z.infer<typeof providerConfigFileV6Schema>): z.infer<typeof 
   }
 }
 
+/** Settings saved before version 8 have no helper text models and no stored checks. */
+function asV8(file: z.infer<typeof providerConfigFileV7Schema>): z.infer<typeof providerConfigFileV8Schema> {
+  return { ...file, version: 8, textHelpers: { vision: null, backup: null }, checks: {} }
+}
+
 export const providerConfigFileSchema = z.union([
-  providerConfigFileV7Schema,
-  providerConfigFileV6Schema.transform(asV7),
-  providerConfigFileV5Schema.transform((value) => asV7(asV6(value.providers, value.executionPolicy))),
-  providerConfigFileV4Schema.transform((value) => asV7(asV6(migrateV4Providers(value.providers), value.executionPolicy))),
-  providerConfigFileV3Schema.transform((value) => asV7(asV6(migrateV3Providers(value.providers), value.executionPolicy))),
-  providerConfigFileV2Schema.transform((value) => asV7(asV6(migrateLegacyProviders(value.providers), value.executionPolicy))),
-  providerConfigFileV1Schema.transform((value) => asV7(asV6(migrateLegacyProviders(value.providers), DEFAULT_PROVIDER_EXECUTION_POLICY)))
+  providerConfigFileV8Schema,
+  providerConfigFileV7Schema.transform(asV8),
+  providerConfigFileV6Schema.transform((value) => asV8(asV7(value))),
+  providerConfigFileV5Schema.transform((value) => asV8(asV7(asV6(value.providers, value.executionPolicy)))),
+  providerConfigFileV4Schema.transform((value) => asV8(asV7(asV6(migrateV4Providers(value.providers), value.executionPolicy)))),
+  providerConfigFileV3Schema.transform((value) => asV8(asV7(asV6(migrateV3Providers(value.providers), value.executionPolicy)))),
+  providerConfigFileV2Schema.transform((value) => asV8(asV7(asV6(migrateLegacyProviders(value.providers), value.executionPolicy)))),
+  providerConfigFileV1Schema.transform((value) => asV8(asV7(asV6(migrateLegacyProviders(value.providers), DEFAULT_PROVIDER_EXECUTION_POLICY))))
 ])
 
 export const providerSettingSchema = z.union([
@@ -358,11 +410,15 @@ export const providerSettingSchema = z.union([
   imageProviderConfigSchema.extend({ configured: z.boolean() })
 ])
 
+const textHelperSettingSchema = textHelperConfigSchema.and(z.object({ configured: z.boolean() }))
+
 export const providerSettingsSnapshotSchema = z.object({
   providers: z.array(providerSettingSchema).min(2).max(1 + MAX_IMAGE_PROVIDERS),
   defaultImageProviderId: imageProviderIdSchema,
   realCallsAuthorized: z.boolean(),
-  executionPolicy: providerExecutionPolicySchema
+  executionPolicy: providerExecutionPolicySchema,
+  textHelpers: z.object({ vision: textHelperSettingSchema.nullable(), backup: textHelperSettingSchema.nullable() }),
+  checks: z.record(z.string(), providerCheckSchema)
 })
 
 export const providerConnectionTestInputSchema = z.object({
@@ -382,7 +438,7 @@ const providerConnectionFailureSchema = z.object({
 })
 
 const providerConnectionTestBaseSchema = z.object({
-  providerId: z.literal('openai-compatible-llm'),
+  providerId: z.union([z.literal(MAIN_TEXT_MODEL_ID), textHelperIdSchema]),
   providerLabel: z.string().trim().min(1).max(80),
   protocol: llmProtocolSchema,
   model: z.string().trim().max(160),
@@ -428,6 +484,9 @@ export type ProviderExecutionPolicy = z.infer<typeof providerExecutionPolicySche
 /** A policy as it may be sent: fields with a default can be left out. */
 export type ProviderExecutionPolicyInput = z.input<typeof providerExecutionPolicySchema>
 export type ProviderSettingsSnapshot = z.infer<typeof providerSettingsSnapshotSchema>
+export type ProviderCheck = z.infer<typeof providerCheckSchema>
+export type TextHelperConfig = z.infer<typeof textHelperConfigSchema>
+export type MainTextModelConfig = z.infer<typeof llmProviderConfigSchema>
 export type ProviderConnectionTestInput = z.input<typeof providerConnectionTestInputSchema>
 export type ProviderConnectionTestResult = z.infer<typeof providerConnectionTestResultSchema>
 
@@ -446,7 +505,7 @@ export function resolveLlmProtocolEndpoint(baseUrl: string, protocol: z.infer<ty
   return new URL(target, base).toString()
 }
 
-export function resolveLlmEndpoint(config: z.infer<typeof llmProviderConfigSchema>): string {
+export function resolveLlmEndpoint(config: { readonly baseUrl: string; readonly protocol: z.infer<typeof llmProtocolSchema> }): string {
   return resolveLlmProtocolEndpoint(config.baseUrl, config.protocol)
 }
 
@@ -486,7 +545,7 @@ export function resolveImageEndpoint(
 }
 
 export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
-  version: 7,
+  version: 8,
   providers: [
     {
       id: 'openai-compatible-llm',
@@ -524,7 +583,9 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
     }
   ],
   defaultImageProviderId: PRIMARY_IMAGE_PROVIDER_ID,
-  executionPolicy: DEFAULT_PROVIDER_EXECUTION_POLICY
+  executionPolicy: DEFAULT_PROVIDER_EXECUTION_POLICY,
+  textHelpers: { vision: null, backup: null },
+  checks: {}
 }
 
 export type ImageProviderConfig = z.infer<typeof imageProviderConfigSchema>
@@ -552,4 +613,30 @@ export function newImageProviderConfig(id: string): ImageProviderConfig {
     concurrency: 1,
     capabilities: { textToImage: true, imageReferences: false, maskEditing: false, multipleReferences: false, transparentOutput: false }
   })
+}
+
+const TEXT_HELPER_LABELS: Record<TextHelperRole, string> = { vision: '看图模型', backup: '备用模型' }
+
+/** An empty helper text model; it sends nothing until it has an address, a model and a key. */
+export function newTextHelperConfig(role: TextHelperRole): TextHelperConfig {
+  const main = DEFAULT_PROVIDER_CONFIG.providers[0]
+  return textHelperConfigSchema.parse({
+    ...main,
+    id: TEXT_HELPER_IDS[role],
+    label: TEXT_HELPER_LABELS[role],
+    baseUrl: '',
+    defaultModel: '',
+    protocol: 'openai-chat-completions',
+    capabilities: { streaming: true, toolCalling: role === 'backup', vision: role === 'vision' },
+    pricing: null
+  })
+}
+
+export function textHelperRoleOf(id: string): TextHelperRole | null {
+  return id === TEXT_HELPER_IDS.vision ? 'vision' : id === TEXT_HELPER_IDS.backup ? 'backup' : null
+}
+
+/** A helper text model that can be called: an address, a model and a key. */
+export function textHelperReady(helper: TextHelperConfig | null, hasKey: boolean): helper is TextHelperConfig {
+  return helper !== null && helper.baseUrl !== '' && helper.defaultModel !== '' && hasKey
 }

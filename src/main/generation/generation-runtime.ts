@@ -12,7 +12,7 @@ import { ephemeralAnnotationSchema, type EphemeralAnnotation } from '../../share
 import { ELEMENT_SCHEMA_VERSION, imageElementSchema, type ImageEffects, type LayerMask, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 import { fitSubject, type SubjectFinder, type SubjectFit } from '../edit/subject-fit'
 import { fitsIntoPlace } from '../../shared/subject-place'
-import { STEPWISE_COLLABORATION_BUDGET, type AgentEvent, type AgentHarnessSnapshot, type AgentMode, type AgentTaskDispatch, type TaskRelation, type TurnInputMode } from '../../shared/agent-harness'
+import { DEFAULT_COLLABORATION_BUDGET, STEPWISE_COLLABORATION_BUDGET, type AgentEvent, type AgentHarnessSnapshot, type AgentMode, type AgentTaskDispatch, type TaskRelation, type TurnInputMode } from '../../shared/agent-harness'
 import type {
   CreateMemoryCandidateInput,
   CreateProjectDirectiveInput,
@@ -78,6 +78,8 @@ import {
 } from '../agent'
 import type { AgentLoopToolContext } from '../agent'
 import { createMultiStepPlannerAdapter, environmentAgentEngine } from '../agent/multi-step/runtime-adapter'
+import { EngineSwitchingPlanner } from '../agent/engine-switching-planner'
+import { DeterministicCreativePlannerAdapter } from '../agent/planner-adapter'
 import type { SubjectSegmentation } from '../segmentation/subject-segmentation'
 import { imageBytes } from '../storage/image-file'
 import type { AgentEngine, AgentEngineSetting } from '../../shared/agent-engine'
@@ -111,7 +113,8 @@ import type {
   ProviderPublicConfig,
   ProviderPublicConfigInput,
   ProviderSecretInput,
-  ProviderSettingsSnapshot
+  ProviderSettingsSnapshot,
+  TextHelperRole
 } from '../../shared/provider-settings'
 import type {
   AssetImportInput,
@@ -339,7 +342,7 @@ export class GenerationRuntime {
   /** Forced by the environment or a runtime option; otherwise the configured text model decides. */
   readonly #forcedAgentEngine: AgentEngine | null
   #subject: GenerationRuntimeOptions['subject'] | undefined
-  #activeAgentEngine: AgentEngine = 'plan-once'
+  #engines: EngineSwitchingPlanner | null = null
   readonly #executionBindings: ImageExecutionBindings
   readonly #providerUsage: ProviderUsageLedger
   readonly #providerConnection: ProviderConnectionValidator
@@ -671,23 +674,27 @@ export class GenerationRuntime {
         imageGenerationAvailable
       })
     })
-    this.#activeAgentEngine = this.#forcedAgentEngine ?? (await this.#textModelReady() ? 'multi-step' : 'plan-once')
-    const multiStep = this.#activeAgentEngine === 'multi-step'
-      ? createMultiStepPlannerAdapter({
-          secrets: this.#secrets,
-          config: this.#providerConfig,
-          authorization: this.#providerUsage,
-          assets: project.workspace.assets,
-          scene: () => sceneService.state().scene,
-          importImage: (bytes, sourceId) => this.#importDerivedImage(project, bytes, 'imported', sourceId),
-          ...(this.#subject === undefined ? {} : { subject: this.#subjectModel(this.#subject) })
-        })
-      : null
+    const multiStep = createMultiStepPlannerAdapter({
+      secrets: this.#secrets,
+      config: this.#providerConfig,
+      authorization: this.#providerUsage,
+      assets: project.workspace.assets,
+      scene: () => sceneService.state().scene,
+      importImage: (bytes, sourceId) => this.#importDerivedImage(project, bytes, 'imported', sourceId),
+      ...(this.#subject === undefined ? {} : { subject: this.#subjectModel(this.#subject) })
+    })
+    // Both engines are ready; each new turn takes the one the settings call for now.
+    const engines = new EngineSwitchingPlanner(
+      { 'multi-step': multiStep, 'plan-once': new DeterministicCreativePlannerAdapter(planner) },
+      await this.#preferredAgentEngine()
+    )
+    this.#engines = engines
     const agent = new AgentRuntime({
       projectId: project.workspace.metadata.id,
       repository: conversationRepository,
       planner,
-      ...(multiStep === null ? {} : { plannerAdapter: multiStep, maxSteps: STEPWISE_COLLABORATION_BUDGET.maxToolCalls }),
+      plannerAdapter: engines,
+      maxSteps: () => engines.stepwise ? STEPWISE_COLLABORATION_BUDGET.maxToolCalls : DEFAULT_COLLABORATION_BUDGET.maxToolCalls,
       generationPolicy: new ProductGenerationPolicy(() => this.#executionPolicy),
       turnCostCap: () => this.#executionPolicy.maxCostCnyPerTurn,
       imagePriceCny: (providerId) => this.#configuredImages.get(providerId)?.pricePerImageCny ?? null,
@@ -1444,7 +1451,7 @@ export class GenerationRuntime {
 
   /** The engine the open project's conversation runs on. */
   getAgentEngine(): AgentEngineSetting {
-    return { active: this.#activeAgentEngine, forcedByEnvironment: this.#forcedAgentEngine !== null }
+    return { active: this.#engines?.engine ?? 'plan-once', forcedByEnvironment: this.#forcedAgentEngine !== null }
   }
 
   /**
@@ -1452,22 +1459,48 @@ export class GenerationRuntime {
    * model that calls tools is set up; until then the local planner lays out
    * drafts without any model. Decided when a project opens.
    */
+  async #preferredAgentEngine(): Promise<AgentEngine> {
+    return this.#forcedAgentEngine ?? (await this.#textModelReady() ? 'multi-step' : 'plan-once')
+  }
+
+  /** After a settings change: the next new turn takes the engine the settings now call for. */
+  async #refreshAgentEngine(): Promise<void> {
+    this.#engines?.prefer(await this.#preferredAgentEngine())
+  }
+
   async #textModelReady(): Promise<boolean> {
     const llm = (await this.#providerConfig.read()).providers[0]
     return llm.baseUrl !== '' && llm.defaultModel !== '' && llm.capabilities.toolCalling && await this.#secrets.has('openai-compatible-llm')
   }
 
-  validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
-    return this.#providerConnection.validate(input)
+  async validateProviderConnection(input: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
+    const result = await this.#providerConnection.validate(input)
+    // The main model's card shows how its latest test went, from here or from 测试.
+    await this.#providerSettings.recordCheck(result.providerId, {
+      ok: result.ok,
+      checkedAt: result.checkedAt,
+      latencyMs: null,
+      summary: result.ok ? '连上了，能调用工具。' : `${result.failure.title}：${result.failure.nextAction}`.slice(0, 400)
+    }).catch(() => undefined)
+    return result
   }
 
-  setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot> {
-    return this.#providerSettings.setSecret(input)
+  /** 测试 on a service's card; its outcome is kept on the card until the service changes. */
+  async checkProvider(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot> {
+    const check = await this.#providerConnection.check(providerId)
+    return this.#providerSettings.recordCheck(providerId, check)
+  }
+
+  async setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.setSecret(input)
+    await this.#refreshAgentEngine()
+    return snapshot
   }
 
   async setProviderConfig(input: ProviderPublicConfigInput): Promise<ProviderSettingsSnapshot> {
     const snapshot = await this.#providerSettings.setConfig(input)
     await this.#refreshConfiguredImageProvider()
+    await this.#refreshAgentEngine()
     return snapshot
   }
 
@@ -1477,14 +1510,24 @@ export class GenerationRuntime {
     return snapshot
   }
 
-  deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot> {
-    return this.#providerSettings.deleteSecret(providerId)
+  async deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot> {
+    const snapshot = await this.#providerSettings.deleteSecret(providerId)
+    await this.#refreshAgentEngine()
+    return snapshot
   }
 
   async addImageProvider(): Promise<ProviderSettingsSnapshot> {
     const snapshot = await this.#providerSettings.addImageProvider()
     await this.#refreshConfiguredImageProvider()
     return snapshot
+  }
+
+  addTextHelper(role: TextHelperRole): Promise<ProviderSettingsSnapshot> {
+    return this.#providerSettings.addTextHelper(role)
+  }
+
+  removeTextHelper(role: TextHelperRole): Promise<ProviderSettingsSnapshot> {
+    return this.#providerSettings.removeTextHelper(role)
   }
 
   async removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot> {

@@ -32,7 +32,8 @@ import type {
   ProviderExecutionPolicyInput,
   ProviderPublicConfigInput,
   ProviderSecretInput,
-  ProviderSettingsSnapshot
+  ProviderSettingsSnapshot,
+  TextHelperRole
 } from './provider-settings'
 import type {
   AssetImportInput,
@@ -101,6 +102,9 @@ export const DESKTOP_CHANNELS = {
   providerSecretSet: 'provider:secret-set',
   providerSecretDelete: 'provider:secret-delete',
   providerImageAdd: 'provider:image-add',
+  providerTextHelperAdd: 'provider:text-helper-add',
+  providerCheck: 'provider:check',
+  providerTextHelperRemove: 'provider:text-helper-remove',
   providerImageRemove: 'provider:image-remove',
   providerImageDefaultSet: 'provider:image-default-set',
   projectRecent: 'project:recent',
@@ -260,6 +264,12 @@ export interface DesktopApi {
   setProviderSecret(input: ProviderSecretInput): Promise<ProviderSettingsSnapshot>
   deleteProviderSecret(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot>
   addImageProvider(): Promise<ProviderSettingsSnapshot>
+  /** 测试 on a service's card: a small request, kept as the card's latest check. */
+  checkProvider(providerId: ConfigurableProviderId): Promise<ProviderSettingsSnapshot>
+  /** Adds an empty vision or backup text model. */
+  addTextHelper(role: TextHelperRole): Promise<ProviderSettingsSnapshot>
+  /** Removes a vision or backup text model and its key. */
+  removeTextHelper(role: TextHelperRole): Promise<ProviderSettingsSnapshot>
   removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
   setDefaultImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
   listRecentProjects(): Promise<readonly RecentProjectSummary[]>

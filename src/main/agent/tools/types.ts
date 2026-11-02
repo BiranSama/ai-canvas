@@ -60,6 +60,11 @@ export interface AgentToolContext {
   /** False when the text model cannot see images; look then describes the layout in words. */
   readonly vision?: boolean
   /**
+   * For a text model that cannot see: a vision model that looks at a picture
+   * and says what it sees; null when none is set up.
+   */
+  readonly describeImage?: ((image: LlmImage, question: string) => Promise<string>) | null
+  /**
    * Whether screenshots may go to the model in this turn: always, only after
    * asking the person once (per-image review policy), or not at all.
    */

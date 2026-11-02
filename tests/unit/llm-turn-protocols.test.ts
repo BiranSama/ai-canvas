@@ -169,6 +169,18 @@ describe('Chat Completions turns', () => {
     })
   })
 
+  it('does not replay output to another service with the same model name, as a backup behind another address', () => {
+    const turn = deepseek().parseTurnResponse(deepseekResponse)
+    expect(turn.native.origin).toBe('https://api.deepseek.com')
+    const relay = new ChatCompletionsTurnProtocol({ baseUrl: 'https://relay.example.test/v1', model: 'deepseek-v4.1-flash', dialect: dialect('deepseek') })
+    const rebuilt = relay.buildTurnRequest(turnInput([
+      { role: 'user', parts: [{ type: 'text', text: '加标题' }] },
+      { role: 'assistant', parts: [...turn.parts], native: turn.native }
+    ]), false).body.messages as Record<string, unknown>[]
+    expect(rebuilt[2]).not.toHaveProperty('reasoning_content')
+    expect(rebuilt[2]).toHaveProperty('tool_calls')
+  })
+
   it('keeps malformed arguments as data for the loop to hand back', () => {
     const turn = deepseek().parseTurnResponse({
       id: 'bad', choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ id: 'c', function: { name: 'add_text', arguments: '{"text": "晨' } }] } }]

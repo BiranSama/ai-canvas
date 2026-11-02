@@ -67,15 +67,16 @@ export function toolCallFromText(callId: string, name: string, argumentsText: st
 }
 
 /**
- * A step's native output is replayed only to the protocol, vendor and model that
- * produced it; signatures and encrypted reasoning are not portable.
+ * A step's native output is replayed only to the protocol, vendor, model and
+ * address that produced it; signatures and encrypted reasoning are not
+ * portable, even between two services that share a model name.
  */
 export function replayableNative(
   native: LlmNativeReplay | null,
-  target: { readonly wire: LlmWireProtocol; readonly dialectId: string; readonly model: string }
+  target: { readonly wire: LlmWireProtocol; readonly dialectId: string; readonly model: string; readonly origin: string }
 ): LlmNativeReplay | null {
   if (native === null) return null
-  return native.wire === target.wire && native.dialectId === target.dialectId && native.model === target.model
+  return native.wire === target.wire && native.dialectId === target.dialectId && native.model === target.model && native.origin === target.origin
     ? native
     : null
 }

@@ -19,11 +19,13 @@ test('Provider settings make protocol routing and the real connection confirmati
     const llmRow = dialog.locator('.provider-setting-row').filter({ hasText: 'Seed 2.1 Turbo' })
     await llmRow.getByRole('button', { name: '编辑' }).evaluate((button) => button.click())
 
+    // The vendor fills the address and interface; the interface type, thinking, image detail, output length and capabilities sit in the card's 高级.
+    await expect(dialog.getByLabel('LLM Provider 厂商')).toHaveValue('ark')
+    await llmRow.locator('details.provider-advanced > summary').click()
     await dialog.getByLabel('LLM Provider 调用协议').selectOption('openai-chat-completions')
     await dialog.getByLabel('LLM Provider API 地址').fill('https://llm.example.test/v1')
     await dialog.getByLabel('LLM Provider 默认模型').fill('fixture-tool-model')
-    // Thinking, image detail, output length and capabilities sit in the card's 高级.
-    await llmRow.locator('details.provider-advanced > summary').click()
+    await expect(dialog.getByLabel('LLM Provider 厂商')).toHaveValue('custom')
     await dialog.getByLabel('LLM Provider 思考强度').selectOption('high')
     await expect(dialog.getByLabel('LLM Provider 图像细节')).toBeEnabled()
     await dialog.getByLabel('LLM Provider 图像细节').selectOption('low')
@@ -31,7 +33,7 @@ test('Provider settings make protocol routing and the real connection confirmati
     await expect(llmRow.getByLabel('LLM Provider 能力').getByText('图像理解')).toBeVisible()
     await expect(llmRow.locator('.provider-resolved-endpoint')).toContainText('https://llm.example.test/v1/chat/completions')
     await llmRow.getByRole('button', { name: '保存', exact: true }).evaluate((button) => button.click())
-    await expect(dialog.getByTestId('provider-settings-status')).toContainText('未发起网络请求')
+    await expect(dialog.getByTestId('provider-settings-status')).toContainText('没有发出任何网络请求')
 
     const keyInput = dialog.getByLabel('火山方舟 · Seed 2.1 Turbo API Key')
     await keyInput.fill('fixture-never-send-key')
@@ -82,7 +84,7 @@ test('the image module freely configures an explicit protocol and opens directly
     await expect(imageRow.locator('.provider-resolved-endpoint')).toContainText('https://images.example.test/v1/images/generations')
     await expect(imageRow.locator('.provider-resolved-endpoint')).toContainText('https://images.example.test/v1/images/edits')
     await imageRow.getByRole('button', { name: '保存', exact: true }).evaluate((button) => button.click())
-    await expect(dialog.getByTestId('provider-settings-status')).toContainText('未发起网络请求')
+    await expect(dialog.getByTestId('provider-settings-status')).toContainText('没有发出任何网络请求')
     const imageKey = imageRow.getByLabel('Owner Image Relay API Key')
     await imageKey.fill('synthetic-owner-image-key')
     await imageRow.getByRole('button', { name: '安全保存 Owner Image Relay 凭据' }).evaluate((button) => button.click())

@@ -9,6 +9,7 @@ import { generationReferencePreviewInputSchema } from '../../shared/generation-r
 import type { AppearanceSettingsService } from '../appearance/appearance-settings-service'
 import type { GenerationRuntime } from '../generation/generation-runtime'
 import type { AppUpdateService } from '../update/app-update-service'
+import { textHelperRoleSchema } from '../../shared/provider-settings'
 import { localFontCatalog } from '../fonts/local-font-catalog'
 import { takeOpenFileRequests } from '../open-file-requests'
 import { readPsdForImport } from '../psd/psd-import'
@@ -273,6 +274,9 @@ export function registerDesktopIpc(
     return (await generationRuntime).deleteProviderSecret(providerSecretDeleteSchema.parse(input))
   })
   ipcMain.handle(DESKTOP_CHANNELS.providerImageAdd, async () => (await generationRuntime).addImageProvider())
+  ipcMain.handle(DESKTOP_CHANNELS.providerCheck, async (_event, input: unknown) => (await generationRuntime).checkProvider(providerSecretDeleteSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.providerTextHelperAdd, async (_event, input: unknown) => (await generationRuntime).addTextHelper(textHelperRoleSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.providerTextHelperRemove, async (_event, input: unknown) => (await generationRuntime).removeTextHelper(textHelperRoleSchema.parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.providerImageRemove, async (_event, input: unknown) => {
     return (await generationRuntime).removeImageProvider(providerImageIdSchema.parse(input))
   })

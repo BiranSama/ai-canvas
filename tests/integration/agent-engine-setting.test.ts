@@ -14,18 +14,33 @@ async function runtime(userData: string, agentEngine?: 'plan-once' | 'multi-step
 }
 
 describe('agent engine', () => {
-  it('plans locally until a text model is set up, then works step by step from the next project open', async () => {
+  it('plans locally until a text model is set up, then works step by step from the next turn, without reopening', async () => {
     const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-engine-'))
     const value = await runtime(userData)
     try {
       expect(value.getAgentEngine()).toEqual({ active: 'plan-once', forcedByEnvironment: false })
       await value.setProviderSecret({ providerId: 'openai-compatible-llm', apiKey: 'sk-engine-fixture-0123456789' })
-      // The open project keeps the engine it started with.
+      // The open project's next turn works step by step.
+      expect(value.getAgentEngine()).toEqual({ active: 'multi-step', forcedByEnvironment: false })
+      // Without the key it plans locally again.
+      await value.deleteProviderSecret('openai-compatible-llm')
       expect(value.getAgentEngine()).toMatchObject({ active: 'plan-once' })
+      await value.setProviderSecret({ providerId: 'openai-compatible-llm', apiKey: 'sk-engine-fixture-0123456789' })
       await value.createProject(join(userData, 'library', 'second.aicanvas'), 'Second')
       expect(value.getAgentEngine()).toEqual({ active: 'multi-step', forcedByEnvironment: false })
     } finally {
       await value.close()
+    }
+  })
+
+  it('keeps an engine forced from outside the settings whatever they say', async () => {
+    const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-engine-pinned-'))
+    const pinned = await runtime(userData, 'plan-once')
+    try {
+      await pinned.setProviderSecret({ providerId: 'openai-compatible-llm', apiKey: 'sk-engine-fixture-0123456789' })
+      expect(pinned.getAgentEngine()).toEqual({ active: 'plan-once', forcedByEnvironment: true })
+    } finally {
+      await pinned.close()
     }
   })
 

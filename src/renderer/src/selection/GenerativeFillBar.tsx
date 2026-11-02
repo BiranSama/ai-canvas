@@ -48,6 +48,7 @@ export function GenerativeFillBar({ originX, originY, zoom, stageWidth, stageHei
       if (selection === null) return
       const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: '生成式填充选区.png', width: selection.width, height: selection.height, gray: new Uint8Array(selection.data) })
       const provider = await preferredImageProvider('edit')
+      if (provider.note !== null) showAppNotice(provider.note)
       await window.desktop.editFromCanvas({
         scene,
         targetElementId: null,
