@@ -34,7 +34,16 @@ export function ServiceConnectCard({ onCreateBlank, onShowExamples }: {
   useEffect(() => {
     let current = true
     window.desktop.getProviderSettings().then((value) => { if (current) setSnapshot(value) }).catch(() => undefined)
-    return () => { current = false }
+    // A key saved or removed in the settings shows here at once: the card hides, or comes back.
+    const changed = (event: Event): void => {
+      const next = (event as CustomEvent<{ readonly snapshot?: ProviderSettingsSnapshot }>).detail?.snapshot
+      if (current && next !== undefined) setSnapshot(next)
+    }
+    window.addEventListener('ai-canvas:provider-settings-changed', changed)
+    return () => {
+      current = false
+      window.removeEventListener('ai-canvas:provider-settings-changed', changed)
+    }
   }, [])
 
   const llm = snapshot?.providers.find((provider) => provider.kind === 'llm')

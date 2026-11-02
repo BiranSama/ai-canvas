@@ -116,3 +116,14 @@ it('keeps the vendor, the fields and the button still while one save and test is
   await act(async () => { finish(passed) })
   expect(screen.getByText('连好了')).toBeInTheDocument()
 })
+
+it('follows keys saved or removed in the settings', async () => {
+  desktop(passed)
+  render(<ServiceConnectCard onCreateBlank={() => undefined} onShowExamples={() => undefined} />)
+  await act(async () => undefined)
+  expect(screen.getByRole('region', { name: '连上服务' })).toBeInTheDocument()
+  act(() => { window.dispatchEvent(new CustomEvent('ai-canvas:provider-settings-changed', { detail: { snapshot: settings(true) } })) })
+  expect(screen.queryByRole('region', { name: '连上服务' })).not.toBeInTheDocument()
+  act(() => { window.dispatchEvent(new CustomEvent('ai-canvas:provider-settings-changed', { detail: { snapshot: settings(false) } })) })
+  expect(screen.getByRole('region', { name: '连上服务' })).toBeInTheDocument()
+})
