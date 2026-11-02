@@ -112,7 +112,7 @@ export class ProviderConnectionValidator {
   async validate(inputValue: ProviderConnectionTestInput): Promise<ProviderConnectionTestResult> {
     const input = providerConnectionTestInputSchema.parse(inputValue)
     const config = await this.#options.config.read()
-    const llm = config.providers.find((provider): provider is Extract<ProviderPublicConfig, { kind: 'llm' }> => provider.kind === 'llm')!
+    const llm = config.providers[0]
     const base = {
       providerId: 'openai-compatible-llm' as const,
       providerLabel: llm.label,

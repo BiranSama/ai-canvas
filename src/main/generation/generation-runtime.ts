@@ -111,7 +111,8 @@ import type {
   ProviderPublicConfig,
   ProviderPublicConfigInput,
   ProviderSecretInput,
-  ProviderSettingsSnapshot
+  ProviderSettingsSnapshot,
+  TextHelperRole
 } from '../../shared/provider-settings'
 import type {
   AssetImportInput,
@@ -1485,6 +1486,14 @@ export class GenerationRuntime {
     const snapshot = await this.#providerSettings.addImageProvider()
     await this.#refreshConfiguredImageProvider()
     return snapshot
+  }
+
+  addTextHelper(role: TextHelperRole): Promise<ProviderSettingsSnapshot> {
+    return this.#providerSettings.addTextHelper(role)
+  }
+
+  removeTextHelper(role: TextHelperRole): Promise<ProviderSettingsSnapshot> {
+    return this.#providerSettings.removeTextHelper(role)
   }
 
   async removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot> {

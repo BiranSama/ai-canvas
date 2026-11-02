@@ -344,6 +344,8 @@ test('launches the production canvas with native modules isolated in Main', asyn
         'setProviderSecret',
         'deleteProviderSecret',
         'addImageProvider',
+        'addTextHelper',
+        'removeTextHelper',
         'removeImageProvider',
         'setDefaultImageProvider',
         'listRecentProjects',

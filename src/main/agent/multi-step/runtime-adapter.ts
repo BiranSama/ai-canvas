@@ -66,7 +66,7 @@ export function createMultiStepPlannerAdapter(options: {
   const providers = async (): Promise<{ readonly llm: LlmConfig | undefined; readonly image: ImageConfig | undefined; readonly file: ProviderConfigFile }> => {
     const file = await options.config.read()
     return {
-      llm: file.providers.find((provider): provider is LlmConfig => provider.kind === 'llm'),
+      llm: file.providers[0],
       image: defaultImageProviderConfig(file),
       file
     }

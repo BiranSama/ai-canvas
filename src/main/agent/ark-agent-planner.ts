@@ -760,7 +760,7 @@ export class ConfiguredAgentPlanner implements AgentPlanner {
       return forwardPlan(this.#fallback, request, signal, recovery, context)
     }
     const config = await this.#config.read()
-    const llm = config.providers.find((provider): provider is Extract<ProviderPublicConfig, { kind: 'llm' }> => provider.kind === 'llm')
+    const llm = config.providers[0]
     const image = defaultImageProviderConfig(config)
     if (llm === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !llm.capabilities.toolCalling) {
       return forwardPlan(this.#fallback, request, signal, recovery, context)
