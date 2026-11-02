@@ -54,7 +54,8 @@ export interface AgentRuntimeOptions {
   readonly planner: AgentPlanner
   readonly generationPolicy?: GenerationPolicy
   /** The owner's multiple of the standard per-turn allowance. */
-  readonly maxSteps?: number
+  /** Steps a run may take; a function when it depends on the engine a new turn takes. */
+  readonly maxSteps?: number | (() => number)
   /** The estimated spend in CNY at which a turn pauses; null for none. */
   readonly turnCostCap?: () => number | null
   /** What one image from an image service costs, for that estimate; null when no price is set. */
@@ -137,7 +138,7 @@ export class AgentRuntime {
   readonly #projectId: string
   readonly #repository: ConversationRepository
   readonly #generationPolicy: GenerationPolicy
-  readonly #maxSteps: number
+  readonly #maxSteps: () => number
   readonly #now: () => string
   readonly #logger: DiagnosticLogger
   readonly #activityLedger: ActivityLedgerRepository | null
@@ -153,7 +154,8 @@ export class AgentRuntime {
     this.#projectId = options.projectId
     this.#repository = options.repository
     this.#generationPolicy = options.generationPolicy ?? new GenerationPolicy()
-    this.#maxSteps = Math.max(1, Math.floor(options.maxSteps ?? DEFAULT_COLLABORATION_BUDGET.maxToolCalls))
+    const maxSteps = options.maxSteps ?? DEFAULT_COLLABORATION_BUDGET.maxToolCalls
+    this.#maxSteps = () => Math.max(1, Math.floor(typeof maxSteps === 'function' ? maxSteps() : maxSteps))
     this.#now = options.now ?? (() => new Date().toISOString())
     this.#logger = options.logger ?? new RedactedLogger()
     this.#activityLedger = options.activityLedger ?? null
@@ -193,7 +195,7 @@ export class AgentRuntime {
   }
 
   #runStepLimit(): number {
-    return this.#maxSteps
+    return this.#maxSteps()
   }
 
   async initialize(): Promise<number> {

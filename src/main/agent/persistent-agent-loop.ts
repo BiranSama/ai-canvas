@@ -642,7 +642,6 @@ export class PersistentAgentLoop {
   readonly #generationPolicy: GenerationPolicy
   readonly #turnCostCap: () => number | null
   readonly #imagePriceCny: (providerId: string) => number | null
-  readonly #budget: AgentRunBudget
   readonly #budgetOverride: AgentRunBudget | null
   readonly #permissionProfileId: string
   readonly #providerIds: readonly string[]
@@ -681,10 +680,14 @@ export class PersistentAgentLoop {
     this.#turnCostCap = options.turnCostCap ?? (() => null)
     this.#imagePriceCny = options.imagePriceCny ?? (() => null)
     this.#budgetOverride = options.budget ?? null
-    this.#budget = options.budget ?? (options.planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
     this.#permissionProfileId = options.permissionProfileId ?? ownerFullPermissionProfile().id
     this.#providerIds = [...(options.providerIds ?? ['image-provider'])]
     this.#now = options.now ?? (() => new Date().toISOString())
+  }
+
+  /** The budget of a turn with no goal, for the engine serving turns now. */
+  get #budget(): AgentRunBudget {
+    return this.#budgetOverride ?? (this.#planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
   }
 
   async initialize(): Promise<{ readonly thread: AgentThread; readonly recovered: number }> {
