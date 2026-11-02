@@ -101,7 +101,8 @@ export const lookTool = defineTool({
       details: context.scene.elements.filter((candidate) => isolated!.members.some((member) => member.id === candidate.id))
         .map((member) => elementFacts(member, context.refs, context.scene))
     })
-    if (context.vision === false) {
+    const describeImage = context.vision === false ? context.describeImage ?? null : null
+    if (context.vision === false && describeImage === null) {
       return answer(isolated === null ? describeLayout(context) : describeTarget('当前文字模型不能看图，这是这个对象的文字描述。'))
     }
     if (context.screenshots === 'ask') {
@@ -119,6 +120,18 @@ export const lookTool = defineTool({
       ...(isolated === null ? {} : { background: 'checker' as const })
     })
     const hidden = element !== null && !element.visible
+    if (describeImage !== null) {
+      // The vision model looks for the text model and answers in words; the facts stay alongside.
+      const question = isolated !== null
+        ? `这是画面里的一个对象单独的样子，灰白格子是透明处。请具体描述它：形状、颜色、文字内容、边缘是否干净。`
+        : args.mode === 'reference'
+          ? '这是要发给生图模型的参考图。请描述构图、主体位置、颜色和留白。'
+          : '这是一张正在制作的设计稿。请具体描述：构图和主体位置、文字内容和是否清楚、颜色、有没有遮挡、重叠或贴边的问题。'
+      const seen = await describeImage(image, question).then((text) => text.trim()).catch(() => '')
+      const facts = isolated === null ? describeLayout(context) : describeTarget('')
+      if (seen === '') return answer({ ...facts, summary: '看图模型这次没有回应，这是画面的文字描述。' })
+      return answer({ ...facts, summary: `当前文字模型不能看图，看图模型看到的是：${seen.slice(0, 1_500)}` })
+    }
     return answer({
       ok: true,
       summary: isolated !== null

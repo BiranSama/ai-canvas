@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import sharp from 'sharp'
 import type { Scene } from '../../../domain'
 import type { AgentEngine } from '../../../shared/agent-engine'
-import { defaultImageProviderConfig, resolveLlmEndpoint, type ProviderConfigFile, type ProviderPublicConfig } from '../../../shared/provider-settings'
+import { defaultImageProviderConfig, resolveLlmEndpoint, textHelperReady, type ProviderConfigFile, type ProviderPublicConfig } from '../../../shared/provider-settings'
 import { ArkHttpClient } from '../../security/ark-http-client'
 import type { ProviderUsageReservation } from '../../security/provider-usage-ledger'
 import type { AssetMetadata } from '../../storage/project-repository'
@@ -136,27 +136,35 @@ export function createMultiStepPlannerAdapter(options: {
       return bytes === null ? null : (await options.importImage!(bytes, elementId)).id
     },
     model: async (): Promise<MultiStepModel> => {
-      const { llm } = await providers()
+      const { llm, file } = await providers()
       if (llm === undefined || llm.baseUrl === '' || llm.defaultModel === '' || !await options.secrets.has('openai-compatible-llm')) {
         throw engineError('PROVIDER_KEY_MISSING', '多步 Agent 需要文字模型：先在设置里配置文字模型并保存 API Key。手动编辑照常可用。')
       }
-      return {
-        protocol: createConfiguredTurnProtocol(llm),
+      const build = (config: LlmConfig): MultiStepModel => ({
+        protocol: createConfiguredTurnProtocol(config),
         http: new ArkHttpClient({
           secrets: options.secrets,
           authorization: options.authorization,
-          allowedBaseUrls: [llm.baseUrl],
+          allowedBaseUrls: [config.baseUrl],
           ...(options.fetcher === undefined ? {} : { fetcher: options.fetcher })
         }),
-        transport: llm.transport,
-        timeoutMs: llm.timeoutMs,
+        transport: config.transport,
+        timeoutMs: config.timeoutMs,
         // Thinking shares the output budget with the reply and tool arguments.
-        maxOutputTokens: Math.max(llm.maxOutputTokens, 8_192),
-        label: llm.label,
-        protocolId: llm.protocol,
-        endpoint: resolveLlmEndpoint(llm),
-        pricing: llm.pricing
-      }
+        maxOutputTokens: Math.max(config.maxOutputTokens, 8_192),
+        label: config.label,
+        protocolId: config.protocol,
+        endpoint: resolveLlmEndpoint(config),
+        pricing: config.pricing,
+        providerId: config.id
+      })
+      // The backup takes a request only when it can do what the main model does here: call tools.
+      const saved = file.textHelpers.backup
+      const backup = saved !== null && saved.capabilities.toolCalling && textHelperReady(saved, await options.secrets.has(saved.id)) ? build(saved) : null
+      // The vision model looks only for a main model that cannot see for itself.
+      const looker = file.textHelpers.vision
+      const vision = !llm.capabilities.vision && looker !== null && textHelperReady(looker, await options.secrets.has(looker.id)) ? build(looker) : null
+      return { ...build(llm), backup, vision }
     },
     generation: async () => {
       const { image, file } = await providers()
