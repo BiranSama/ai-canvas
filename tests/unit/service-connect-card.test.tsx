@@ -101,3 +101,20 @@ it('is not shown once a text model has a key, and 「先用示例看看」 puts 
   await act(async () => undefined)
   expect(screen.queryByRole('region', { name: '连上服务' })).not.toBeInTheDocument()
 })
+
+it('keeps the vendor, the fields and the button still while one save and test is under way', async () => {
+  const api = desktop(passed)
+  let finish!: (value: unknown) => void
+  api.validateProviderConnection.mockImplementation(() => new Promise((resolve) => { finish = resolve }))
+  render(<ServiceConnectCard onCreateBlank={() => undefined} onShowExamples={() => undefined} />)
+  await act(async () => undefined)
+  fireEvent.change(screen.getByLabelText('Key'), { target: { value: 'ark-key-123456' } })
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存并测试连接' })) })
+  expect(screen.getByRole('button', { name: /Kimi/ })).toBeDisabled()
+  expect(screen.getByLabelText('Key')).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: /Kimi/ }))
+  expect(screen.getByRole('button', { name: /火山方舟/ })).toHaveAttribute('aria-pressed', 'true')
+  expect(api.setProviderConfig).toHaveBeenCalledTimes(1)
+  await act(async () => { finish(passed) })
+  expect(screen.getByText('连好了')).toBeInTheDocument()
+})
