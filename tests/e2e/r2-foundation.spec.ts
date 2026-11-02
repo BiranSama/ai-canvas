@@ -78,7 +78,7 @@ test('AC-R2-01/02 opens from the path-free project library and keeps Glass Islan
 
     await window.getByRole('button', { name: '返回项目库' }).click({ force: true })
     await expect(window.getByRole('button', { name: '打开项目：未命名创作' })).toBeVisible()
-    await expect(window.getByText(/4:5/)).toBeVisible()
+    await expect(window.getByRole('button', { name: '打开项目：未命名创作' }).getByText(/4:5/)).toBeVisible()
     await window.getByRole('button', { name: '收藏项目：未命名创作' }).evaluate((button: { click(): void }) => button.click())
     await window.getByRole('button', { name: '收藏', exact: true }).evaluate((button: { click(): void }) => button.click())
     await expect(window.getByRole('button', { name: '打开项目：未命名创作' })).toBeVisible()

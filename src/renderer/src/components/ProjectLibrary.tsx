@@ -4,6 +4,7 @@ import {
   Clock3,
   FolderOpen,
   ImagePlus,
+  LayoutTemplate,
   MoreHorizontal,
   Plus,
   Settings2,
@@ -22,6 +23,10 @@ import { ProviderSettingsSheet } from './ProviderSettingsSheet'
 import { activeModal } from '../interaction/keyboard-scope'
 import { useModalScope } from '../interaction/use-modal-scope'
 import { flushProjectWorkContext } from '../store/project-context-sync'
+import { MERCHANT_EXAMPLE_KEYS, MERCHANT_EXAMPLES } from '../fixtures/merchant-examples'
+import { createExampleProject } from '../project/example-project'
+import { ServiceConnectCard } from './ServiceConnectCard'
+import { AppUpdateNotice } from './AppUpdateNotice'
 
 interface ProjectLibraryProps {
   readonly runtime: RuntimeInfo
@@ -56,6 +61,7 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
   const [menuProjectId, setMenuProjectId] = useState<string | null>(null)
   const [deleteCandidate, setDeleteCandidate] = useState<RecentProjectSummary | null>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
+  const examplesRef = useRef<HTMLElement>(null)
   const deleteCancelRef = useRef<HTMLButtonElement>(null)
   const deleteModalRef = useRef<HTMLElement>(null)
   const deleteReturnRef = useRef<HTMLButtonElement>(null)
@@ -197,7 +203,10 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
     >
       <header className="library-titlebar">
         <div className="library-brand"><img src={appIconUrl} alt="AI Canvas" /><span>AI Canvas</span></div>
-        <button type="button" className="library-settings-button" aria-label="打开设置" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button>
+        <div className="library-titlebar-actions">
+          <AppUpdateNotice />
+          <button type="button" className="library-settings-button" aria-label="打开设置" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /></button>
+        </div>
       </header>
 
       <main className="library-main">
@@ -211,6 +220,8 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
             <button type="button" className={filter === 'favorite' ? 'is-active' : ''} onClick={() => setFilter('favorite')}>收藏</button>
           </div>
         </div>
+
+        <ServiceConnectCard onCreateBlank={createBlank} onShowExamples={() => examplesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
 
         <section className={`project-gallery${sortedProjects.length > 0 && sortedProjects.length <= 2 ? ' is-sparse' : ''}`} aria-label="项目库">
           <article className="project-new-card glass-surface">
@@ -288,6 +299,20 @@ export function ProjectLibrary({ runtime, onOpen, onActiveProjectChanged }: Proj
             </div>
           )}
           {sortedProjects.length === 0 && filter === 'favorite' && <div className="library-first-run"><Star size={18} /><p>收藏的项目会留在这里，方便下一次直接继续。</p></div>}
+        </section>
+
+        <section ref={examplesRef} className="library-examples" aria-label="从示例开始">
+          <h2><LayoutTemplate size={15} />从示例开始</h2>
+          <p>做好的作品，图层都能改。打开后跟 Agent 说一句「把标题换成我的店名」试试。</p>
+          <div className="library-example-grid">
+            {MERCHANT_EXAMPLE_KEYS.map((key) => (
+              <button key={key} type="button" className={`library-example-card example-${key}`} disabled={busy} aria-label={`从示例开始：${MERCHANT_EXAMPLES[key].label}`} onClick={() => void run(() => createExampleProject(key))}>
+                <span className="library-example-art" aria-hidden="true" />
+                <strong>{MERCHANT_EXAMPLES[key].label}</strong>
+                <small>{MERCHANT_EXAMPLES[key].ratio} · {MERCHANT_EXAMPLES[key].note}</small>
+              </button>
+            ))}
+          </div>
         </section>
       </main>
 

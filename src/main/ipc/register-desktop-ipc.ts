@@ -8,6 +8,7 @@ import { projectWorkContextSchema } from '../../shared/project-work-context'
 import { generationReferencePreviewInputSchema } from '../../shared/generation-reference'
 import type { AppearanceSettingsService } from '../appearance/appearance-settings-service'
 import type { GenerationRuntime } from '../generation/generation-runtime'
+import type { AppUpdateService } from '../update/app-update-service'
 import { localFontCatalog } from '../fonts/local-font-catalog'
 import { takeOpenFileRequests } from '../open-file-requests'
 import { readPsdForImport } from '../psd/psd-import'
@@ -79,6 +80,25 @@ function ensureAppearanceBroadcast(service: AppearanceSettingsService): void {
   })
 }
 
+let subscribedUpdates: Promise<AppUpdateService> | null = null
+let unsubscribeUpdates: (() => void) | null = null
+
+/** Where updating stands reaches every window, so a downloaded version can be offered wherever the person is. */
+function ensureAppUpdateBroadcast(updates: Promise<AppUpdateService>): void {
+  if (subscribedUpdates === updates) return
+  unsubscribeUpdates?.()
+  unsubscribeUpdates = null
+  subscribedUpdates = updates
+  void updates.then((service) => {
+    if (subscribedUpdates !== updates) return
+    unsubscribeUpdates = service.subscribe((snapshot) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(DESKTOP_EVENTS.appUpdateChanged, snapshot)
+      }
+    })
+  })
+}
+
 let subjectModelBroadcast: (() => void) | null = null
 
 /** Download progress for Select Subject's model reaches every window, so its dialog can follow it. */
@@ -132,13 +152,18 @@ async function createRuntimeInfo(
 export function registerDesktopIpc(
   backgroundMaterial: RuntimeInfo['backgroundMaterial'],
   generationRuntime: Promise<GenerationRuntime>,
-  appearanceSettings: AppearanceSettingsService
+  appearanceSettings: AppearanceSettingsService,
+  appUpdates: Promise<AppUpdateService>
 ): void {
   ensureSceneBroadcast(generationRuntime)
   ensureAppearanceBroadcast(appearanceSettings)
+  ensureAppUpdateBroadcast(appUpdates)
   ensureSubjectModelBroadcast()
   for (const channel of Object.values(DESKTOP_CHANNELS)) ipcMain.removeHandler(channel)
   ipcMain.handle(DESKTOP_CHANNELS.runtimeInfo, async (): Promise<RuntimeInfo> => createRuntimeInfo(backgroundMaterial, generationRuntime))
+  ipcMain.handle(DESKTOP_CHANNELS.appUpdate, async () => (await appUpdates).snapshot())
+  ipcMain.handle(DESKTOP_CHANNELS.appUpdateCheck, async () => (await appUpdates).check())
+  ipcMain.handle(DESKTOP_CHANNELS.appUpdateInstall, async () => (await appUpdates).install())
   ipcMain.handle(DESKTOP_CHANNELS.localFonts, async (_event, rescan: unknown) => localFontCatalog.list({ rescan: rescan === true }))
   ipcMain.handle(DESKTOP_CHANNELS.openFileRequests, () => takeOpenFileRequests())
   ipcMain.handle(DESKTOP_CHANNELS.psdRead, async (_event, bytes: unknown) => {

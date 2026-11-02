@@ -24,14 +24,15 @@
     "test:product-reliability": "vitest run --config vitest.integration.config.ts tests/integration/product-1-f-project-cycles.test.ts --maxWorkers=1 && pnpm build && playwright test --config playwright.product-reliability.config.ts",
     "test:product-security": "vitest run --config vitest.config.ts tests/unit/security-redaction.test.ts tests/unit/renderer-network-boundary.test.ts tests/unit/agent-recovery.test.ts tests/unit/agent-atomic-tools.test.ts tests/unit/provider-agent-p0.test.ts tests/unit/ipc-contracts.test.ts tests/unit/krill-http-transport.test.ts tests/unit/ark-http-multipart.test.ts tests/unit/provider-contracts.test.ts tests/unit/provider-usage-ledger.test.ts tests/unit/context-builder.test.ts tests/unit/diagnostic-export-service.test.ts tests/unit/outbound-image-audit.test.ts --maxWorkers=1 && vitest run --config vitest.integration.config.ts tests/integration/agent-runtime.test.ts tests/integration/generation-queue.test.ts tests/integration/project-storage.test.ts tests/integration/product-provider-runtime.test.ts tests/integration/agent-context-repository.test.ts tests/integration/generation-agent-workflow-runtime.test.ts tests/integration/persistent-agent-loop.test.ts --maxWorkers=1 && pnpm build && playwright test --config playwright.product-security.config.ts",
     "test:e2e": "pnpm build && playwright test --config playwright.config.ts",
-    "package:win": "pnpm build && electron-builder --win nsis portable --config.electronDist=node_modules/electron/dist",
-    "package:win:dir": "pnpm build && electron-builder --win dir --config.electronDist=node_modules/electron/dist"
+    "package:win": "pnpm build && electron-builder --win nsis portable --publish never --config.electronDist=node_modules/electron/dist",
+    "package:win:dir": "pnpm build && electron-builder --win dir --publish never --config.electronDist=node_modules/electron/dist"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "0.10.35",
     "ag-psd": "^31.0.3",
     "ai": "^7.0.58",
     "better-sqlite3": "^13.0.3",
+    "electron-updater": "^6.8.11",
     "immer": "^11.1.16",
     "konva": "^10.3.0",
     "kysely": "^0.29.4",
