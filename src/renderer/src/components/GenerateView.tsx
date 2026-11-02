@@ -266,6 +266,10 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
   const draftProfileFor = (serviceId: string) => profileEntries.find((entry) => entry.status === 'available'
     && entry.profile.providerId === serviceId && entry.profile.tier === 'draft')?.profile
   const readyImageServices = imageServices.filter((service) => service.configured && draftProfileFor(service.id) !== undefined)
+  // Only the services that can do this generation: with a reference, those that take one.
+  const needsReference = referenceSource.kind !== 'text'
+  const fittingImageServices = readyImageServices.filter((service) => service.kind === 'image'
+    && (needsReference ? service.capabilities.imageReferences : service.capabilities.textToImage))
   const configuredImageProvider = imageServices.find((provider) => provider.id === selectedImageServiceId)
   const imageModuleConfigured = configuredImageProvider?.kind === 'image'
     && configuredImageProvider.baseUrl.trim() !== ''
@@ -566,15 +570,16 @@ export function GenerateView({ header }: GenerateViewProps): React.JSX.Element {
                 <button type="button" aria-label="配置图片模型" onClick={() => window.dispatchEvent(new CustomEvent('ai-canvas:open-provider-settings', { detail: { providerId: selectedImageServiceId } }))}><Settings2 size={13} />更换配置</button>
               </div>
             </div>
-            {imageServices.length > 1 && readyImageServices.length > 0 && <label className="generation-model-scenario"><span>生图服务</span><select aria-label="生图服务" value={readyImageServices.some((service) => service.id === selectedImageServiceId) ? selectedImageServiceId : ''} onChange={(event) => {
+            {imageServices.length > 1 && readyImageServices.length > 0 && <label className="generation-model-scenario"><span>生图服务</span><select aria-label="生图服务" value={fittingImageServices.some((service) => service.id === selectedImageServiceId) ? selectedImageServiceId : ''} onChange={(event) => {
               const profile = draftProfileFor(event.currentTarget.value)
               if (profile === undefined) return
               updateDraft({ profileId: profile.id, profileSelectionMade: true, quantity: profile.defaultQuantity, model: profile.modelId })
               setPendingConfirmation(false)
             }}>
-              {!readyImageServices.some((service) => service.id === selectedImageServiceId) && <option value="" disabled>默认服务未就绪，选一个</option>}
-              {readyImageServices.map((service) => <option key={service.id} value={service.id}>{service.label}{service.id === providerSettings?.defaultImageProviderId ? '（默认）' : ''}</option>)}
+              {!fittingImageServices.some((service) => service.id === selectedImageServiceId) && <option value="" disabled>{readyImageServices.some((service) => service.id === selectedImageServiceId) && needsReference ? '当前服务不接受参考图，选一个能用的' : '默认服务未就绪，选一个'}</option>}
+              {fittingImageServices.map((service) => <option key={service.id} value={service.id}>{service.label}{service.id === providerSettings?.defaultImageProviderId ? '（默认）' : ''}</option>)}
             </select></label>}
+            {readyImageServices.length > 0 && fittingImageServices.length === 0 && needsReference && <p className="generation-service-hint" role="status">设置里的生图服务都不接受参考图：给能用参考图的服务打开「参考图」，或把参考改成仅文字。</p>}
             <label className="generation-model-scenario"><span>模型情景</span><select aria-label="模型情景" value={model} onChange={(event) => updateDraft({ model: event.currentTarget.value })}>{activeProvider?.models.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
           </div>
           <div className="generation-tier" role="group" aria-label="生成档位">

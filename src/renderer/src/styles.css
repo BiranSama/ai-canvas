@@ -3550,3 +3550,4 @@ button.knowledge-copy { cursor: pointer; }
 .provider-helper-add { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; margin: -2px 0 6px; }
 .provider-setting-row[data-provider-slot="vision"],
 .provider-setting-row[data-provider-slot="backup"] { margin-left: 18px; }
+.generation-service-hint { margin: 4px 0 0; color: #8a5a32; font-size: 10px; line-height: 1.6; }
