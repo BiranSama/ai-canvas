@@ -1,5 +1,5 @@
 import { Check, KeyRound, Plug } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { PRIMARY_IMAGE_PROVIDER_ID, providerPublicConfigSchema, type ProviderConnectionTestResult, type ProviderSettingsSnapshot } from '../../../shared/provider-settings'
 import { applyLlmVendor, LLM_VENDOR_PRESETS, llmVendorPreset } from '../../../shared/vendor-presets'
 import { useFirstRunStore } from '../store/first-run-store'
@@ -28,6 +28,8 @@ export function ServiceConnectCard({ onCreateBlank, onShowExamples }: {
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   /** Connecting began here: the key is saved before the test, so the card stays up to show how it went. */
   const [engaged, setEngaged] = useState(false)
+  /** One save-and-test at a time: a second would save another vendor's settings and key under the first one's test. */
+  const inFlight = useRef(false)
 
   useEffect(() => {
     let current = true
@@ -39,7 +41,10 @@ export function ServiceConnectCard({ onCreateBlank, onShowExamples }: {
   // Shown while the text model has no key, and kept on screen once connecting began here so the outcome and the next step stay in view.
   if (snapshot === null || llm === undefined || dismissed || (llm.configured && !engaged)) return null
 
+  const working = phase.kind === 'working'
+
   const chooseVendor = (id: string): void => {
+    if (inFlight.current) return
     const next = llmVendorPreset(id)
     setVendorId(id)
     setModel(next.model)
@@ -50,7 +55,8 @@ export function ServiceConnectCard({ onCreateBlank, onShowExamples }: {
   const ready = apiKey.trim().length >= 8 && model.trim() !== '' && baseUrl.trim() !== ''
 
   const connect = async (): Promise<void> => {
-    if (!ready || phase.kind === 'working') return
+    if (!ready || inFlight.current) return
+    inFlight.current = true
     setEngaged(true)
     try {
       setPhase({ kind: 'working', step: '正在保存设置…' })
@@ -74,6 +80,8 @@ export function ServiceConnectCard({ onCreateBlank, onShowExamples }: {
         : { kind: 'failed', title: result.failure.title, detail: `${result.failure.detail} ${result.failure.nextAction}` })
     } catch (error) {
       setPhase({ kind: 'failed', title: '没有连上', detail: error instanceof Error ? error.message : '请检查 Key 和网络后再试。' })
+    } finally {
+      inFlight.current = false
     }
   }
 
@@ -109,7 +117,7 @@ export function ServiceConnectCard({ onCreateBlank, onShowExamples }: {
           <span className="service-connect-step">1 选厂商</span>
           <div className="service-connect-vendors" role="group" aria-label="选厂商">
             {LLM_VENDOR_PRESETS.map((preset) => (
-              <button key={preset.id} type="button" aria-pressed={vendorId === preset.id} onClick={() => chooseVendor(preset.id)}>
+              <button key={preset.id} type="button" aria-pressed={vendorId === preset.id} disabled={working} onClick={() => chooseVendor(preset.id)}>
                 <strong>{preset.label}</strong><small>{preset.note}</small>
               </button>
             ))}
@@ -118,22 +126,22 @@ export function ServiceConnectCard({ onCreateBlank, onShowExamples }: {
         <li>
           <span className="service-connect-step">2 填 Key</span>
           <div className="service-connect-fields">
-            {vendor.id === 'custom' && <label><span>接口地址</span><input aria-label="接口地址" placeholder="https://…/v1" value={baseUrl} onChange={(event) => setBaseUrl(event.currentTarget.value)} /></label>}
-            {(vendor.model === '' || vendor.id === 'custom') && <label><span>模型名</span><input aria-label="模型名" placeholder="照厂商控制台里的模型名填" value={model} onChange={(event) => setModel(event.currentTarget.value)} /></label>}
+            {vendor.id === 'custom' && <label><span>接口地址</span><input aria-label="接口地址" disabled={working} placeholder="https://…/v1" value={baseUrl} onChange={(event) => setBaseUrl(event.currentTarget.value)} /></label>}
+            {(vendor.model === '' || vendor.id === 'custom') && <label><span>模型名</span><input aria-label="模型名" disabled={working} placeholder="照厂商控制台里的模型名填" value={model} onChange={(event) => setModel(event.currentTarget.value)} /></label>}
             <label>
               <span>Key</span>
-              <input aria-label="Key" type="password" autoComplete="new-password" placeholder={vendor.keyHint} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
+              <input aria-label="Key" type="password" disabled={working} autoComplete="new-password" placeholder={vendor.keyHint} value={apiKey} onChange={(event) => setApiKey(event.currentTarget.value)} />
             </label>
             <small><KeyRound size={11} />{vendor.keyHint}。Key 由系统加密保存在这台电脑上，不会写进作品。</small>
             {vendor.sharesKeyWithImage === true && (
-              <label className="service-connect-share"><input type="checkbox" checked={shareWithImage} onChange={(event) => setShareWithImage(event.currentTarget.checked)} />同一个 Key 也用来生图（火山方舟 Seedream）</label>
+              <label className="service-connect-share"><input type="checkbox" checked={shareWithImage} disabled={working} onChange={(event) => setShareWithImage(event.currentTarget.checked)} />同一个 Key 也用来生图（火山方舟 Seedream）</label>
             )}
           </div>
         </li>
         <li>
           <span className="service-connect-step">3 测试连接</span>
           <div className="service-connect-test">
-            <button type="button" className="is-primary" disabled={!ready || phase.kind === 'working'} onClick={() => void connect()}>
+            <button type="button" className="is-primary" disabled={!ready || working} onClick={() => void connect()}>
               {phase.kind === 'working' ? phase.step : '保存并测试连接'}
             </button>
             <small>会发 1 个很小的文字请求，费用预留上限 ¥0.05，不生成图片。</small>
