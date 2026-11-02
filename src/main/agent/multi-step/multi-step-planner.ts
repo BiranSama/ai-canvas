@@ -182,7 +182,14 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       calls: 0,
       /** Null once a call cannot be priced. */
       costCny: 0 as number | null,
+      /** The calls that could be priced; the cost cap counts these even when another call has no price. */
+      pricedCostCny: 0,
       backupCalls: [] as string[]
+    }
+    const addCost = (usage: LlmUsage | null, pricing: LlmPricing | null | undefined): void => {
+      const cost = usage === null || pricing == null ? null : estimateModelCostCny(usage, pricing)
+      if (cost !== null) pass.pricedCostCny += cost
+      pass.costCny = pass.costCny === null || cost === null ? null : pass.costCny + cost
     }
     const record = (result: LlmToolResult): void => {
       results.set(result.callId, result)
@@ -222,7 +229,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         modelTurns += 1
         pass.calls += 1
         if (turn.usage !== null) pass.usage.push(turn.usage)
-        pass.costCny = pass.costCny === null || turn.usage === null || helper.pricing == null ? null : pass.costCny + estimateModelCostCny(turn.usage, helper.pricing)
+        addCost(turn.usage, helper.pricing)
         return turnText(turn)
       },
       screenshots,
@@ -253,7 +260,8 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           brief: pass.brief,
           checkpoint: pass.checkpoint,
           modelCalls: pass.calls,
-          costCny: pass.calls === 0 ? null : pass.costCny === null ? null : Number(pass.costCny.toFixed(6))
+          costCny: pass.calls === 0 ? null : pass.costCny === null ? null : Number(pass.costCny.toFixed(6)),
+          pricedCostCny: pass.calls === 0 ? null : Number(pass.pricedCostCny.toFixed(6))
         } satisfies ModelTrace
       },
       modelTurns
@@ -303,7 +311,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       }
       // A pass that has made its share of calls, or spent what the turn has left, hands back what it has;
       // the loop stores it, checks the turn's guards and cost cap, and asks again.
-      const spentInPass = pass.costCny ?? 0
+      const spentInPass = pass.pricedCostCny
       if (modelTurns > 0 && (modelTurns >= callLimit || pass.results.length >= MAX_PASS_RESULTS
         || (input.costLeftCny != null && spentInPass >= input.costLeftCny))) {
         return finish({ kind: 'progress' }, null, modelTurns)
@@ -332,18 +340,18 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
         // The steps the checkpoint replaced are no longer sent, nor their screenshots.
         this.#screenshots.clear()
       }
-      const { turn, served } = await this.#callModel(model, {
+      const { turn, served, requests } = await this.#callModel(model, {
         system,
         messages,
         tools,
         maxOutputTokens: model.maxOutputTokens,
         // One conversation's requests share their start; vendors that route by key serve them from one cache.
         cacheKey: `ai-canvas-${input.turn.threadId}`
-      }, signal, context, modelTurns, screenshots === 'allowed')
-      modelTurns += 1
-      pass.calls += 1
+      }, signal, context, modelTurns, screenshots === 'allowed', modelTurns + 1 < callLimit)
+      modelTurns += requests
+      pass.calls += requests
       if (turn.usage !== null) pass.usage.push(turn.usage)
-      pass.costCny = pass.costCny === null || turn.usage === null || served.pricing == null ? null : pass.costCny + estimateModelCostCny(turn.usage, served.pricing)
+      addCost(turn.usage, served.pricing)
       if (served !== model) {
         pass.backupCalls.push(served.label)
         const uses = this.#backupUses.get(input.turn.id) ?? new Set<string>()
@@ -489,16 +497,19 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     signal: AbortSignal,
     context: AgentPlannerAttemptContext | undefined,
     previousCalls: number,
-    imagesApproved: boolean
-  ): Promise<{ readonly turn: LlmAssistantTurn; readonly served: MultiStepModel }> {
+    imagesApproved: boolean,
+    /** Whether the turn has a model call left for the backup's request. */
+    backupAllowed: boolean
+  ): Promise<{ readonly turn: LlmAssistantTurn; readonly served: MultiStepModel; readonly requests: number }> {
     try {
-      return { turn: await this.#callOnce(model, request, signal, context, previousCalls, imagesApproved), served: model }
+      return { turn: await this.#callOnce(model, request, signal, context, previousCalls, imagesApproved), served: model, requests: 1 }
     } catch (error) {
       const backup = model.backup
-      if (backup === undefined || backup === null || signal.aborted || !backupCanAnswer(error)) throw error
+      if (backup === undefined || backup === null || !backupAllowed || signal.aborted || !backupCanAnswer(error)) throw error
       // A backup that cannot see gets the request without its pictures, as a declined screenshot is sent.
       const sent = backup.protocol.capabilities.vision ? request : { ...request, messages: request.messages.map(withoutImages) }
-      return { turn: await this.#callOnce(backup, { ...sent, maxOutputTokens: backup.maxOutputTokens }, signal, context, previousCalls, imagesApproved), served: backup }
+      // The failed request and the backup's both count as model calls of the turn.
+      return { turn: await this.#callOnce(backup, { ...sent, maxOutputTokens: backup.maxOutputTokens }, signal, context, previousCalls + 1, imagesApproved), served: backup, requests: 2 }
     }
   }
 

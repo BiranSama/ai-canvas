@@ -52,7 +52,9 @@ export const modelTraceSchema = z.object({
   /** Model calls this pass made, including any whose usage was not reported. */
   modelCalls: z.number().int().nonnegative().default(0),
   /** Estimated cost of those calls; null without a price or when a call reported no usage. */
-  costCny: z.number().nonnegative().nullable().default(null)
+  costCny: z.number().nonnegative().nullable().default(null),
+  /** The cost of the calls that could be priced, which the turn's cost cap counts; null in passes stored before it was kept. */
+  pricedCostCny: z.number().nonnegative().nullable().default(null)
 })
 
 export type ModelTrace = z.infer<typeof modelTraceSchema>
@@ -122,5 +124,8 @@ export function transcriptFrom(input: {
 
 /** The estimated cost of a turn's model calls that could be priced; calls without a price count as nothing. */
 export function turnModelCostCny(items: readonly AgentItem[]): number {
-  return items.reduce((total, item) => total + (traceOf(item)?.costCny ?? 0), 0)
+  return items.reduce((total, item) => {
+    const trace = traceOf(item)
+    return total + (trace?.pricedCostCny ?? trace?.costCny ?? 0)
+  }, 0)
 }

@@ -39,9 +39,11 @@ it('gives each new turn the engine preferred now, and lets a turn under way fini
   expect(switcher.engine).toBe('multi-step')
   expect(switcher.stepwise).toBe(true)
   await switcher.next(step('t2', 0), new AbortController().signal)
-  // The key is removed mid-turn: that turn keeps going step by step until it completes.
+  // The key is removed mid-turn: that turn keeps going step by step until it completes; new turns plan locally.
   switcher.prefer('plan-once')
-  expect(switcher.engine).toBe('multi-step')
+  expect(switcher.engine).toBe('plan-once')
+  expect(switcher.stepwiseFor('t2', [])).toBe(true)
+  expect(switcher.stepwiseFor(null, [])).toBe(false)
   multiStepDone = true
   await switcher.next(step('t2', 1), new AbortController().signal)
   expect(switcher.engine).toBe('plan-once')
@@ -54,14 +56,28 @@ it('resumes a started turn on the engine it started on, also after reopening', a
   // Reopened after the text model was set up: new turns go step by step.
   const reopened = new EngineSwitchingPlanner({ 'multi-step': engine('multi', true, calls), 'plan-once': engine('local', false, calls) }, 'multi-step')
   const localTurn = [plan('t7', false)]
-  expect(reopened.stepwiseFor(localTurn)).toBe(false)
+  expect(reopened.stepwiseFor('t7', localTurn)).toBe(false)
   await reopened.next(step('t7', 1, localTurn), new AbortController().signal)
   // Reopened after the key was removed: a step-by-step turn still finishes step by step.
   const removed = new EngineSwitchingPlanner({ 'multi-step': engine('multi', true, calls), 'plan-once': engine('local', false, calls) }, 'plan-once')
   const stepwiseTurn = [plan('t8', true)]
-  expect(removed.stepwiseFor(stepwiseTurn)).toBe(true)
-  expect(removed.stepwiseFor([])).toBe(false)
+  expect(removed.stepwiseFor('t8', stepwiseTurn)).toBe(true)
+  expect(removed.stepwiseFor(null, [])).toBe(false)
   await removed.next(step('t8', 0, stepwiseTurn), new AbortController().signal)
   await removed.next(step('t9', 0), new AbortController().signal)
   expect(calls).toEqual(['local:t7:1', 'multi:t8:0', 'local:t9:0'])
+})
+
+it('gives a new turn the preferred engine although an earlier one ended without completing', async () => {
+  const calls: string[] = []
+  const progressing: PlannerAdapter = { stepwise: false, next: async (input) => { calls.push(`local:${input.turn.id}`); return { step: { kind: 'progress' }, modelTurns: 0 } as unknown as PlannerStepResult } }
+  const switcher = new EngineSwitchingPlanner({ 'multi-step': engine('multi', true, calls), 'plan-once': progressing }, 'plan-once')
+  // A local turn stops at a question, and is then cancelled or answered with 先保留画布, never completing here.
+  await switcher.next(step('t1', 0), new AbortController().signal)
+  switcher.prefer('multi-step')
+  expect(switcher.stepwiseFor(null, [])).toBe(true)
+  expect(switcher.stepwise).toBe(true)
+  expect(switcher.stepwiseFor('t1', [plan('t1', false)])).toBe(false)
+  await switcher.next(step('t2', 0), new AbortController().signal)
+  expect(calls).toEqual(['local:t1', 'multi:t2:0'])
 })

@@ -124,3 +124,25 @@ it('takes a gateway timeout to the backup, but not the turn running out of time'
   await expect(planner(slow).next(input(), new AbortController().signal)).rejects.toMatchObject({ code: 'PROVIDER_TIMEOUT' })
   expect(backup.requests).toHaveLength(1)
 })
+
+it('counts a request taken over by the backup as two model calls, and does not send it without a call to spare', async () => {
+  const backup = model('backup-model', () => ({ id: 'b1', status: 'completed', output: reply('备用模型接上了。'), usage }))
+  const main = model('main-model', () => { throw new ArkHttpError('PROVIDER_UPSTREAM_ERROR', '服务出错', 503, 'application/json') }, { backup })
+  const result = await planner(main).next(input(), new AbortController().signal)
+  expect(result.modelTurns).toBe(2)
+  expect((result.step.trace as ModelTrace).modelCalls).toBe(2)
+  const lastCall = model('main-model', () => { throw new ArkHttpError('PROVIDER_UPSTREAM_ERROR', '服务出错', 503, 'application/json') }, { backup })
+  await expect(planner(lastCall, false, 1).next(input(), new AbortController().signal)).rejects.toMatchObject({ code: 'PROVIDER_UPSTREAM_ERROR' })
+  expect(backup.requests).toHaveLength(1)
+})
+
+it('keeps the priced cost for the cost cap when the vision model has no price', async () => {
+  const vision = model('vision-model', () => ({ id: 'v1', status: 'completed', output: reply('标题在左上角。'), usage }), { sees: true })
+  const main = model('main-model', (_body, count) => count === 1
+    ? { id: 'm1', status: 'completed', output: [{ type: 'function_call', id: 'fc_1', call_id: 'look1', name: 'look', arguments: '{}', status: 'completed' }], usage }
+    : { id: 'm2', status: 'completed', output: reply('好了。'), usage }, { vision, pricing: { inputPerMillionCny: 10, cachedInputPerMillionCny: null, outputPerMillionCny: 10 } })
+  const trace = (await planner(main, true).next(input(), new AbortController().signal)).step.trace as ModelTrace
+  // Not a full estimate, since one call has no price; the two priced main calls still count: 2 × (1,000 + 100) at ¥10 per million.
+  expect(trace.costCny).toBeNull()
+  expect(trace.pricedCostCny).toBeCloseTo(0.022, 6)
+})

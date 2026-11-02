@@ -351,7 +351,9 @@ export function ProviderSettingsSheet({
     setStatus(`正在测试${label}…`)
     try {
       const value = await window.desktop.checkProvider(providerId)
-      publishSnapshot(value)
+      // Only the check changed: the drafts being edited elsewhere stay as they are.
+      setSnapshot(value)
+      window.dispatchEvent(new CustomEvent('ai-canvas:provider-settings-changed', { detail: { snapshot: value } }))
       const check = value.checks[providerId]
       setStatus(check === undefined ? '测试没有结果。' : `${label}：${check.summary}`)
     } catch (error) {
@@ -656,6 +658,8 @@ export function ProviderSettingsSheet({
             const imageIndex = snapshot.providers.findIndex((candidate) => candidate.id === provider.id)
             const prefix = role !== null ? TEXT_HELPER_NAMES[role] : provider.kind === 'llm' ? 'LLM Provider' : provider.id === PRIMARY_IMAGE_PROVIDER_ID ? 'Image Provider' : `Image Provider ${imageIndex}`
             const check = snapshot.checks[provider.id]
+            // 测试 checks what is saved, so it waits until this card's changes are saved.
+            const cardSaved = JSON.stringify(draft) === JSON.stringify(providerPublicConfigSchema.parse(provider))
             const imageServices = snapshot.providers.length - 1
             const isDefaultImage = provider.kind === 'image' && snapshot.defaultImageProviderId === provider.id
             return (
@@ -681,7 +685,7 @@ export function ProviderSettingsSheet({
                       {provider.configured ? <Check size={11} /> : <KeyRound size={11} />}
                       {provider.configured ? '已配置' : '无凭据'}</span>
                     {provider.kind === 'image' && !isDefaultImage && <button type="button" className="provider-edit-toggle" aria-label={`把 ${draft.label} 设为默认生图服务`} disabled={busy !== null} onClick={() => void makeDefaultImageService(provider.id)}>设为默认</button>}
-                    <button type="button" className="provider-edit-toggle" aria-label={`测试 ${draft.label}`} title={provider.configured ? '发一个很小的请求检查这个服务；生图服务的测试不生成图片' : '先保存 Key 再测试'} disabled={!provider.configured || busy !== null} onClick={() => void checkService(provider.id, draft.label)}>{busy === provider.id ? '测试中' : '测试'}</button>
+                    <button type="button" className="provider-edit-toggle" aria-label={`测试 ${draft.label}`} title={!provider.configured ? '先保存 Key 再测试' : !cardSaved ? '先保存这张卡片的更改再测试' : '发一个很小的请求检查这个服务；生图服务的测试不生成图片'} disabled={!provider.configured || !cardSaved || busy !== null} onClick={() => void checkService(provider.id, draft.label)}>{busy === provider.id ? '测试中' : '测试'}</button>
                     <button type="button" className="provider-edit-toggle" aria-expanded={expandedProvider === provider.id} onClick={() => setExpandedProvider((current) => current === provider.id ? null : provider.id)}><Pencil size={11} />{expandedProvider === provider.id ? '收起' : '编辑'}</button>
                   </div>
                 </div>

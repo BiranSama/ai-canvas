@@ -90,8 +90,11 @@ export interface PlannerAdapter {
    * result back, instead of executing a whole plan.
    */
   readonly stepwise?: boolean
-  /** Whether the turn these items belong to is served step by step, for planners that choose per turn. */
-  stepwiseFor?(items: readonly AgentItem[]): boolean
+  /**
+   * Whether a turn is served step by step, for planners that choose per turn:
+   * the turn with this id and items, or a new turn when the id is null.
+   */
+  stepwiseFor?(turnId: string | null, items: readonly AgentItem[]): boolean
   next(input: PlannerInput, signal: AbortSignal, context?: AgentPlannerAttemptContext): Promise<PlannerStepResult>
 }
 

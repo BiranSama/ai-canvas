@@ -34,22 +34,22 @@ export class EngineSwitchingPlanner implements PlannerAdapter {
     this.#preferred = engine
   }
 
-  /** The engine of the turn under way, or the one a new turn would take. */
+  /** The engine a new turn takes; a turn that has started is asked about with stepwiseFor. */
   get engine(): AgentEngine {
-    return this.#turnId === null ? this.#preferred : this.#current
+    return this.#preferred
   }
 
   get stepwise(): boolean {
     return this.#engines[this.engine].stepwise === true
   }
 
-  stepwiseFor(items: readonly AgentItem[]): boolean {
-    return this.#engines[this.#engineFor(items)].stepwise === true
+  stepwiseFor(turnId: string | null, items: readonly AgentItem[]): boolean {
+    return this.#engines[this.#engineFor(turnId, items)].stepwise === true
   }
 
   async next(input: PlannerInput, signal: AbortSignal, context?: AgentPlannerAttemptContext): Promise<PlannerStepResult> {
     if (input.turn.id !== this.#turnId) {
-      this.#current = this.#engineFor(input.items)
+      this.#current = this.#engineFor(input.turn.id, input.items)
       this.#turnId = input.turn.id
     }
     const result = await this.#engines[this.#current].next(input, signal, context)
@@ -57,9 +57,9 @@ export class EngineSwitchingPlanner implements PlannerAdapter {
     return result
   }
 
-  /** The turn being served keeps its engine; another started turn, its own; a fresh one, the preferred. */
-  #engineFor(items: readonly AgentItem[]): AgentEngine {
-    if (this.#turnId !== null && items.every((item) => item.turnId === this.#turnId)) return this.#current
+  /** The turn being served keeps its engine; another started turn, its own; a new one, the preferred. */
+  #engineFor(turnId: string | null, items: readonly AgentItem[]): AgentEngine {
+    if (turnId !== null && turnId === this.#turnId) return this.#current
     return startedOn(items) ?? this.#preferred
   }
 }

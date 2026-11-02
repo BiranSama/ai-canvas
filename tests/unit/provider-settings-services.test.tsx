@@ -80,3 +80,16 @@ it('shows what each image service can do', async () => {
   await act(async () => undefined)
   expect(screen.getByLabelText('火山方舟 · Seedream 5.0 能做什么')).toHaveTextContent('文生图参考图局部修改多张参考')
 })
+
+it('waits for a card to be saved before testing it, and keeps other edits when a test returns', async () => {
+  const api = desktop(snapshot())
+  render(<ProviderSettingsSheet onClose={() => undefined} initialProviderId="openai-compatible-llm" />)
+  await act(async () => undefined)
+  const model = screen.getByLabelText('LLM Provider 默认模型')
+  fireEvent.change(model, { target: { value: 'unsaved-model' } })
+  expect(screen.getByRole('button', { name: /^测试 火山方舟 · Seed 2/ })).toBeDisabled()
+  // Testing another, saved, service leaves the text model's unsaved name alone.
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^测试 火山方舟 · Seedream/ })) })
+  expect(api.checkProvider).toHaveBeenCalledWith('image-provider')
+  expect(screen.getByLabelText('LLM Provider 默认模型')).toHaveValue('unsaved-model')
+})
