@@ -685,6 +685,11 @@ export class PersistentAgentLoop {
     this.#now = options.now ?? (() => new Date().toISOString())
   }
 
+  /** Whether the turn with these items is served step by step; a turn keeps the engine it started on. */
+  #stepwiseFor(items: readonly AgentItem[]): boolean {
+    return this.#planner.stepwiseFor?.(items) ?? this.#planner.stepwise === true
+  }
+
   /** The budget of a turn with no goal, for the engine serving turns now. */
   get #budget(): AgentRunBudget {
     return this.#budgetOverride ?? (this.#planner.stepwise === true ? STEPWISE_AUTO_BUDGET : DEFAULT_AUTO_BUDGET)
@@ -873,7 +878,7 @@ export class PersistentAgentLoop {
     const decisionPayload = payload<StoredDecisionPayload>(decision)
     if (!decisionPayload.proposal.options.some((option) => option.id === optionId)) throw new Error('Decision option does not exist.')
     // A stepwise planner hears the refusal as the call's result and carries on.
-    if (decisionPayload.proposal.kind === 'generation_confirmation' && optionId === 'keep_canvas' && this.#planner.stepwise !== true) {
+    if (decisionPayload.proposal.kind === 'generation_confirmation' && optionId === 'keep_canvas' && !this.#stepwiseFor(items)) {
       await this.#repository.transitionItem(decision.id, 'completed', { ...decisionPayload, optionId })
       const legacyRunId = turn.inputMessageId ?? ''
       await this.#projection.onDecisionResolved?.({ legacyRunId, proposal: decisionPayload.proposal, optionId })
@@ -1437,7 +1442,7 @@ export class PersistentAgentLoop {
           requestCorrelationId
         } satisfies StoredPlanItem
       })
-      const stepwise = this.#planner.stepwise === true
+      const stepwise = this.#stepwiseFor(items)
       // A stepwise planner's one-tool plans are steps, not replacement plans; the
       // activity list grows per call instead.
       const projectionIndex = stepwise ? items.filter((item) => item.type === 'tool_call').length : null

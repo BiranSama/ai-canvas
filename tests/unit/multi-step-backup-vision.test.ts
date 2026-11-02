@@ -54,12 +54,13 @@ function input(): PlannerInput {
   }
 }
 
-function planner(main: MultiStepModel, looker = false): MultiStepPlannerAdapter {
+function planner(main: MultiStepModel, looker = false, maxModelCallsPerPass?: number): MultiStepPlannerAdapter {
   const scene = createScene({ id: uuid(2), projectId: PROJECT, now: NOW })
   return new MultiStepPlannerAdapter({
     scene: () => scene,
     generation: async () => null,
     model: async () => main,
+    ...(maxModelCallsPerPass === undefined ? {} : { maxModelCallsPerPass }),
     ...(looker ? { looker: { look: async () => ({ mimeType: 'image/png' as const, base64: 'iVBORw0KGgo=' }) } } : {})
   })
 }
@@ -102,4 +103,24 @@ it('lets a model that cannot see look through the vision model, and counts that 
   expect(main.requests).toHaveLength(2)
   expect(result.step).toMatchObject({ kind: 'complete', assessment: { summary: '标题和人物重叠了，我建议挪一下。' } })
   expect((result.step.trace as ModelTrace).modelCalls).toBe(3)
+  // The look counts toward the turn's model calls.
+  expect(result.modelTurns).toBe(3)
+})
+
+it('does not look through the vision model once the turn has no model calls left', async () => {
+  const vision = model('vision-model', () => ({ id: 'v1', status: 'completed', output: reply('不该到这里'), usage }), { sees: true })
+  const main = model('main-model', () => ({ id: 'm1', status: 'completed', output: [{ type: 'function_call', id: 'fc_1', call_id: 'look1', name: 'look', arguments: '{}', status: 'completed' }], usage }), { vision })
+  const result = await planner(main, true, 1).next(input(), new AbortController().signal)
+  expect(vision.requests).toHaveLength(0)
+  expect(result.modelTurns).toBe(1)
+  expect(JSON.stringify((result.step.trace as ModelTrace).results)).toContain('看图模型这次没有看到画面（这一轮的模型调用次数已用完）')
+})
+
+it('takes a gateway timeout to the backup, but not the turn running out of time', async () => {
+  const backup = model('backup-model', () => ({ id: 'b1', status: 'completed', output: reply('备用模型接上了。'), usage }))
+  const gateway = model('main-model', () => { throw new ArkHttpError('PROVIDER_TIMEOUT', '网关超时', 504, 'text/html') }, { backup })
+  await expect(planner(gateway).next(input(), new AbortController().signal)).resolves.toMatchObject({ step: { kind: 'complete', assessment: { summary: '备用模型接上了。' } } })
+  const slow = model('main-model', () => { throw new ArkHttpError('PROVIDER_TIMEOUT', '在 30000 毫秒内没有响应', null, null) }, { backup })
+  await expect(planner(slow).next(input(), new AbortController().signal)).rejects.toMatchObject({ code: 'PROVIDER_TIMEOUT' })
+  expect(backup.requests).toHaveLength(1)
 })

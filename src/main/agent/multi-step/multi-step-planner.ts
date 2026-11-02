@@ -49,7 +49,11 @@ const VISION_HELPER_SYSTEM = '你替一个不能看图的设计助手看图。�
 const BACKUP_CODES = new Set(['PROVIDER_RATE_LIMITED', 'PROVIDER_UPSTREAM_ERROR', 'PROVIDER_NETWORK_ERROR', 'PROVIDER_CONNECT_TIMEOUT'])
 
 function backupCanAnswer(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' && BACKUP_CODES.has(error.code)
+  if (typeof error !== 'object' || error === null || !('code' in error) || typeof error.code !== 'string') return false
+  if (BACKUP_CODES.has(error.code)) return true
+  // A gateway that gave up waiting (HTTP 504 or 408) is the service failing, not this turn's own deadline running out.
+  const status = 'status' in error ? error.status : null
+  return error.code === 'PROVIDER_TIMEOUT' && (status === 504 || status === 408)
 }
 
 export interface MultiStepPlannerOptions {
@@ -191,6 +195,9 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     const generated = (input.request.generationResults ?? []) as readonly GenerationResultEntry[]
     for (const result of this.#settleEmittedCalls(items, traces, scene, generated)) record(result)
 
+    // Every request of this pass counts toward the turn's model calls, a look through the vision model included.
+    let modelTurns = 0
+    const callLimit = this.#modelCallLimit(input.turn.modelTurnsUsed, input.budget)
     const toolContext: AgentToolContext = {
       scene,
       refs,
@@ -204,6 +211,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       vision: model.protocol.capabilities.vision,
       describeImage: model.protocol.capabilities.vision || model.vision === undefined || model.vision === null ? null : async (image, question) => {
         const helper = model.vision!
+        if (modelTurns >= callLimit) throw new Error('这一轮的模型调用次数已用完')
         const turn = await this.#callOnce(helper, {
           system: VISION_HELPER_SYSTEM,
           messages: [{ role: 'user', parts: [{ type: 'text', text: question }, { type: 'image', image }] }],
@@ -211,6 +219,7 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
           maxOutputTokens: Math.min(2_048, helper.maxOutputTokens)
         }, signal, context, pass.calls, true)
         // A look through the vision model is a model call of this turn, priced at the vision model's rates.
+        modelTurns += 1
         pass.calls += 1
         if (turn.usage !== null) pass.usage.push(turn.usage)
         pass.costCny = pass.costCny === null || turn.usage === null || helper.pricing == null ? null : pass.costCny + estimateModelCostCny(turn.usage, helper.pricing)
@@ -252,8 +261,6 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     }
 
     let opening: LlmTranscriptMessage | null = null
-    let modelTurns = 0
-    const callLimit = this.#modelCallLimit(input.turn.modelTurnsUsed, input.budget)
     while (true) {
       // Calls left over from the latest assistant step run before the model is asked again.
       const latest = [...assistants, ...pass.assistants].at(-1)

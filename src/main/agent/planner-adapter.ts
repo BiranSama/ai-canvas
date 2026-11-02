@@ -90,6 +90,8 @@ export interface PlannerAdapter {
    * result back, instead of executing a whole plan.
    */
   readonly stepwise?: boolean
+  /** Whether the turn these items belong to is served step by step, for planners that choose per turn. */
+  stepwiseFor?(items: readonly AgentItem[]): boolean
   next(input: PlannerInput, signal: AbortSignal, context?: AgentPlannerAttemptContext): Promise<PlannerStepResult>
 }
 

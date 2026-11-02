@@ -127,10 +127,10 @@ export const lookTool = defineTool({
         : args.mode === 'reference'
           ? '这是要发给生图模型的参考图。请描述构图、主体位置、颜色和留白。'
           : '这是一张正在制作的设计稿。请具体描述：构图和主体位置、文字内容和是否清楚、颜色、有没有遮挡、重叠或贴边的问题。'
-      const seen = await describeImage(image, question).then((text) => text.trim()).catch(() => '')
+      const seen = await describeImage(image, question).then((text) => ({ text: text.trim(), reason: null }), (error: unknown) => ({ text: '', reason: error instanceof Error ? error.message : null }))
       const facts = isolated === null ? describeLayout(context) : describeTarget('')
-      if (seen === '') return answer({ ...facts, summary: '看图模型这次没有回应，这是画面的文字描述。' })
-      return answer({ ...facts, summary: `当前文字模型不能看图，看图模型看到的是：${seen.slice(0, 1_500)}` })
+      if (seen.text === '') return answer({ ...facts, summary: `看图模型这次没有看到画面${seen.reason === null ? '' : `（${seen.reason.slice(0, 120)}）`}，这是画面的文字描述。` })
+      return answer({ ...facts, summary: `当前文字模型不能看图，看图模型看到的是：${seen.text.slice(0, 1_500)}` })
     }
     return answer({
       ok: true,
