@@ -129,6 +129,7 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+N', action: '新建空白项目' },
       { keys: 'Ctrl+O', action: '打开图片或 PSD，自动建成项目' },
       { keys: 'Ctrl+Shift+S', action: '项目另存为' },
+      { keys: 'Ctrl+Alt+Shift+W', action: '导出（图片、PSD、PDF、多尺寸）' },
       { keys: 'Ctrl+Alt+Shift+K', action: '快捷键一览' }
     ]
   },

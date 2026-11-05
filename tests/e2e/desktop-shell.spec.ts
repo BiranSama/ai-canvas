@@ -1,7 +1,9 @@
 import { _electron as electron, expect, test } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import sharp from 'sharp'
+import { exportThroughPanel } from '../helpers/export-file'
 import { openEditor } from '../helpers/workbench-ui'
 
 test('launches the production canvas with native modules isolated in Main', async () => {
@@ -189,68 +191,27 @@ test('launches the production canvas with native modules isolated in Main', asyn
     await window.getByLabel('撤销', { exact: true }).evaluate((button) => button.click())
     await expect(xField).toHaveValue(initialX)
 
-    const exported = await window.evaluate(`(async () => {
-      let captured = null
-      const originalClick = HTMLAnchorElement.prototype.click
-      HTMLAnchorElement.prototype.click = function captureExport() { captured = this.href }
-      try {
-        document.querySelector('.export-control > button')?.click()
-        if (captured === null) throw new Error('Export did not produce a data URL.')
-        const image = new Image()
-        const loaded = new Promise((resolveLoaded, rejectLoaded) => {
-          image.onload = () => resolveLoaded()
-          image.onerror = () => rejectLoaded(new Error('Exported image could not be decoded.'))
-        })
-        image.src = captured
-        await loaded
-        const canvas = document.createElement('canvas')
-        canvas.width = image.width
-        canvas.height = image.height
-        const context = canvas.getContext('2d')
-        context?.drawImage(image, 0, 0)
-        const pixel = context?.getImageData(20, 20, 1, 1).data
-        const referenceOnlyPixel = context?.getImageData(512, 850, 1, 1).data
-        return {
-          mimePrefix: captured.slice(0, 22),
-          width: image.width,
-          height: image.height,
-          topPixel: pixel === undefined ? [] : [...pixel],
-          referenceOnlyPixel: referenceOnlyPixel === undefined ? [] : [...referenceOnlyPixel]
-        }
-      } finally {
-        HTMLAnchorElement.prototype.click = originalClick
-      }
-    })()`)
-    expect(exported).toEqual({
-      mimePrefix: 'data:image/png;base64,',
+    const exportedPng = await sharp(await readFile(await exportThroughPanel(window))).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    const pixelAt = (x: number, y: number): number[] => [...exportedPng.data.subarray((y * exportedPng.info.width + x) * 4, (y * exportedPng.info.width + x) * 4 + 4)]
+    expect({
+      width: exportedPng.info.width,
+      height: exportedPng.info.height,
+      topPixel: pixelAt(20, 20),
+      referenceOnlyPixel: pixelAt(512, 850)
+    }).toEqual({
       width: 1024,
       height: 1280,
       topPixel: [17, 23, 34, 255],
       referenceOnlyPixel: [17, 23, 34, 255]
     })
 
-    const formatSelect = window.getByRole('combobox', { name: '导出格式' })
-    for (const format of [
-      { value: 'jpeg', prefix: 'data:image/jpeg;base64,' },
-      { value: 'webp', prefix: 'data:image/webp;base64,' }
-    ]) {
-      await formatSelect.selectOption(format.value)
-      if (format.value === 'jpeg') await expect(window.getByLabel('JPEG 背景色')).toBeVisible()
-      const prefix = await window.evaluate(`(() => {
-        let captured = null
-        const originalClick = HTMLAnchorElement.prototype.click
-        HTMLAnchorElement.prototype.click = function captureExport() { captured = this.href }
-        try {
-          document.querySelector('.export-control > button')?.click()
-          return captured === null ? null : captured.slice(0, 23)
-        } finally {
-          HTMLAnchorElement.prototype.click = originalClick
-        }
-      })()`)
-      expect(prefix).toBe(format.prefix)
+    for (const format of [{ label: 'JPEG', format: 'jpeg' }, { label: 'WebP', format: 'webp' }] as const) {
+      const file = await exportThroughPanel(window, { kind: 'image', format: format.label })
+      expect((await sharp(await readFile(file)).metadata()).format).toBe(format.format)
     }
+    // 2× draws text and shapes again at twice the size.
+    expect(await sharp(await readFile(await exportThroughPanel(window, { kind: 'image', format: 'PNG', scale: 2 }))).metadata()).toMatchObject({ width: 2048, height: 2560 })
 
-    await formatSelect.selectOption('png')
     await window.getByRole('tab', { name: /图层/ }).evaluate((button) => button.click())
     await window.locator('.layer-copy').filter({ hasText: '背景' }).first().click()
     await window.getByRole('button', { name: '隐藏背景' }).click()
@@ -263,26 +224,8 @@ test('launches the production canvas with native modules isolated in Main', asyn
       if (!checkbox.checked) checkbox.click()
     })
     await expect(transparentBackground).toBeChecked()
-    const transparentPixel = await window.evaluate(`(async () => {
-      let captured = null
-      const originalClick = HTMLAnchorElement.prototype.click
-      HTMLAnchorElement.prototype.click = function captureExport() { captured = this.href }
-      try {
-        document.querySelector('.export-control > button')?.click()
-        const image = new Image()
-        const loaded = new Promise((resolveLoaded) => { image.onload = resolveLoaded })
-        image.src = captured
-        await loaded
-        const canvas = document.createElement('canvas')
-        canvas.width = image.width
-        canvas.height = image.height
-        const context = canvas.getContext('2d')
-        context.drawImage(image, 0, 0)
-        return [...context.getImageData(20, 20, 1, 1).data]
-      } finally {
-        HTMLAnchorElement.prototype.click = originalClick
-      }
-    })()`)
+    const transparentPng = await sharp(await readFile(await exportThroughPanel(window))).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    const transparentPixel = [...transparentPng.data.subarray((20 * transparentPng.info.width + 20) * 4, (20 * transparentPng.info.width + 20) * 4 + 4)]
     expect(transparentPixel).toEqual([0, 0, 0, 0])
 
     const rendererCapabilities = await window.evaluate(() => {
@@ -304,6 +247,12 @@ test('launches the production canvas with native modules isolated in Main', asyn
         'getAppUpdate',
         'checkForAppUpdate',
         'installAppUpdate',
+        'chooseExportFile',
+        'chooseExportFolder',
+        'writeExportImage',
+        'writeExportPdf',
+        'writeExportPsd',
+        'revealExport',
         'onAppUpdate',
         'listLocalFonts',
         'takeOpenFileRequests',

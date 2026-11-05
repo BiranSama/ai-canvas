@@ -2,11 +2,11 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 import { mkdtemp } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import sharp from 'sharp'
 import type { PaintOp, SceneElement } from '../../src/domain'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { applyPaintOps } from '../../src/shared/paint-ops'
 import { openEditor } from '../helpers/workbench-ui'
+import { exportedPixels } from '../helpers/export-file'
 
 async function launch(): Promise<{ app: ElectronApplication, page: Page }> {
   const userData = await mkdtemp(join(tmpdir(), 'paint-'))
@@ -52,18 +52,9 @@ async function newCanvasWithLayer(page: Page): Promise<void> {
   await expect.poll(async () => (await bootstrap(page)).scene.elements.map((element) => element.name)).toEqual(['图层 1'])
 }
 
-/** The picture as the export button writes it, as raw RGBA. */
-async function exported(page: Page): Promise<{ data: Buffer, width: number, height: number }> {
-  const url = await page.evaluate(`(() => {
-    let captured = null
-    const originalClick = HTMLAnchorElement.prototype.click
-    HTMLAnchorElement.prototype.click = function captureExport() { captured = this.href }
-    try { document.querySelector('.export-control > button')?.click() } finally { HTMLAnchorElement.prototype.click = originalClick }
-    return captured
-  })()`) as string | null
-  if (url === null) throw new Error('Export did not produce a data URL.')
-  const { data, info } = await sharp(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
-  return { data, width: info.width, height: info.height }
+/** The picture as the 导出 panel writes it to PNG, as raw RGBA. */
+async function exported(page: Page): Promise<{ readonly data: Buffer, readonly width: number, readonly height: number }> {
+  return exportedPixels(page)
 }
 
 /** The layer's recorded paint replayed on a transparent canvas, over the artboard colour. */

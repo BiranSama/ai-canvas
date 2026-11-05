@@ -1,3 +1,4 @@
+import type { ExportFileChoice, ExportImageWrite, ExportPdfWrite, ExportPsdWrite, ExportTargetChoice, ExportWriteResult } from './artwork-export'
 import type { AppUpdateSnapshot } from './app-update'
 import type { PsdDocumentImport } from './psd-import'
 import type { SubjectModelDownloadInput, SubjectModelStatus, SubjectSegmentInput, SubjectSegmentResult } from './segmentation'
@@ -66,6 +67,12 @@ export const DESKTOP_CHANNELS = {
   appUpdate: 'app:update',
   appUpdateCheck: 'app:update-check',
   appUpdateInstall: 'app:update-install',
+  exportChooseFile: 'export:choose-file',
+  exportChooseFolder: 'export:choose-folder',
+  exportWriteImage: 'export:write-image',
+  exportWritePdf: 'export:write-pdf',
+  exportWritePsd: 'export:write-psd',
+  exportReveal: 'export:reveal',
   localFonts: 'desktop:local-fonts',
   openFileRequests: 'desktop:open-file-requests',
   psdRead: 'project:psd-read',
@@ -216,6 +223,15 @@ export interface DesktopApi {
   /** Restarts into the downloaded version; false when none is waiting. */
   installAppUpdate(): Promise<boolean>
   onAppUpdate(listener: (snapshot: AppUpdateSnapshot) => void): () => void
+  /** Asks where to save an export; the target it gives is good for one file. */
+  chooseExportFile(choice: ExportFileChoice): Promise<ExportTargetChoice>
+  /** Asks for a folder to export several files into; its target only ever adds new files. */
+  chooseExportFolder(suggestedName: string): Promise<ExportTargetChoice>
+  writeExportImage(input: ExportImageWrite): Promise<ExportWriteResult>
+  writeExportPdf(input: ExportPdfWrite): Promise<ExportWriteResult>
+  writeExportPsd(input: ExportPsdWrite): Promise<ExportWriteResult>
+  /** Shows a file this run exported in the system's file manager. */
+  revealExport(path: string): Promise<void>
   /** Font families installed on this computer, scanned once per run unless asked to rescan. */
   listLocalFonts(rescan?: boolean): Promise<readonly LocalFontFamily[]>
   /** Images waiting to be opened as projects; each is handed over once. */

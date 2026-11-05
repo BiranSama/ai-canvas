@@ -1,7 +1,9 @@
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import sharp from 'sharp'
+import { exportThroughPanel } from '../helpers/export-file'
 import { enterPackagedWorkspace, packagedTestEnvironment } from './packaged-test-helpers'
 
 const executablePath = process.env.AI_CANVAS_PACKAGED_PATH
@@ -34,26 +36,9 @@ test('keeps settings, artwork export and project restart working in the packaged
     await expect(settings.locator('[data-provider-slot="image"]')).toBeVisible()
     await settings.getByRole('button', { name: '关闭设置' }).click()
 
-    const exported = await window.evaluate(`(async () => {
-      let captured = null
-      const originalClick = HTMLAnchorElement.prototype.click
-      HTMLAnchorElement.prototype.click = function captureExport() { captured = this.href }
-      try {
-        document.querySelector('.export-control > button')?.click()
-        if (captured === null) throw new Error('Export did not produce a data URL.')
-        const image = new Image()
-        const loaded = new Promise((resolve, reject) => {
-          image.onload = () => resolve()
-          image.onerror = () => reject(new Error('Exported image could not be decoded.'))
-        })
-        image.src = captured
-        await loaded
-        return { prefix: captured.slice(0, 22), width: image.width, height: image.height }
-      } finally {
-        HTMLAnchorElement.prototype.click = originalClick
-      }
-    })()`)
-    expect(exported).toEqual({ prefix: 'data:image/png;base64,', width: 1024, height: 1280 })
+    const exportedFile = await readFile(await exportThroughPanel(window))
+    const exported = await sharp(exportedFile).metadata()
+    expect({ format: exported.format, width: exported.width, height: exported.height }).toEqual({ format: 'png', width: 1024, height: 1280 })
     expect(externalRequests).toEqual([])
 
     await app.close()

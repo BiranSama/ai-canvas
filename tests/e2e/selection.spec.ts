@@ -7,6 +7,7 @@ import type { PaintOp, SceneElement } from '../../src/domain'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { applyPaintOps } from '../../src/shared/paint-ops'
 import { openEditor, editPlacedResult } from '../helpers/workbench-ui'
+import { exportedPixels } from '../helpers/export-file'
 
 async function launch(env: Record<string, string> = {}): Promise<{ app: ElectronApplication, page: Page }> {
   const userData = await mkdtemp(join(tmpdir(), 'select-'))
@@ -71,17 +72,8 @@ async function newCanvasWithLayer(page: Page): Promise<void> {
   await expect.poll(async () => (await bootstrap(page)).scene.elements.map((candidate) => candidate.name)).toEqual(['图层 1'])
 }
 
-async function exported(page: Page): Promise<{ data: Buffer, width: number, height: number }> {
-  const url = await page.evaluate(`(() => {
-    let captured = null
-    const originalClick = HTMLAnchorElement.prototype.click
-    HTMLAnchorElement.prototype.click = function captureExport() { captured = this.href }
-    try { document.querySelector('.export-control > button')?.click() } finally { HTMLAnchorElement.prototype.click = originalClick }
-    return captured
-  })()`) as string | null
-  if (url === null) throw new Error('Export did not produce a data URL.')
-  const { data, info } = await sharp(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64')).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
-  return { data, width: info.width, height: info.height }
+async function exported(page: Page): Promise<{ readonly data: Buffer, readonly width: number, readonly height: number }> {
+  return exportedPixels(page)
 }
 
 /** A grayscale asset's first channel, as Main serves it to the page. Decoded here: a million numbers back from the page take seconds. */

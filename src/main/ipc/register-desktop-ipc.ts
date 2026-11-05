@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
-import { basename, extname } from 'node:path'
+import { mkdirSync } from 'node:fs'
+import { basename, extname, join } from 'node:path'
 import { DESKTOP_CHANNELS, DESKTOP_EVENTS, type RuntimeInfo } from '../../shared/desktop-api'
 import { diagnosticExportResultSchema } from '../../shared/diagnostics'
 import { pixelImportInputSchema } from '../../shared/project'
@@ -13,6 +14,8 @@ import { textHelperRoleSchema } from '../../shared/provider-settings'
 import { localFontCatalog } from '../fonts/local-font-catalog'
 import { takeOpenFileRequests } from '../open-file-requests'
 import { readPsdForImport } from '../psd/psd-import'
+import { ExportService } from '../export/export-service'
+import { exportFileChoiceSchema, exportFolderChoiceSchema, exportImageWriteSchema, exportPdfWriteSchema, exportPsdWriteSchema, exportRevealSchema } from '../../shared/artwork-export'
 import { onSubjectModelStatus, readMagicTouchAssets, subjectSegmentation } from '../segmentation/subject-segmentation-electron'
 import { subjectModelDownloadSchema, subjectSegmentInputSchema } from '../../shared/segmentation'
 
@@ -150,6 +153,49 @@ async function createRuntimeInfo(
   })
 }
 
+let exportService: ExportService | null = null
+
+/** End-to-end runs never open a dialog: exports land in the given folder, or one under the run's user data. */
+function e2eExportDirectory(): string | null {
+  if (process.env.AI_CANVAS_E2E === undefined) return null
+  const directory = (process.env.AI_CANVAS_E2E_EXPORT_DIR ?? '') !== '' ? process.env.AI_CANVAS_E2E_EXPORT_DIR! : join(app.getPath('userData'), 'e2e-exports')
+  mkdirSync(directory, { recursive: true })
+  return directory
+}
+
+function exportsFor(): ExportService {
+  exportService ??= new ExportService({
+    saveFile: async (options) => {
+      const owner = BrowserWindow.getFocusedWindow()
+      const dialogOptions = { ...options, filters: options.filters.map((filter) => ({ name: filter.name, extensions: [...filter.extensions] })) }
+      const result = owner === null ? await dialog.showSaveDialog(dialogOptions) : await dialog.showSaveDialog(owner, dialogOptions)
+      return result.canceled ? null : result.filePath
+    },
+    chooseFolder: async (options) => {
+      const owner = BrowserWindow.getFocusedWindow()
+      const dialogOptions = { ...options, properties: ['openDirectory' as const, 'createDirectory' as const] }
+      const result = owner === null ? await dialog.showOpenDialog(dialogOptions) : await dialog.showOpenDialog(owner, dialogOptions)
+      return result.canceled ? null : result.filePaths[0] ?? null
+    }
+  }, (family, weight) => localFontCatalog.face(family, weight), e2eExportDirectory())
+  return exportService
+}
+
+function registerExportIpc(): void {
+  ipcMain.handle(DESKTOP_CHANNELS.exportChooseFile, async (_event, input: unknown) => exportsFor().chooseFile(exportFileChoiceSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.exportChooseFolder, async (_event, input: unknown) => {
+    exportFolderChoiceSchema.parse(input)
+    return exportsFor().chooseFolder()
+  })
+  ipcMain.handle(DESKTOP_CHANNELS.exportWriteImage, async (_event, input: unknown) => exportsFor().writeImage(exportImageWriteSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.exportWritePdf, async (_event, input: unknown) => exportsFor().writePdf(exportPdfWriteSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.exportWritePsd, async (_event, input: unknown) => exportsFor().writePsd(exportPsdWriteSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.exportReveal, async (_event, input: unknown) => {
+    const { path } = exportRevealSchema.parse(input)
+    if (exportsFor().canReveal(path)) shell.showItemInFolder(path)
+  })
+}
+
 export function registerDesktopIpc(
   backgroundMaterial: RuntimeInfo['backgroundMaterial'],
   generationRuntime: Promise<GenerationRuntime>,
@@ -166,6 +212,7 @@ export function registerDesktopIpc(
   ipcMain.handle(DESKTOP_CHANNELS.appUpdateCheck, async () => (await appUpdates).check())
   ipcMain.handle(DESKTOP_CHANNELS.appUpdateInstall, async () => (await appUpdates).install())
   ipcMain.handle(DESKTOP_CHANNELS.localFonts, async (_event, rescan: unknown) => localFontCatalog.list({ rescan: rescan === true }))
+  registerExportIpc()
   ipcMain.handle(DESKTOP_CHANNELS.openFileRequests, () => takeOpenFileRequests())
   ipcMain.handle(DESKTOP_CHANNELS.psdRead, async (_event, bytes: unknown) => {
     if (!(bytes instanceof Uint8Array) || bytes.byteLength === 0 || bytes.byteLength > MAX_PSD_BYTES) throw new Error('PSD 必须大于 0 字节且不超过 1 GB。')

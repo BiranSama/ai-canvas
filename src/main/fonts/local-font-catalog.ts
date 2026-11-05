@@ -10,6 +10,11 @@ export interface FontFaceNames {
   readonly localName: string | null
   readonly style: string
   readonly chinese: boolean
+  /** The name Photoshop and PDFs refer to the face by, such as MicrosoftYaHei-Bold. */
+  readonly postScriptName: string | null
+  /** The OS/2 weight class, 100 (thin) to 900 (black). */
+  readonly weight: number
+  readonly italic: boolean
 }
 
 const FONT_FILE = /\.(?:ttf|otf|ttc|otc)$/i
@@ -66,7 +71,7 @@ function nameRecords(table: Buffer): readonly NameRecord[] {
   for (let index = 0; index < count && 6 + index * 12 + 12 <= table.length; index += 1) {
     const at = 6 + index * 12
     const nameId = table.readUInt16BE(at + 6)
-    if (nameId !== 1 && nameId !== 2 && nameId !== 16 && nameId !== 17) continue
+    if (nameId !== 1 && nameId !== 2 && nameId !== 6 && nameId !== 16 && nameId !== 17) continue
     const start = storage + table.readUInt16BE(at + 10)
     const end = start + table.readUInt16BE(at + 8)
     if (end > table.length) continue
@@ -101,11 +106,16 @@ export function faceNames(nameTable: Buffer, os2Table: Buffer | null): FontFaceN
     ?? pick(records, [17, 2], () => true)
     ?? 'Regular'
   const codePages = os2Table !== null && os2Table.length >= 82 && os2Table.readUInt16BE(0) >= 1 ? os2Table.readUInt32BE(78) : 0
+  const weightClass = os2Table !== null && os2Table.length >= 6 ? os2Table.readUInt16BE(4) : 0
+  const italicBit = os2Table !== null && os2Table.length >= 64 ? (os2Table.readUInt16BE(62) & 1) !== 0 : false
   return {
     family,
     localName: localName === null || localName === family ? null : localName,
     style,
-    chinese: (codePages & CHINESE_CODE_PAGES) !== 0 || localName !== null
+    chinese: (codePages & CHINESE_CODE_PAGES) !== 0 || localName !== null,
+    postScriptName: pick(records, [6], (record) => record.platform === 3) ?? pick(records, [6], () => true),
+    weight: weightClass >= 1 && weightClass <= 1000 ? weightClass : /bold/i.test(style) ? 700 : 400,
+    italic: italicBit || /italic|oblique/i.test(style)
   }
 }
 
@@ -200,24 +210,42 @@ export function groupFontFaces(faces: readonly FontFaceNames[]): readonly LocalF
 /** Scans the font folders once per run; installing a font shows up after a restart or a rescan. */
 export class LocalFontCatalog {
   readonly #directories: () => readonly string[]
-  #scan: Promise<readonly LocalFontFamily[]> | null = null
+  #scan: Promise<readonly FontFaceNames[]> | null = null
 
   constructor(directories: () => readonly string[] = () => systemFontDirectories()) {
     this.#directories = directories
   }
 
-  list(options: { readonly rescan?: boolean } = {}): Promise<readonly LocalFontFamily[]> {
-    if (this.#scan === null || options.rescan === true) this.#scan = this.#read()
+  async list(options: { readonly rescan?: boolean } = {}): Promise<readonly LocalFontFamily[]> {
+    return groupFontFaces(await this.#faces(options.rescan === true))
+  }
+
+  /**
+   * The installed face Photoshop should set a family in at this weight:
+   * upright first, then the nearest weight. A family that is not installed
+   * keeps its own name without spaces, which is how most PostScript names
+   * read, and Photoshop offers to replace it.
+   */
+  async face(family: string, weight: number): Promise<{ readonly postScriptName: string; readonly fauxBold: boolean }> {
+    const key = family.trim().toLowerCase()
+    const faces = (await this.#faces(false)).filter((face) => face.postScriptName !== null && (face.family.toLowerCase() === key || face.localName?.toLowerCase() === key))
+    const best = [...faces].sort((left, right) => Number(left.italic) - Number(right.italic) || Math.abs(left.weight - weight) - Math.abs(right.weight - weight))[0]
+    if (best === undefined) return { postScriptName: family.replace(/\s+/g, ''), fauxBold: weight >= 600 }
+    return { postScriptName: best.postScriptName!, fauxBold: weight >= 600 && best.weight < 600 }
+  }
+
+  #faces(rescan: boolean): Promise<readonly FontFaceNames[]> {
+    if (this.#scan === null || rescan) this.#scan = this.#read()
     return this.#scan
   }
 
-  async #read(): Promise<readonly LocalFontFamily[]> {
+  async #read(): Promise<readonly FontFaceNames[]> {
     const files = await fontFiles(this.#directories())
     const faces: FontFaceNames[] = []
     for (let start = 0; start < files.length; start += PARALLEL_READS) {
       for (const read of await Promise.all(files.slice(start, start + PARALLEL_READS).map(readFontFile))) faces.push(...read)
     }
-    return groupFontFaces(faces)
+    return faces
   }
 }
 

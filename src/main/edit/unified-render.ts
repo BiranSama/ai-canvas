@@ -1,11 +1,12 @@
 import { z } from 'zod'
-import type { Scene, SceneCommand, SceneElement } from '../../domain'
+import { hiddenByGroups, type Scene, type SceneCommand, type SceneElement } from '../../domain'
 import { elementPresentation } from '../reference/composite-reference-renderer'
 
 /** The layers a unified render redraws: everything exported except text, which stays exact on top. */
 export function unifiedRenderCover(scene: Scene): readonly string[] {
+  const hiddenInGroups = hiddenByGroups(scene.elements)
   return scene.elements
-    .filter((element) => element.type !== 'text' && elementPresentation(element, 'final') !== 'omit')
+    .filter((element) => element.type !== 'text' && !hiddenInGroups.has(element.id) && elementPresentation(element, 'final') !== 'omit')
     .map((element) => element.id)
 }
 
