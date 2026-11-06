@@ -267,6 +267,7 @@ function psdText(element: Extract<SceneElement, { type: 'text' }>, scene: Scene)
     fontWeight: element.fontWeight,
     fontSize: metrics.fontSize,
     color: fill.hex,
+    fillOpacity: fill.alpha,
     letterSpacing: metrics.letterSpacing,
     lineHeight: element.lineHeight,
     align: element.align,
@@ -354,19 +355,10 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
 
 /** The canvas colour over the whole picture, opaque. */
 function solidColor(color: string, width: number, height: number): Uint8Array<ArrayBuffer> {
-  const probe = document.createElement('canvas').getContext('2d')
-  let rgb: readonly [number, number, number] = [255, 255, 255]
-  if (probe !== null) {
-    probe.fillStyle = color
-    const parsed = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})/i.exec(probe.fillStyle)
-    if (parsed !== null) rgb = [parseInt(parsed[1]!, 16), parseInt(parsed[2]!, 16), parseInt(parsed[3]!, 16)]
-  }
+  // Read the way the canvas reads it, transparency included, so the layer matches the picture.
+  const { hex, alpha } = cssColor(color)
+  const rgba = [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), Math.round(alpha * 255)] as const
   const pixels = new Uint8Array(width * height * 4)
-  for (let index = 0; index < pixels.length; index += 4) {
-    pixels[index] = rgb[0]
-    pixels[index + 1] = rgb[1]
-    pixels[index + 2] = rgb[2]
-    pixels[index + 3] = 255
-  }
+  for (let index = 0; index < pixels.length; index += 4) pixels.set(rgba, index)
   return pixels
 }

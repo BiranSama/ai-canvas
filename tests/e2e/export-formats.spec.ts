@@ -72,7 +72,9 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
         batch: { id: crypto.randomUUID(), origin: 'user', summary: '导出测试', commands: [
           { kind: 'element.update', elementId: named('价格圆标').id, changes: { mask: { assetId: mask.id, enabled: true } } },
           // CSS colours on the editable title's stroke and shadow, half transparent for the shadow.
-          { kind: 'element.update', elementId: named('标题').id, changes: { mask: { assetId: mask.id, enabled: true }, stroke: 'white', strokeWidth: 2, shadowColor: 'rgba(0, 0, 0, 0.5)', shadowBlur: 6 } },
+          { kind: 'element.update', elementId: named('标题').id, changes: { mask: { assetId: mask.id, enabled: true }, fill: 'rgba(58, 42, 32, 0.5)', stroke: 'white', strokeWidth: 2, shadowColor: 'rgba(0, 0, 0, 0.5)', shadowBlur: 6 } },
+          // A translucent canvas colour, under the cream background layer.
+          { kind: 'scene.set-canvas', canvas: { ...current.canvas, backgroundColor: 'rgba(20, 40, 60, 0.5)' } },
           { kind: 'element.update', elementId: named('店名').id, changes: { visible: false } },
           // The bottom bar reaches past the canvas: a PSD keeps the part outside it.
           { kind: 'element.update', elementId: named('底部色块').id, changes: { transform: { ...named('底部色块').transform, height: named('底部色块').transform.height + 0.1 } } },
@@ -93,6 +95,7 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
     const png = await raw(pngPath)
     expect({ width: psd.width, height: psd.height }).toEqual({ width: png.width, height: png.height })
     expect(psd.children?.[0]?.name).toBe('背景色')
+    expect([...psd.children![0]!.imageData!.data.slice(0, 4)]).toEqual([20, 40, 60, 128])
 
     const group = find(psd.children, '标题组')
     expect(group?.children?.map((layer) => layer.name)).toEqual(['标题', '副标题'])
@@ -118,6 +121,7 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
     // The title's mask is the mask itself over the whole box, not read from the letters drawn now:
     // in the hidden half it hides even where there are no letters, so text typed there in Photoshop stays hidden.
     const titleLayer = find(psd.children, '标题')!
+    expect(Math.round((titleLayer.text?.style?.fillColor as { a?: number } | undefined)?.a ?? 255)).toBe(128)
     expect(titleLayer.effects?.stroke?.[0]?.color).toMatchObject({ r: 255, g: 255, b: 255 })
     expect(titleLayer.effects?.dropShadow?.[0]?.color).toMatchObject({ r: 0, g: 0, b: 0 })
     expect(titleLayer.effects?.dropShadow?.[0]?.opacity).toBeCloseTo(0.31, 1)

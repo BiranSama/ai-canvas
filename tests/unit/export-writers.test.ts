@@ -88,7 +88,7 @@ describe('PSD writer', () => {
         layer('标题', {
           left: 1, top: 1,
           text: {
-            content: '秋日\n拿铁', orientation: 'horizontal', fontFamily: 'Microsoft YaHei', fontWeight: 700, fontSize: 48, color: '#3A2A20',
+            content: '秋日\n拿铁', orientation: 'horizontal', fontFamily: 'Microsoft YaHei', fontWeight: 700, fontSize: 48, color: '#3A2A20', fillOpacity: 0.5,
             letterSpacing: 4.8, lineHeight: 1.2, align: 'center', box: { x: 1, y: 1, width: 6, height: 4 }, rotation: 0, textHeight: 2,
             stroke: { color: '#FFFFFF', width: 3, opacity: 0.5 }, shadow: { color: '#000000', blur: 6, opacity: 0.62 }
           }
@@ -116,6 +116,10 @@ describe('PSD writer', () => {
     expect(title.text?.style?.tracking).toBe(100)
     expect(title.text?.style?.leading).toBeCloseTo(57.6)
     expect(title.text?.paragraphStyle?.justification).toBe('center')
+    const fill = title.text?.style?.fillColor as { r: number; g: number; b: number; a?: number }
+    expect([fill.r, fill.g, fill.b].map(Math.round)).toEqual([0x3A, 0x2A, 0x20])
+    // Half transparent letters stay half transparent.
+    expect(Math.round(fill.a ?? 255)).toBe(128)
     expect(title.effects?.stroke?.[0]).toMatchObject({ enabled: true, position: 'center', size: { units: 'Pixels', value: 3 } })
     expect(title.effects?.stroke?.[0]?.opacity).toBeCloseTo(0.5, 2)
     expect(title.effects?.dropShadow?.[0]?.opacity).toBeCloseTo(0.62, 2)

@@ -79,7 +79,8 @@ async function textData(text: PsdText, fonts: PsdFontLookup): Promise<{ readonly
       leading: text.fontSize * text.lineHeight,
       tracking: Math.round(text.letterSpacing / text.fontSize * 1000),
       autoKerning: true,
-      fillColor: color(text.color)
+      // A translucent fill stays translucent in the letters themselves, apart from the layer's opacity.
+      fillColor: { ...color(text.color), a: Math.round(text.fillOpacity * 255) }
     },
     paragraphStyle: { justification: JUSTIFICATION[text.align] }
   }

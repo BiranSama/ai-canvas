@@ -74,6 +74,8 @@ export const psdTextSchema = z.object({
   /** In document pixels, which a PSD at 72 ppi reads as points. */
   fontSize: finite.positive().max(4096),
   color: hexColor,
+  /** How opaque the letters are, from the fill colour's own transparency. */
+  fillOpacity: finite.min(0).max(1),
   letterSpacing: finite,
   lineHeight: finite.positive().max(10),
   align: z.enum(['start', 'center', 'end', 'justify']),
