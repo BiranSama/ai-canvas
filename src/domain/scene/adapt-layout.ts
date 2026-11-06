@@ -53,9 +53,10 @@ export function storedAspect(width: number, height: number): { readonly aspectWi
   const ratio = width / height
   let best = { aspectWidth: 1, aspectHeight: 1, error: Infinity }
   for (let aspectHeight = 1; aspectHeight <= 100; aspectHeight += 1) {
-    const aspectWidth = Math.round(ratio * aspectHeight)
-    if (aspectWidth < 1 || aspectWidth > 100) continue
-    const error = Math.abs(aspectWidth / aspectHeight - ratio)
+    // Past 100:1 either way the nearest storable ratio is at the edge: 100:1 or 1:100.
+    const aspectWidth = Math.min(100, Math.max(1, Math.round(ratio * aspectHeight)))
+    // Compared on a log scale, so a ratio and its inverse are equally far from 1:1.
+    const error = Math.abs(Math.log(aspectWidth / aspectHeight) - Math.log(ratio))
     if (error < best.error - 1e-12) best = { aspectWidth, aspectHeight, error }
   }
   return { aspectWidth: best.aspectWidth, aspectHeight: best.aspectHeight }

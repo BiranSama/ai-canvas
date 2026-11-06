@@ -82,7 +82,7 @@ export const psdTextSchema = z.object({
   rotation: finite,
   /** How tall the laid-out lines are; the canvas centres them in the box. */
   textHeight: finite.nonnegative(),
-  stroke: z.object({ color: hexColor, width: finite.positive() }).strict().nullable(),
+  stroke: z.object({ color: hexColor, width: finite.positive(), opacity: finite.min(0).max(1) }).strict().nullable(),
   shadow: z.object({ color: hexColor, blur: finite.nonnegative(), opacity: finite.min(0).max(1) }).strict().nullable()
 }).strict()
 export type PsdText = z.infer<typeof psdTextSchema>

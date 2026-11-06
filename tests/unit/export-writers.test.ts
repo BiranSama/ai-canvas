@@ -90,7 +90,7 @@ describe('PSD writer', () => {
           text: {
             content: '秋日\n拿铁', orientation: 'horizontal', fontFamily: 'Microsoft YaHei', fontWeight: 700, fontSize: 48, color: '#3A2A20',
             letterSpacing: 4.8, lineHeight: 1.2, align: 'center', box: { x: 1, y: 1, width: 6, height: 4 }, rotation: 0, textHeight: 2,
-            stroke: { color: '#FFFFFF', width: 3 }, shadow: { color: '#000000', blur: 6, opacity: 0.62 }
+            stroke: { color: '#FFFFFF', width: 3, opacity: 0.5 }, shadow: { color: '#000000', blur: 6, opacity: 0.62 }
           }
         })
       ]
@@ -117,6 +117,7 @@ describe('PSD writer', () => {
     expect(title.text?.style?.leading).toBeCloseTo(57.6)
     expect(title.text?.paragraphStyle?.justification).toBe('center')
     expect(title.effects?.stroke?.[0]).toMatchObject({ enabled: true, position: 'center', size: { units: 'Pixels', value: 3 } })
+    expect(title.effects?.stroke?.[0]?.opacity).toBeCloseTo(0.5, 2)
     expect(title.effects?.dropShadow?.[0]?.opacity).toBeCloseTo(0.62, 2)
     expect([...psd.imageData!.data.slice(0, 4)]).toEqual([200, 190, 180, 255])
   })

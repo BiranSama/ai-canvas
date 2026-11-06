@@ -88,7 +88,7 @@ async function textData(text: PsdText, fonts: PsdFontLookup): Promise<{ readonly
     effects.stroke = [{
       present: true, showInDialog: true, enabled: true,
       size: { units: 'Pixels', value: text.stroke.width }, position: 'center', fillType: 'color',
-      blendMode: 'normal', opacity: 1, color: color(text.stroke.color)
+      blendMode: 'normal', opacity: text.stroke.opacity, color: color(text.stroke.color)
     }]
   }
   if (text.shadow !== null) {

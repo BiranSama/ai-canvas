@@ -236,25 +236,45 @@ function textHeight(element: Extract<SceneElement, { type: 'text' }>, width: num
   return lines * metrics.fontSize * element.lineHeight
 }
 
+/**
+ * A CSS colour as the canvas reads it (#fff, white, rgb(), #RRGGBBAA…):
+ * its opaque colour and how opaque it is. The browser parses it, so it
+ * matches what the canvas draws; one it cannot read draws black there too.
+ */
+export function cssColor(color: string): { readonly hex: string; readonly alpha: number } {
+  const context = document.createElement('canvas').getContext('2d')
+  if (context === null) return { hex: '#000000', alpha: 1 }
+  context.fillStyle = '#000000'
+  context.fillStyle = color
+  const parsed = String(context.fillStyle)
+  if (parsed.startsWith('#')) return { hex: parsed.slice(0, 7).toUpperCase(), alpha: 1 }
+  const parts = /rgba?\(([^)]+)\)/.exec(parsed)?.[1]?.split(',').map((part) => Number(part.trim())) ?? []
+  const [r = 0, g = 0, b = 0, a = 1] = parts
+  const hex = `#${[r, g, b].map((value) => Math.round(value).toString(16).padStart(2, '0')).join('')}`.toUpperCase()
+  return { hex, alpha: Math.min(1, Math.max(0, a)) }
+}
+
 function psdText(element: Extract<SceneElement, { type: 'text' }>, scene: Scene): PsdText {
   const box = { x: element.transform.x * scene.canvas.outputWidth, y: element.transform.y * scene.canvas.outputHeight, width: element.transform.width * scene.canvas.outputWidth, height: element.transform.height * scene.canvas.outputHeight }
   const metrics = textMetrics(element, box.width, box.height, 1)
-  const solid = (color: string): string => /^#[0-9a-fA-F]{6}/.test(color) ? color.slice(0, 7).toUpperCase() : '#000000'
+  const fill = cssColor(element.fill)
+  const stroke = element.stroke === null ? null : cssColor(element.stroke)
+  const shadow = element.shadowColor === null ? null : cssColor(element.shadowColor)
   return {
     content: element.content,
     orientation: element.orientation,
     fontFamily: element.fontFamily,
     fontWeight: element.fontWeight,
     fontSize: metrics.fontSize,
-    color: solid(element.fill),
+    color: fill.hex,
     letterSpacing: metrics.letterSpacing,
     lineHeight: element.lineHeight,
     align: element.align,
     box,
     rotation: element.transform.rotation,
     textHeight: textHeight(element, box.width, box.height),
-    stroke: element.stroke === null || metrics.strokeWidth <= 0 ? null : { color: solid(element.stroke), width: metrics.strokeWidth },
-    shadow: element.shadowColor === null || metrics.shadowBlur <= 0 ? null : { color: solid(element.shadowColor), blur: metrics.shadowBlur, opacity: TEXT_SHADOW_OPACITY }
+    stroke: stroke === null || stroke.alpha === 0 || metrics.strokeWidth <= 0 ? null : { color: stroke.hex, width: metrics.strokeWidth, opacity: stroke.alpha },
+    shadow: shadow === null || shadow.alpha === 0 || metrics.shadowBlur <= 0 ? null : { color: shadow.hex, blur: metrics.shadowBlur, opacity: TEXT_SHADOW_OPACITY * shadow.alpha }
   }
 }
 

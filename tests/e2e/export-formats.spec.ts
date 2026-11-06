@@ -71,7 +71,8 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
         expectedSceneRevision: current.revision,
         batch: { id: crypto.randomUUID(), origin: 'user', summary: '导出测试', commands: [
           { kind: 'element.update', elementId: named('价格圆标').id, changes: { mask: { assetId: mask.id, enabled: true } } },
-          { kind: 'element.update', elementId: named('标题').id, changes: { mask: { assetId: mask.id, enabled: true } } },
+          // CSS colours on the editable title's stroke and shadow, half transparent for the shadow.
+          { kind: 'element.update', elementId: named('标题').id, changes: { mask: { assetId: mask.id, enabled: true }, stroke: 'white', strokeWidth: 2, shadowColor: 'rgba(0, 0, 0, 0.5)', shadowBlur: 6 } },
           { kind: 'element.update', elementId: named('店名').id, changes: { visible: false } },
           // The bottom bar reaches past the canvas: a PSD keeps the part outside it.
           { kind: 'element.update', elementId: named('底部色块').id, changes: { transform: { ...named('底部色块').transform, height: named('底部色块').transform.height + 0.1 } } },
@@ -117,6 +118,9 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
     // The title's mask is the mask itself over the whole box, not read from the letters drawn now:
     // in the hidden half it hides even where there are no letters, so text typed there in Photoshop stays hidden.
     const titleLayer = find(psd.children, '标题')!
+    expect(titleLayer.effects?.stroke?.[0]?.color).toMatchObject({ r: 255, g: 255, b: 255 })
+    expect(titleLayer.effects?.dropShadow?.[0]?.color).toMatchObject({ r: 0, g: 0, b: 0 })
+    expect(titleLayer.effects?.dropShadow?.[0]?.opacity).toBeCloseTo(0.31, 1)
     const titleMask = titleLayer.mask!
     const maskAt = (u: number, v: number): number => {
       const x = Math.round((fixture.title.x + fixture.title.width * u) * psd.width) - titleMask.left!

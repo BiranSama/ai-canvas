@@ -32,6 +32,9 @@ describe('laying an artwork out at another size', () => {
     expect(storedAspect(1920, 1080)).toEqual({ aspectWidth: 16, aspectHeight: 9 })
     // 900 × 383 has no ratio with terms up to 100; 47:20 is the nearest.
     expect(storedAspect(900, 383)).toEqual({ aspectWidth: 47, aspectHeight: 20 })
+    // Past 100:1 the nearest storable ratio is at the edge, never a square.
+    expect(storedAspect(16_384, 64)).toEqual({ aspectWidth: 100, aspectHeight: 1 })
+    expect(storedAspect(64, 16_384)).toEqual({ aspectWidth: 1, aspectHeight: 100 })
   })
 
   it('only scales an artwork of the same proportions: places stay, text sizes follow', () => {
