@@ -297,7 +297,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
   let done = 0
   const notes: string[] = []
   progress({ label: '正在读取图层', done, total })
-  const session = await ArtworkSession.prepare(scene, signal)
+  const session = await ArtworkSession.prepare(scene, signal, { includeHidden: true })
   try {
     const layerOf = async (element: SceneElement): Promise<PsdLayer> => {
       checkAborted(signal)

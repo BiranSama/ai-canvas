@@ -140,11 +140,17 @@ export class ArtworkSession {
     this.scene = scene
   }
 
-  /** Reads what every layer that could be drawn needs; hidden layers too, since a PSD keeps them. */
-  static async prepare(scene: Scene, signal?: AbortSignal): Promise<ArtworkSession> {
+  /**
+   * Reads what the layers to be drawn need: those the picture shows, or
+   * with includeHidden every exported kind, hidden ones too, as a PSD keeps
+   * them. A layer that is not drawn never holds an export up.
+   */
+  static async prepare(scene: Scene, signal?: AbortSignal, options: { readonly includeHidden?: boolean } = {}): Promise<ArtworkSession> {
     const session = new ArtworkSession(scene)
-    const drawable = scene.elements.filter((element) => element.type !== 'group' && isFinalContent(element))
-    const unblendable = drawable.find((element) => element.visible && !blendSupported(element))
+    const drawable = options.includeHidden === true
+      ? scene.elements.filter((element) => element.type !== 'group' && isFinalContent(element))
+      : exportedLayers(scene)
+    const unblendable = exportedLayers(scene).find((element) => !blendSupported(element))
     if (unblendable !== undefined) throw new ArtworkRenderError(`这台电脑的图形环境画不出「${unblendable.name}」的混合模式，导出出来会和画布不一样，所以先停下了。`)
     for (const element of drawable) {
       if (signal?.aborted === true) throw abortError()
