@@ -38,7 +38,7 @@ import { useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeInput } from './ImeSafeTextField'
 
 const KIND_LABELS: Record<SceneElement['type'], string> = {
-  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体', light: '光影', mask: 'AI 区域', group: '组合'
+  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体', light: '光影', mask: 'AI 区域', group: '组合', adjustment: '调整'
 }
 
 interface Row {

@@ -53,7 +53,7 @@ export function boundsOf(elements: readonly SceneElement[]): NormalizedTransform
 }
 
 const TYPE_LABELS: Readonly<Record<SceneElement['type'], string>> = {
-  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体占位', light: '光', mask: '蒙版', group: '组'
+  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体占位', light: '光', mask: '蒙版', group: '组', adjustment: '调整图层'
 }
 
 export function typeLabel(element: SceneElement): string {

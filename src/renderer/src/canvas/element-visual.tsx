@@ -176,6 +176,8 @@ export function ElementVisual({ element, width, height, outputScale, renderImage
       )
     }
     case 'group':
+      // An adjustment layer has nothing of its own to draw; the stage applies it to what is below.
+    case 'adjustment':
       return null
   }
 }

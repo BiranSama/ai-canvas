@@ -26,7 +26,8 @@ const elementLabels: Record<SceneElement['type'], string> = {
   placeholder: '主体',
   light: '光影',
   mask: '蒙版',
-  group: '组合'
+  group: '组合',
+  adjustment: '调整图层'
 }
 
 function NumberField({ label, value, onChange, step = 0.01 }: { label: string; value: number; onChange(value: number): void; step?: number }): React.JSX.Element {

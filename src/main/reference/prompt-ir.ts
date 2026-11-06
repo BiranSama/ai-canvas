@@ -1,6 +1,7 @@
 import { sceneSchema, type Scene, type SceneElement } from '../../domain'
 import { promptIrSchema, type PromptIr, type PromptIrElement, type PromptIrOcclusion } from '../../shared/reference'
 import { resolveBlendMode } from '../../shared/blend-mode'
+import { describeAdjustment } from '../../shared/adjustments'
 
 function attributesFor(element: SceneElement): Record<string, unknown> {
   if (element.type === 'image') return { assetId: element.assetId, crop: element.crop, fit: element.fit, referenceRole: element.referenceRole }
@@ -46,11 +47,13 @@ function attributesFor(element: SceneElement): Record<string, unknown> {
     targetElementIds: element.targetElementIds
   }
   if (element.type === 'mask') return { mode: element.mode, targetElementId: element.targetElementId, feather: element.feather, pathCount: element.paths.length }
+  if (element.type === 'adjustment') return { adjustment: describeAdjustment(element.settings) }
   return { childIds: element.childIds }
 }
 
 function presentationFor(element: SceneElement): PromptIrElement['presentation'] {
-  if (!element.visible || element.referencePolicy === 'exclude' || element.type === 'mask' || element.type === 'group') return 'omitted'
+  // An adjustment layer is no object in the picture; the reference already shows what it does.
+  if (!element.visible || element.referencePolicy === 'exclude' || element.type === 'mask' || element.type === 'group' || element.type === 'adjustment') return 'omitted'
   if (element.referencePolicy === 'reference-only' || element.type === 'placeholder' || (element.type === 'shape' && element.role === 'placeholder')) return 'semantic-guide'
   return 'visual'
 }
@@ -72,7 +75,7 @@ function compileOcclusions(elements: readonly SceneElement[]): PromptIrOcclusion
   const candidates = elements.filter((element) =>
     element.visible &&
     element.referencePolicy !== 'exclude' &&
-    !['group', 'mask', 'light'].includes(element.type) &&
+    !['group', 'mask', 'light', 'adjustment'].includes(element.type) &&
     element.semanticRole !== 'background'
   )
   const occlusions: PromptIrOcclusion[] = []

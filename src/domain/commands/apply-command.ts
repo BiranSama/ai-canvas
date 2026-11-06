@@ -1,5 +1,5 @@
 import type { Draft } from 'immer'
-import { imageElementSchema, sceneElementSchema, type Scene, type SceneElement } from '../scene/schema'
+import { imageElementSchema, sceneElementSchema, WHOLE_CANVAS, type Scene, type SceneElement } from '../scene/schema'
 import { CommandDomainError } from './errors'
 import type { SceneCommand } from './schema'
 
@@ -81,8 +81,10 @@ function updateElement(scene: Draft<Scene>, elementId: string, changes: Record<s
   }
 
   const transformChange = changes.transform
-  const mergedTransform =
-    typeof transformChange === 'object' && transformChange !== null
+  // An adjustment layer covers the whole canvas whatever moves the layers around it.
+  const mergedTransform = current.type === 'adjustment'
+    ? { ...WHOLE_CANVAS }
+    : typeof transformChange === 'object' && transformChange !== null
       ? { ...current.transform, ...transformChange }
       : current.transform
 
@@ -134,10 +136,12 @@ function groupElements(
     return element
   })
 
-  const left = Math.min(...children.map((element) => element.transform.x))
-  const top = Math.min(...children.map((element) => element.transform.y))
-  const right = Math.max(...children.map((element) => element.transform.x + element.transform.width))
-  const bottom = Math.max(...children.map((element) => element.transform.y + element.transform.height))
+  // An adjustment layer has no box of its own, so it does not widen the group's.
+  const boxed = children.some((element) => element.type !== 'adjustment') ? children.filter((element) => element.type !== 'adjustment') : children
+  const left = Math.min(...boxed.map((element) => element.transform.x))
+  const top = Math.min(...boxed.map((element) => element.transform.y))
+  const right = Math.max(...boxed.map((element) => element.transform.x + element.transform.width))
+  const bottom = Math.max(...boxed.map((element) => element.transform.y + element.transform.height))
   const groupIndex = Math.min(...children.map((element) => element.zIndex))
 
   for (const child of children) child.groupId = groupPayload.id
@@ -179,7 +183,12 @@ export function applySceneCommand(scene: Draft<Scene>, command: SceneCommand): v
       if (scene.elements.some((element) => element.id === command.element.id)) {
         throw new CommandDomainError('ELEMENT_EXISTS', `Element ${command.element.id} already exists.`)
       }
-      scene.elements.push({ ...command.element, blendMode: command.element.blendMode ?? 'normal', zIndex: scene.elements.length })
+      scene.elements.push({
+        ...command.element,
+        blendMode: command.element.blendMode ?? 'normal',
+        zIndex: scene.elements.length,
+        ...(command.element.type === 'adjustment' ? { transform: { ...WHOLE_CANVAS } } : {})
+      })
       return
     case 'element.update':
       updateElement(scene, command.elementId, command.changes)
@@ -195,6 +204,8 @@ export function applySceneCommand(scene: Draft<Scene>, command: SceneCommand): v
       const kept: Record<string, unknown> = { ...current }
       delete kept.paint
       delete kept.mask
+      // Colour adjustments still apply to a new picture; one made in a selection of the old pixels does not.
+      if (current.type === 'image' && current.adjustments !== undefined) kept.adjustments = current.adjustments.filter((adjustment) => adjustment.clip === undefined)
       scene.elements[index] = imageElementSchema.parse({
         ...kept, type: 'image', assetId: command.assetId, provenance: command.provenance,
         crop: current.type === 'image' ? current.crop : { x: 0, y: 0, width: 1, height: 1 },
