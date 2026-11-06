@@ -9,7 +9,7 @@ import { ArtworkStage, type LayerDraw } from './artwork-stage'
 import { isFinalContent } from './layer-drawing'
 import type { AdjustmentClips } from './image-effects'
 import type { AdjustmentCoverage } from './adjustment-layer'
-import { adjustmentClipIds } from '../../../shared/adjustments'
+import { adjustmentClipIds, sampleCoverage } from '../../../shared/adjustments'
 
 /*
  * Draws a scene away from the screen, at any pixel size, with the canvas's
@@ -37,6 +37,8 @@ export interface LayerRequest {
   readonly mask: MaskUse
   /** False draws text without its stroke and shadow, which a PSD adds back as layer styles. */
   readonly textEffects: boolean
+  /** False draws an image without its own adjustments, which a PSD adds back as clipped adjustment layers. */
+  readonly adjustments?: boolean
 }
 
 export interface ArtworkRequest {
@@ -315,6 +317,15 @@ export class ArtworkSession {
     return { width: gray.width, height: gray.height, coverage: maskCoverage(gray.data, gray.width, gray.height, mask.paint, readClips(element, mask.paint, { width: gray.width, height: gray.height })) }
   }
 
+  /** An adjustment layer's mask over the whole picture at this size, on or not, for a PSD's layer mask; null without one. */
+  adjustmentMaskAt(elementId: string, width: number, height: number): Uint8Array<ArrayBuffer> | null {
+    const element = this.scene.elements.find((candidate) => candidate.id === elementId)
+    if (element?.type !== 'adjustment') return null
+    const mask = this.#adjustmentMask(element, 'on')
+    if (mask === null) return null
+    return sampleCoverage({ width: mask.width, height: mask.height, data: mask.coverage }, width, height, { scaleX: mask.width / width, scaleY: mask.height / height, offsetX: 0, offsetY: 0 })
+  }
+
   /** The picture, or one layer of it, at this size. */
   render(request: ArtworkRequest): HTMLCanvasElement {
     const width = Math.max(1, Math.round(request.width))
@@ -384,9 +395,10 @@ export class ArtworkSession {
         image: null, adjustmentClips: null, maskAlpha: null, adjustmentMask: this.#adjustmentMask(element, use)
       }
     }
+    const plain = element.type === 'image' && (maskOnly || layer?.adjustments === false)
     return {
       // The mask alone ignores the image's effects: they follow its outline, not the mask.
-      element: maskOnly && element.type === 'image' ? { ...element, effects: undefined, adjustments: undefined } : element,
+      element: element.type === 'image' && plain ? { ...element, ...(maskOnly ? { effects: undefined } : {}), adjustments: undefined } : element,
       maskOnly,
       x: element.transform.x * width,
       y: element.transform.y * height,
@@ -396,7 +408,7 @@ export class ArtworkSession {
       operation: isolated ? 'source-over' : blendModeToCanvasOperation(resolveBlendMode(element)),
       textEffects: layer?.textEffects ?? true,
       image: element.type === 'image' ? this.#imageSource(element, use) : null,
-      adjustmentClips: element.type === 'image' && !maskOnly ? this.#adjustmentClips(element) : null,
+      adjustmentClips: element.type === 'image' && !plain ? this.#adjustmentClips(element) : null,
       maskAlpha: (element.type === 'text' || element.type === 'shape') && maskApplies(element, use) ? this.#boxMaskAlpha(element) : null,
       adjustmentMask: null
     }

@@ -1,10 +1,13 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { readPsd } from 'ag-psd'
 import Database from 'better-sqlite3'
 import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
 import { ELEMENT_SCHEMA_VERSION, type Scene } from '../../src/domain'
+// Gives ag-psd what it needs to decode pixels outside a browser.
+import '../../src/main/psd/psd-import'
 import { CompositeReferenceRenderer } from '../../src/main/reference/composite-reference-renderer'
 import { adjustPixels, defaultAdjustment } from '../../src/shared/adjustments'
 import type { DesktopApi } from '../../src/shared/desktop-api'
@@ -243,6 +246,14 @@ test('the shortcuts open a previewing dialog; adjustment layers come from the pa
     await expect.poll(async () => { const current = await element(page, layer.id); return current?.type === 'adjustment' && current.settings.kind === 'brightness-contrast' ? current.settings.brightness : null }).toBe(40)
     const adjusted = await raw(await exportThroughPanel(page))
     expect(worstDifference(before, adjusted)).toBeGreaterThan(10)
+
+    // In a PSD the picture's own adjustments are adjustment layers clipped to it, and the adjustment layer is Photoshop's own.
+    const psd = readPsd(await readFile(await exportThroughPanel(page, { kind: 'psd' })), { useImageData: true })
+    const names = (psd.children ?? []).map((child) => [child.name, child.adjustment?.type ?? null, child.clipping === true])
+    const at = names.findIndex(([name]) => name === '渐变')
+    expect(names.slice(at, at + 4)).toEqual([['渐变', null, false], ['色阶', 'levels', true], ['反相', 'invert', true], [layer.name, 'brightness/contrast', false]])
+    const composite = Buffer.from(psd.imageData!.data.buffer, psd.imageData!.data.byteOffset, psd.imageData!.data.byteLength)
+    expect(worstDifference(composite, adjusted)).toBeLessThanOrEqual(2)
 
     // Merging it down puts the adjustment into the picture's pixels, and only there, as in Photoshop:
     // the picture keeps its look, the layers below it lose the adjustment.

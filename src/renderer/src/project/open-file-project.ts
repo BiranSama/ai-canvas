@@ -1,4 +1,4 @@
-import { ELEMENT_SCHEMA_VERSION, parseAspectRatio, type Canvas, type SceneCommand, type SceneElement } from '../../../domain'
+import { ELEMENT_SCHEMA_VERSION, parseAspectRatio, WHOLE_CANVAS, type Canvas, type SceneCommand, type SceneElement } from '../../../domain'
 import type { WorkspaceBootstrap } from '../../../shared/project'
 import { createElementForTool } from '../canvas/element-factory'
 
@@ -133,6 +133,19 @@ export async function createProjectFromPsd(file: File): Promise<OpenedProject | 
     rotation: 0
   })
   for (const [index, layer] of document.layers.entries()) {
+    if (layer.kind === 'adjustment') {
+      // Photoshop's adjustment layer: over the whole canvas, its mask in the canvas's pixels.
+      const mask = layer.mask === null ? null : await window.desktop.importAsset({ projectId, name: `${layer.name} 蒙版.png`, mimeType: 'image/png', bytes: layer.mask.png })
+      const element: SceneElement = {
+        id: globalThis.crypto.randomUUID(), version: ELEMENT_SCHEMA_VERSION, type: 'adjustment', name: layer.name, description: '',
+        transform: { ...WHOLE_CANVAS }, zIndex: 0, opacity: layer.opacity, blendMode: 'normal', visible: layer.visible, locked: false, groupId: null,
+        semanticRole: 'adjustment', referencePolicy: 'include', settings: layer.settings,
+        mask: mask === null || layer.mask === null ? null : { assetId: mask.id, enabled: layer.mask.enabled }
+      }
+      commands.push({ kind: 'element.add', element })
+      if (layer.groupIndex !== null) groupMembers[layer.groupIndex]?.push(element.id)
+      continue
+    }
     const asset = await window.desktop.importAsset({ projectId, name: `${layer.name}.png`, mimeType: 'image/png', bytes: layer.png })
     const base = createElementForTool('image', bootstrap.scene, asset.id)
     if (base?.type !== 'image') continue
@@ -147,7 +160,9 @@ export async function createProjectFromPsd(file: File): Promise<OpenedProject | 
       visible: layer.visible,
       blendMode: layer.blendMode,
       ...(background ? { semanticRole: 'background' as const, referenceRole: 'composition' as const } : {}),
-      ...(mask === null || layer.mask === null ? {} : { mask: { assetId: mask.id, enabled: layer.mask.enabled } })
+      ...(mask === null || layer.mask === null ? {} : { mask: { assetId: mask.id, enabled: layer.mask.enabled } }),
+      // Adjustment layers clipped to this layer in Photoshop change it alone, as its own adjustments do.
+      ...(layer.adjustments.length === 0 ? {} : { adjustments: layer.adjustments.map((adjustment) => ({ id: globalThis.crypto.randomUUID(), enabled: adjustment.enabled, settings: adjustment.settings })) })
     }
     commands.push({ kind: 'element.add', element })
     if (layer.groupIndex !== null) groupMembers[layer.groupIndex]?.push(element.id)

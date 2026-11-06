@@ -562,7 +562,7 @@ export function sampleCoverage(
   width: number,
   height: number,
   map: { readonly scaleX: number; readonly scaleY: number; readonly offsetX: number; readonly offsetY: number }
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const coverage = new Uint8Array(width * height)
   if (mask.width === width && mask.height === height && map.scaleX === 1 && map.scaleY === 1 && map.offsetX === 0 && map.offsetY === 0) {
     coverage.set(mask.data)

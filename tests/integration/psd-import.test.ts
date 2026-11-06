@@ -2,11 +2,18 @@ import { writePsdUint8Array } from 'ag-psd'
 import sharp from 'sharp'
 import { describe, expect, it } from 'vitest'
 import { PsdImportError, readPsdForImport } from '../../src/main/psd/psd-import'
+import type { PsdDocumentImport, PsdLayerImport } from '../../src/shared/psd-import'
 import { samplePsd } from '../helpers/psd-fixture'
 
 async function pixels(png: Uint8Array) {
   const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
   return { data, width: info.width, height: info.height }
+}
+
+/** The entry as a pixel layer; the sample has no adjustment layers. */
+function pixelLayer(entry: PsdDocumentImport['layers'][number] | undefined): PsdLayerImport {
+  if (entry?.kind !== 'pixels') throw new Error('Not a pixel layer.')
+  return entry
 }
 
 describe('reading a PSD for import', () => {
@@ -22,14 +29,14 @@ describe('reading a PSD for import', () => {
     expect(document.layers[3]!.opacity).toBeCloseTo(0.8, 2)
     expect(document.layers[4]).toMatchObject({ blendMode: 'normal' })
 
-    const shadow = await pixels(document.layers[1]!.png)
+    const shadow = await pixels(pixelLayer(document.layers[1]).png)
     expect([shadow.width, shadow.height]).toEqual([20, 10])
     expect([...shadow.data.subarray(0, 4)]).toEqual([0, 0, 255, 255])
   })
 
   it('keeps the layer mask as a mask over the layer, and says what it simplified, bringing the flattened image along', async () => {
     const document = await readPsdForImport(samplePsd())
-    const layer = document.layers[3]!
+    const layer = pixelLayer(document.layers[3])
     // The pixels stay whole; the mask, in the layer's own pixels, hides the part it hid in Photoshop.
     const unmasked = await pixels(layer.png)
     expect(unmasked.data[(5 * 40 + 30) * 4 + 3]).toBe(255)

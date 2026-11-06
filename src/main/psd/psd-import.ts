@@ -1,7 +1,9 @@
 import { getCompositeImageData, getLayerImageData, getLayerMaskImageData, initializeCanvas, readPsd, type Layer, type PixelData } from 'ag-psd'
 import sharp from 'sharp'
-import type { PsdDocumentImport, PsdGroupImport, PsdLayerImport } from '../../shared/psd-import'
-import type { BlendMode } from '../../domain'
+import type { PsdAdjustmentImport, PsdDocumentImport, PsdGroupImport, PsdLayerImport } from '../../shared/psd-import'
+import type { AdjustmentSettings, BlendMode } from '../../domain'
+import { fromPsdAdjustment } from './psd-adjustments'
+import { ADJUSTMENT_LABELS } from '../../shared/adjustments'
 
 /*
  * Reads a PSD into what a project needs: one PNG per pixel layer, at its
@@ -10,10 +12,14 @@ import type { BlendMode } from '../../domain'
  * without decoding any bitmap and checked against limits, then each layer
  * is decoded, turned into a PNG and let go before the next.
  *
- * What the scene cannot hold is simplified and listed: layer styles,
- * adjustment and fill layers, clipping masks, nested groups and blend
- * modes beyond the five the canvas has. Whenever something was, the PSD's
- * own flattened image comes along too, so the original look is at hand.
+ * Adjustment layers of the kinds the canvas has come along as adjustment
+ * layers; one clipped to a pixel layer, in normal blend at full opacity and
+ * without a mask, becomes that layer's own adjustment, which does the same.
+ *
+ * What the scene cannot hold is simplified and listed: layer styles, other
+ * adjustment and fill layers, clipping masks, nested groups and blend modes
+ * beyond the five the canvas has. Whenever something was, the PSD's own
+ * flattened image comes along too, so the original look is at hand.
  */
 
 export interface PsdImportLimits {
@@ -80,6 +86,36 @@ function layerMask(layer: Layer, width: number, height: number): { readonly gray
   return { gray, enabled: mask.disabled !== true }
 }
 
+/** Adjustments whose Photoshop formula is not published: the canvas draws them close to it, not exactly. */
+const APPROXIMATE: ReadonlySet<AdjustmentSettings['kind']> = new Set(['brightness-contrast', 'vibrance', 'color-balance', 'black-white'])
+
+/** The most pixels a side of an adjustment layer's mask has, as the canvas keeps it. */
+const ADJUSTMENT_MASK_EDGE = 4096
+
+/** An adjustment layer's mask over the whole document, at most ADJUSTMENT_MASK_EDGE a side, as gray values. */
+function documentMask(layer: Layer, documentWidth: number, documentHeight: number): { readonly gray: Uint8Array<ArrayBuffer>; readonly width: number; readonly height: number; readonly enabled: boolean } | null {
+  const mask = layer.mask
+  if (mask === undefined) return null
+  const maskPixels = getLayerMaskImageData(layer)
+  if (maskPixels === undefined) return null
+  const maskBytes = toBytes(maskPixels)
+  const scale = Math.min(1, ADJUSTMENT_MASK_EDGE / Math.max(documentWidth, documentHeight))
+  const width = Math.max(1, Math.round(documentWidth * scale))
+  const height = Math.max(1, Math.round(documentHeight * scale))
+  const left = mask.left ?? 0
+  const top = mask.top ?? 0
+  const outside = mask.defaultColor ?? 255
+  const gray = new Uint8Array(width * height)
+  for (let y = 0; y < height; y += 1) {
+    const my = Math.floor((y + 0.5) / scale) - top
+    for (let x = 0; x < width; x += 1) {
+      const mx = Math.floor((x + 0.5) / scale) - left
+      gray[y * width + x] = mx >= 0 && my >= 0 && mx < maskPixels.width && my < maskPixels.height ? maskBytes[(my * maskPixels.width + mx) * 4]! : outside
+    }
+  }
+  return { gray, width, height, enabled: mask.disabled !== true }
+}
+
 async function grayPng(gray: Uint8Array<ArrayBuffer>, width: number, height: number): Promise<Uint8Array<ArrayBuffer>> {
   return new Uint8Array(await sharp(Buffer.from(gray.buffer), { raw: { width, height, channels: 1 } }).png({ compressionLevel: 6 }).toBuffer())
 }
@@ -103,8 +139,10 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
   if (psd.width <= 0 || psd.height <= 0 || psd.width > limits.maxEdge || psd.height > limits.maxEdge) throw new PsdImportError(`画布 ${psd.width}×${psd.height} 超出支持的范围（每边最多 ${limits.maxEdge} 像素）。`)
   if (psd.colorMode !== undefined && !SUPPORTED_COLOR_MODES.has(psd.colorMode)) throw new PsdImportError('只支持 RGB、灰度和 CMYK 模式的 PSD，请先在 Photoshop 里转成 RGB。')
 
-  const notes = { styles: 0, adjustments: 0, clipped: 0, nested: 0, blends: 0, deepColor: (psd.bitsPerChannel ?? 8) > 8, text: 0 }
-  const layers: PsdLayerImport[] = []
+  const notes = { styles: 0, adjustments: 0, clipped: 0, nested: 0, blends: 0, deepColor: (psd.bitsPerChannel ?? 8) > 8, text: 0, simplified: new Set<string>(), approximate: new Set<string>() }
+  const layers: (PsdLayerImport | PsdAdjustmentImport)[] = []
+  // The pixel layer clipped layers above it belong to, with the adjustments it takes on.
+  let clipBase: { readonly adjustments: { settings: AdjustmentSettings; enabled: boolean }[] } | null = null
   const groups: PsdGroupImport[] = []
   let layerCount = 0
   let decodedBytes = 0
@@ -127,10 +165,37 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       } else {
         notes.nested += 1
       }
+      clipBase = null
       for (const child of layer.children) await visit(child, { index, visible, opacity })
+      clipBase = null
       return
     }
-    if (layer.adjustment !== undefined) { notes.adjustments += 1; return }
+    if (layer.adjustment !== undefined) {
+      const imported = fromPsdAdjustment(layer.adjustment)
+      if (imported === null) { notes.adjustments += 1; return }
+      if (imported.simplified !== null) notes.simplified.add(imported.simplified)
+      if (APPROXIMATE.has(imported.settings.kind)) notes.approximate.add(ADJUSTMENT_LABELS[imported.settings.kind])
+      const mask = documentMask(layer, psd.width, psd.height)
+      const blend = layer.blendMode ?? 'normal'
+      // Clipped to a pixel layer, plain: that layer's own adjustment does the same.
+      if (layer.clipping === true && clipBase !== null && (blend === 'normal' || blend === 'pass through') && (layer.opacity ?? 1) >= 1 && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))) {
+        clipBase.adjustments.push({ settings: imported.settings, enabled: layer.hidden !== true })
+        return
+      }
+      if (layer.clipping === true) notes.clipped += 1
+      if (blend !== 'normal' && blend !== 'pass through') notes.blends += 1
+      layers.push({
+        kind: 'adjustment',
+        name: layer.name?.trim() || ADJUSTMENT_LABELS[imported.settings.kind],
+        opacity: Math.max(0, Math.min(1, opacity)),
+        visible,
+        groupIndex: group?.index ?? null,
+        settings: imported.settings,
+        mask: mask === null ? null : { png: await grayPng(mask.gray, mask.width, mask.height), enabled: mask.enabled }
+      })
+      clipBase = null
+      return
+    }
     const left = layer.left ?? 0
     const top = layer.top ?? 0
     const width = (layer.right ?? 0) - left
@@ -153,7 +218,11 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       bottomOpaque = left <= 0 && top <= 0 && left + width >= psd.width && top + height >= psd.height && opacity >= 1 && isOpaque(rgba)
         && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))
     }
+    const adjustments: { settings: AdjustmentSettings; enabled: boolean }[] = []
+    if (layer.clipping !== true) clipBase = { adjustments }
     layers.push({
+      kind: 'pixels',
+      adjustments,
       name: layer.name?.trim() || `图层 ${layers.length + 1}`,
       left, top, width, height,
       opacity: Math.max(0, Math.min(1, opacity)),
@@ -172,6 +241,8 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     notes.clipped > 0 ? `${notes.clipped} 个剪贴蒙版按普通图层导入` : null,
     notes.nested > 0 ? `${notes.nested} 个嵌套的组合并到了外层组` : null,
     notes.blends > 0 ? `${notes.blends} 个图层的混合模式暂不支持，按正常处理` : null,
+    ...notes.simplified,
+    notes.approximate.size > 0 ? `${[...notes.approximate].join('、')}按画布的算法显示，和 Photoshop 可能略有不同` : null,
     notes.deepColor ? `${psd.bitsPerChannel} 位色深转成了 8 位` : null
   ].filter((note): note is string => note !== null)
   const keptAsPictures = [
