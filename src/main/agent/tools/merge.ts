@@ -13,7 +13,7 @@ function isPictureLayer(element: SceneElement): element is PictureLayer {
 export const mergeLayersTool = defineTool({
   name: 'merge_layers',
   title: '合并图层',
-  description: '像 Photoshop 的合并图层：把几个图层按现在的样子合成一张图，放在其中最下面那层的位置、沿用它的名字，其余删掉。只给一个文字或形状图层时把它栅格化成图片（样子不变，之后才能 fill 或画笔改像素；文字不能再改字）。不花钱、可撤销。AI 标注（草图、主体占位、光影、蒙版）和隐藏的图层不能合并。',
+  description: '像 Photoshop 的合并图层：把几个图层按现在的样子合成一张图，放在其中最下面那层的位置、沿用它的名字，其余删掉。一起给的调整图层会并进它下面这些图层的像素。只给一个文字或形状图层时把它栅格化成图片（样子不变，之后才能 fill 或画笔改像素；文字不能再改字）。不花钱、可撤销。AI 标注（草图、主体占位、光影、蒙版）和隐藏的图层不能合并。',
   parameters: z.object({
     targets: z.array(z.string().min(1).max(120)).min(1).max(50).describe('图层编号；一个是栅格化，多个是合并')
   }).strict(),
@@ -26,13 +26,16 @@ export const mergeLayersTool = defineTool({
     const ids = new Set(resolved.flatMap((element) => element.type === 'group' ? element.childIds : [element.id]))
     // The stack order decides what covers what and which layer receives the rest.
     const layers = context.scene.elements.filter((element) => ids.has(element.id))
-    const note = layers.find((element) => !isPictureLayer(element))
+    const note = layers.find((element) => !isPictureLayer(element) && element.type !== 'adjustment')
     if (note !== undefined) return rejected(`${context.refs.ref(note.id)}「${note.name}」是 AI 标注，不能合并。`, '只合并图片、文字和形状。')
     const locked = layers.find((element) => element.locked)
     if (locked !== undefined) return rejected(`${context.refs.ref(locked.id)}「${locked.name}」已锁定。`)
     const pictures = layers.filter(isPictureLayer)
+    // Adjustment layers change the layers below them and are merged in with them.
+    const adjustments = layers.filter((element) => element.type === 'adjustment')
+    if (pictures.length === 0) return rejected('调整图层没有像素，不能单独合并。', '和它下面的图片、文字或形状图层一起合并。')
 
-    if (pictures.length === 1) {
+    if (pictures.length === 1 && adjustments.length === 0) {
       const only = pictures[0]!
       if (only.type === 'image') return rejected(`${context.refs.ref(only.id)} 已经是图片图层。`, '要合并就再给至少一个图层。')
       const drawn = await context.drawLayers?.([only.id], only.id) ?? null
@@ -42,19 +45,21 @@ export const mergeLayersTool = defineTool({
         `已把 ${ref}「${only.name}」栅格化成图片，样子不变`, [only.id])
     }
 
-    const hidden = pictures.find((element) => !element.visible)
+    const hidden = layers.find((element) => !element.visible)
     if (hidden !== undefined) return rejected(`${context.refs.ref(hidden.id)}「${hidden.name}」是隐藏的。`, '先显示它，或不要合并它。')
-    const drawn = await context.drawLayers?.(pictures.map((element) => element.id)) ?? null
+    const merged = layers.filter((element) => isPictureLayer(element) || element.type === 'adjustment')
+    const drawn = await context.drawLayers?.(merged.map((element) => element.id), pictures.length === 1 ? pictures[0]!.id : undefined) ?? null
     if (drawn === null) return rejected('现在画不出这些图层。', '稍后再试。')
     const bottom = pictures[0]!
     const commands: SceneCommand[] = [
       { kind: 'element.rasterize', elementId: bottom.id, assetId: drawn.assetId, transform: drawn.transform },
-      // Each layer was drawn with its own opacity and blend, so the result shows them at full strength.
-      { kind: 'element.update', elementId: bottom.id, changes: { opacity: 1, blendMode: 'normal' } },
-      ...pictures.slice(1).map((element) => ({ kind: 'element.remove' as const, elementId: element.id }))
+      // Each layer was drawn with its own opacity and blend, so the result shows them at full strength;
+      // one picture layer with adjustments over it was drawn at full strength and keeps its own.
+      ...(pictures.length === 1 ? [] : [{ kind: 'element.update' as const, elementId: bottom.id, changes: { opacity: 1, blendMode: 'normal' } }]),
+      ...merged.filter((element) => element.id !== bottom.id).map((element) => ({ kind: 'element.remove' as const, elementId: element.id }))
     ]
     const ref = context.refs.ref(bottom.id)
-    return sceneWrite(batchPlan(`合并 ${pictures.length} 个图层`, commands), context,
-      `已把 ${pictures.length} 个图层合并进 ${ref}「${bottom.name}」`, [bottom.id])
+    return sceneWrite(batchPlan(`合并 ${merged.length} 个图层`, commands), context,
+      `已把 ${merged.length} 个图层合并进 ${ref}「${bottom.name}」`, [bottom.id])
   }
 })

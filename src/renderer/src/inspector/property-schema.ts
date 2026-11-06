@@ -133,7 +133,9 @@ export const simplePropertySchema: SimplePropertySchema = {
   adjustment: [
     field('name', '图层名称', 'text', 'content'),
     field('opacity', '不透明度', 'range', 'appearance'),
-    field('visible', '显示图层', 'toggle', 'behavior')
+    field('visible', '显示图层', 'toggle', 'behavior'),
+    field('locked', '锁定图层', 'toggle', 'behavior'),
+    field('referencePolicy', '参考图策略', 'select', 'behavior')
   ]
 }
 

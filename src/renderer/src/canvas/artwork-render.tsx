@@ -7,6 +7,9 @@ import { getRuntimeAssetUrl, isRuntimeAssetMissing, subscribeRuntimeAssets } fro
 import { clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
 import { ArtworkStage, type LayerDraw } from './artwork-stage'
 import { isFinalContent } from './layer-drawing'
+import type { AdjustmentClips } from './image-effects'
+import type { AdjustmentCoverage } from './adjustment-layer'
+import { adjustmentClipIds } from '../../../shared/adjustments'
 
 /*
  * Draws a scene away from the screen, at any pixel size, with the canvas's
@@ -18,7 +21,7 @@ import { isFinalContent } from './layer-drawing'
  */
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
-type MaskedElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
+type MaskedElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' | 'adjustment' }>
 
 export class ArtworkRenderError extends Error {}
 
@@ -172,7 +175,7 @@ export class ArtworkSession {
     for (const element of drawable) {
       if (signal?.aborted === true) throw abortError()
       if (element.type === 'image') await session.#readImage(element, signal)
-      if ((element.type === 'image' || element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined) {
+      if ((element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment') && element.mask !== null && element.mask !== undefined) {
         await session.#readMask(element, signal)
       }
     }
@@ -194,6 +197,18 @@ export class ArtworkSession {
     const size = { width: image.naturalWidth, height: image.naturalHeight }
     const clipIds = paintClipIds(element.paint)
     if (clipIds.length > 0) await waitFor(() => clipLookup(clipIds, size), subscribeAssetPixels, signal, `图层「${element.name}」的笔触范围`)
+    const adjustmentClips = adjustmentClipIds(element.adjustments)
+    if (adjustmentClips.length > 0) await waitFor(() => clipLookup(adjustmentClips, size), subscribeAssetPixels, signal, `图层「${element.name}」调整的选区`)
+  }
+
+  /** The selections the layer's adjustments were made in, read beforehand. */
+  #adjustmentClips(element: ImageElement): AdjustmentClips | null {
+    const ids = adjustmentClipIds(element.adjustments)
+    if (ids.length === 0) return null
+    const size = this.#imageSize(element)
+    const pixels = clipLookup(ids, size)
+    if (pixels === null) throw new ArtworkRenderError(`图层「${element.name}」调整的选区还没读出来，请稍后再导出。`)
+    return { ...size, pixels }
   }
 
   async #readMask(element: MaskedElement, signal: AbortSignal | undefined): Promise<void> {
@@ -284,6 +299,15 @@ export class ArtworkSession {
     return canvas
   }
 
+  /** An adjustment layer's mask over the canvas, or null when it has none on. */
+  #adjustmentMask(element: Extract<SceneElement, { type: 'adjustment' }>, use: MaskUse): AdjustmentCoverage | null {
+    if (!maskApplies(element, use)) return null
+    const mask = element.mask!
+    const gray = grayAssetPixels(mask.assetId)
+    if (gray === null) throw new ArtworkRenderError(`调整图层「${element.name}」的蒙版还没读出来。`)
+    return { width: gray.width, height: gray.height, coverage: maskCoverage(gray.data, gray.width, gray.height, mask.paint, readClips(element, mask.paint, { width: gray.width, height: gray.height })) }
+  }
+
   /** The picture, or one layer of it, at this size. */
   render(request: ArtworkRequest): HTMLCanvasElement {
     const width = Math.max(1, Math.round(request.width))
@@ -340,9 +364,16 @@ export class ArtworkSession {
     const use: MaskUse = layer?.mask ?? 'scene'
     const isolated = layer !== undefined
     const maskOnly = use === 'only'
+    if (element.type === 'adjustment') {
+      // Over the whole picture; its opacity is how much of the adjustment shows, not a layer's transparency.
+      return {
+        element, maskOnly, x: 0, y: 0, width, height, opacity: 1, operation: 'source-over', textEffects: true,
+        image: null, adjustmentClips: null, maskAlpha: null, adjustmentMask: this.#adjustmentMask(element, use)
+      }
+    }
     return {
       // The mask alone ignores the image's effects: they follow its outline, not the mask.
-      element: maskOnly && element.type === 'image' ? { ...element, effects: undefined } : element,
+      element: maskOnly && element.type === 'image' ? { ...element, effects: undefined, adjustments: undefined } : element,
       maskOnly,
       x: element.transform.x * width,
       y: element.transform.y * height,
@@ -352,7 +383,9 @@ export class ArtworkSession {
       operation: isolated ? 'source-over' : blendModeToCanvasOperation(resolveBlendMode(element)),
       textEffects: layer?.textEffects ?? true,
       image: element.type === 'image' ? this.#imageSource(element, use) : null,
-      maskAlpha: (element.type === 'text' || element.type === 'shape') && maskApplies(element, use) ? this.#boxMaskAlpha(element) : null
+      adjustmentClips: element.type === 'image' && !maskOnly ? this.#adjustmentClips(element) : null,
+      maskAlpha: (element.type === 'text' || element.type === 'shape') && maskApplies(element, use) ? this.#boxMaskAlpha(element) : null,
+      adjustmentMask: null
     }
   }
 

@@ -531,3 +531,67 @@ export function describeAdjustment(settings: AdjustmentSettings): string {
   }
   return parts.length === 0 ? label : `${label}（${parts.join('，')}）`
 }
+
+// ---- A layer's own adjustments ----
+
+/** The selection clips a layer's adjustments were made in. */
+export function adjustmentClipIds(adjustments: readonly LayerAdjustment[] | undefined): string[] {
+  return [...new Set(activeAdjustments(adjustments).flatMap((adjustment) => adjustment.clip === undefined ? [] : [adjustment.clip]))]
+}
+
+/**
+ * A layer's adjustments in order over its pixels as drawn. coverageOf gives
+ * a clip's coverage at the same size; an adjustment whose clip it cannot
+ * give is skipped, so callers wait for clips before drawing.
+ */
+export function adjustLayerPixels(data: Pixels, adjustments: readonly LayerAdjustment[] | undefined, coverageOf: (clipId: string) => Uint8Array | Uint8ClampedArray | null = () => null): void {
+  for (const adjustment of activeAdjustments(adjustments)) {
+    if (adjustment.clip === undefined) { adjustPixels(data, adjustment.settings); continue }
+    const coverage = coverageOf(adjustment.clip)
+    if (coverage !== null) adjustPixels(data, adjustment.settings, { coverage })
+  }
+}
+
+/**
+ * Coverage from a grayscale picture at another size, sampled bilinearly at
+ * pixel centres: an adjustment layer's mask over the part of the canvas being
+ * drawn. map turns a pixel of the result into a point in the mask's pixels.
+ */
+export function sampleCoverage(
+  mask: { readonly width: number; readonly height: number; readonly data: Uint8Array | Uint8ClampedArray },
+  width: number,
+  height: number,
+  map: { readonly scaleX: number; readonly scaleY: number; readonly offsetX: number; readonly offsetY: number }
+): Uint8Array {
+  const coverage = new Uint8Array(width * height)
+  if (mask.width === width && mask.height === height && map.scaleX === 1 && map.scaleY === 1 && map.offsetX === 0 && map.offsetY === 0) {
+    coverage.set(mask.data)
+    return coverage
+  }
+  const columns = new Int32Array(width * 2)
+  const columnWeights = new Float32Array(width)
+  for (let x = 0; x < width; x += 1) {
+    const u = Math.min(mask.width - 1, Math.max(0, (x + 0.5) * map.scaleX + map.offsetX - 0.5))
+    const left = Math.floor(u)
+    columns[x * 2] = left
+    columns[x * 2 + 1] = Math.min(mask.width - 1, left + 1)
+    columnWeights[x] = u - left
+  }
+  for (let y = 0; y < height; y += 1) {
+    const v = Math.min(mask.height - 1, Math.max(0, (y + 0.5) * map.scaleY + map.offsetY - 0.5))
+    const top = Math.floor(v)
+    const bottom = Math.min(mask.height - 1, top + 1)
+    const rowWeight = v - top
+    const topRow = top * mask.width
+    const bottomRow = bottom * mask.width
+    for (let x = 0; x < width; x += 1) {
+      const left = columns[x * 2]!
+      const right = columns[x * 2 + 1]!
+      const weight = columnWeights[x]!
+      const upper = mask.data[topRow + left]! + (mask.data[topRow + right]! - mask.data[topRow + left]!) * weight
+      const lower = mask.data[bottomRow + left]! + (mask.data[bottomRow + right]! - mask.data[bottomRow + left]!) * weight
+      coverage[y * width + x] = Math.round(upper + (lower - upper) * rowWeight)
+    }
+  }
+  return coverage
+}
