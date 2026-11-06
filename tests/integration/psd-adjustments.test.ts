@@ -1,6 +1,6 @@
 import { readPsd, writePsdUint8Array, type Layer } from 'ag-psd'
 import { describe, expect, it } from 'vitest'
-import { ADJUSTMENT_KINDS, type AdjustmentSettings } from '../../src/domain'
+import { ADJUSTMENT_KINDS, MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings } from '../../src/domain'
 import { buildPsd } from '../../src/main/export/psd-writer'
 import { fromPsdAdjustment, toPsdAdjustment } from '../../src/main/psd/psd-adjustments'
 import { readPsdForImport } from '../../src/main/psd/psd-import'
@@ -104,6 +104,16 @@ describe('adjustments in a PSD', () => {
     expect(document.layers[1]!.opacity).toBeCloseTo(0.5, 2)
     expect(document.approximations.join('；')).toContain('1 个调整图层或填充图层没有带过来')
     expect(document.approximations.join('；')).toContain('1 个剪贴蒙版按普通图层导入')
+  })
+
+  it('brings clipped adjustments past what a layer holds as adjustment layers, so the PSD still opens', async () => {
+    const imageData = { width: 4, height: 4, data: new Uint8ClampedArray(64).fill(180) }
+    const clipped = Array.from({ length: MAX_LAYER_ADJUSTMENTS + 1 }, (_, index) => ({ name: `反相 ${index + 1}`, clipping: true, adjustment: toPsdAdjustment({ kind: 'invert' }) }))
+    const bytes = writePsdUint8Array({ width: 4, height: 4, children: [{ name: '照片', left: 0, top: 0, right: 4, bottom: 4, imageData }, ...clipped] }, { noBackground: true })
+    const document = await readPsdForImport(bytes)
+    const photo = document.layers[0]!
+    expect(photo.kind === 'pixels' && photo.adjustments).toHaveLength(MAX_LAYER_ADJUSTMENTS)
+    expect(document.layers.slice(1).map((layer) => [layer.kind, layer.name])).toEqual([['adjustment', `反相 ${MAX_LAYER_ADJUSTMENTS + 1}`]])
   })
 
   it('clips to the nearest unclipped layer below, even one it cannot bring', async () => {

@@ -171,7 +171,13 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   }, [image, element.id, element.paint, element.mask, maskView, paintVersion, pixelsVersion])
   // An adjustment being set up in its dialog is shown before it is recorded.
   const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
-  const shownElement = useMemo(() => withLayerPreview(element, preview), [element, preview])
+  // A mask looked at alone or in red shows its coverage, which the layer's own adjustments must not recolour;
+  // alone, the effects that follow the picture's outline are left out too, as the export's mask-only drawing does.
+  const shownElement = useMemo(() => {
+    const previewed = withLayerPreview(element, preview)
+    if (maskView === 'normal') return previewed
+    return { ...previewed, adjustments: undefined, ...(maskView === 'alone' ? { effects: undefined } : {}) }
+  }, [element, preview, maskView])
   const adjustmentClips = useMemo(() => {
     if (image === null) return null
     const size = { width: image.naturalWidth, height: image.naturalHeight }
@@ -190,7 +196,7 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   const effected = useMemo(
     () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(source, shownElement, shownWidth, shownHeight, adjustmentClips, source instanceof HTMLCanvasElement ? `${paintVersion}|${paintedSourceKey(element.id)}` : 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
-    [source, paintVersion, element.crop, element.fit, element.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight]
+    [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight]
   )
   if (image === null || source === null || adjustmentClips === 'pending') {
     const missing = isRuntimeAssetMissing(element.assetId)

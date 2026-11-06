@@ -1,7 +1,7 @@
 import { getCompositeImageData, getLayerImageData, getLayerMaskImageData, initializeCanvas, readPsd, type Layer, type PixelData } from 'ag-psd'
 import sharp from 'sharp'
 import type { PsdAdjustmentImport, PsdDocumentImport, PsdGroupImport, PsdLayerImport } from '../../shared/psd-import'
-import type { AdjustmentSettings, BlendMode } from '../../domain'
+import { MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings, type BlendMode } from '../../domain'
 import { fromPsdAdjustment } from './psd-adjustments'
 import { ADJUSTMENT_LABELS } from '../../shared/adjustments'
 
@@ -181,7 +181,8 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       const mask = documentMask(layer, psd.width, psd.height)
       const blend = layer.blendMode ?? 'normal'
       // Clipped to a pixel layer, plain: that layer's own adjustment does the same.
-      if (layer.clipping === true && base !== null && (blend === 'normal' || blend === 'pass through') && (layer.opacity ?? 1) >= 1 && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))) {
+      // A layer holds only so many adjustments of its own; past that they come as adjustment layers.
+      if (layer.clipping === true && base !== null && base.adjustments.length < MAX_LAYER_ADJUSTMENTS && (blend === 'normal' || blend === 'pass through') && (layer.opacity ?? 1) >= 1 && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))) {
         base.adjustments.push({ settings: imported.settings, enabled: layer.hidden !== true })
         return
       }

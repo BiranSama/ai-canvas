@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { applySceneCommand } from '../../src/domain/commands/apply-command'
 import { adjustmentSettingsSchema, ELEMENT_SCHEMA_VERSION, sceneSchema, type AdjustmentSettings, type SceneElement } from '../../src/domain'
 import { createMerchantExampleScene } from '../../src/renderer/src/fixtures/merchant-examples'
+import { groupBoundsForChildTransforms } from '../../src/renderer/src/store/workspace-store'
 import { adjustPixels, autoLevels, curveTable, defaultAdjustment, describeAdjustment, histogram, isNeutralAdjustment } from '../../src/shared/adjustments'
 
 /** One pixel through an adjustment. */
@@ -130,6 +131,21 @@ describe('mixing and leaving things alone', () => {
     expect([...data]).toEqual([128, 128, 128, 200, 0, 0, 0, 255, 128, 128, 128, 255])
   })
 
+  it('takes a curve with its ends moved in along the diagonal as a change: flat past them', () => {
+    const base = defaultAdjustment('curves')
+    if (base.kind !== 'curves') throw new Error('curves')
+    const inward: AdjustmentSettings = { ...base, channels: { ...base.channels, rgb: [[50, 50], [200, 200]] } }
+    expect(isNeutralAdjustment(inward)).toBe(false)
+    expect(one(inward, 0, 128, 255)).toEqual([50, 128, 200, 255])
+    expect(describeAdjustment(inward)).toBe('曲线（RGB 50→50 200→200）')
+  })
+
+  it('cuts an adjusted value to the range before mixing it with the original', () => {
+    const data = new Uint8ClampedArray([240, 100, 0, 255])
+    adjustPixels(data, { kind: 'vibrance', vibrance: 0, saturation: 100 }, { amount: 0.5 })
+    expect([...data]).toEqual([248, 91, 0, 255])
+  })
+
   it('knows the neutral settings Photoshop opens with', () => {
     for (const kind of ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance'] as const) {
       expect(isNeutralAdjustment(defaultAdjustment(kind))).toBe(true)
@@ -183,6 +199,25 @@ describe('the settings and the adjustment layer', () => {
     })
     expect(sceneSchema.safeParse(grouped).success).toBe(true)
     expect(grouped.elements.find((element) => element.type === 'group')!.transform).toMatchObject({ x: title.transform.x, width: title.transform.width })
+  })
+
+  it('leaves an adjustment layer out of its group\'s box when a member moves', () => {
+    const scene = createMerchantExampleScene('coffee-poster')
+    const title = scene.elements.find((element) => element.name === '标题')!
+    const layer = {
+      id: '0f0f0f0f-0000-4000-8000-0000000000b1', version: ELEMENT_SCHEMA_VERSION, type: 'adjustment', name: '曲线 1', description: '',
+      transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, zIndex: 0, opacity: 1, visible: true, locked: false, groupId: null,
+      semanticRole: 'adjustment', referencePolicy: 'include', settings: defaultAdjustment('curves'), mask: null
+    } as SceneElement
+    const grouped = produce(scene, (draft) => {
+      applySceneCommand(draft, { kind: 'element.add', element: layer })
+      applySceneCommand(draft, {
+        kind: 'element.group', elementIds: [title.id, layer.id],
+        group: { ...layer, id: '0f0f0f0f-0000-4000-8000-0000000000b2', type: 'group', name: '组', childIds: [title.id, layer.id] } as unknown as Extract<SceneElement, { type: 'group' }>
+      })
+    })
+    const moved = { ...title.transform, x: title.transform.x + 0.05 }
+    expect(groupBoundsForChildTransforms(grouped, '0f0f0f0f-0000-4000-8000-0000000000b2', new Map([[title.id, moved]]))).toMatchObject({ x: moved.x, width: moved.width, y: moved.y, height: moved.height })
   })
 
   it('takes no blend mode but normal', () => {

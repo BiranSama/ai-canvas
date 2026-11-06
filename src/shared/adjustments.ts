@@ -335,6 +335,17 @@ function pixelFunction(settings: AdjustmentSettings): PixelFunction | null {
   }
 }
 
+/**
+ * A curve that changes nothing: from black to white along the diagonal. Points
+ * on the diagonal with the ends moved in still change the picture, since the
+ * curve is flat past them.
+ */
+function isStraightCurve(points: CurvePoints): boolean {
+  const first = points[0]!
+  const last = points[points.length - 1]!
+  return first[0] === 0 && first[1] === 0 && last[0] === 255 && last[1] === 255 && points.every(([input, output]) => input === output)
+}
+
 /** Whether the adjustment leaves every pixel as it is. */
 export function isNeutralAdjustment(settings: AdjustmentSettings): boolean {
   switch (settings.kind) {
@@ -344,7 +355,7 @@ export function isNeutralAdjustment(settings: AdjustmentSettings): boolean {
     case 'hue-saturation': return settings.colorize === null && settings.hue === 0 && settings.saturation === 0 && settings.lightness === 0
     case 'color-balance': return [...settings.shadows, ...settings.midtones, ...settings.highlights].every((value) => value === 0)
     case 'levels': return Object.values(settings.channels).every((channel) => channel.inputBlack === 0 && channel.inputWhite === 255 && channel.gamma === 1 && channel.outputBlack === 0 && channel.outputWhite === 255)
-    case 'curves': return Object.values(settings.channels).every((points) => points.every(([input, output]) => input === output))
+    case 'curves': return Object.values(settings.channels).every(isStraightCurve)
     default: return false
   }
 }
@@ -366,10 +377,12 @@ export function adjustPixels(data: Pixels, settings: AdjustmentSettings, options
   const coverage = options.coverage ?? null
   if (amount <= 0 || isNeutralAdjustment(settings)) return
   const tables = channelTables(settings)
+  // The adjusted picture is mixed with the original, so a value past the range is cut first, as the picture would have it.
   const mix = (pixel: number, value: number, original: number): number => {
     let weight = amount
     if (coverage !== null) weight *= coverage[pixel]! / 255
-    return weight >= 1 ? value : original + (value - original) * weight
+    const adjusted = value <= 0 ? 0 : value >= 255 ? 255 : value
+    return weight >= 1 ? adjusted : original + (adjusted - original) * weight
   }
   const full = coverage === null && amount >= 1
   if (tables !== null) {
@@ -500,7 +513,7 @@ export function describeAdjustment(settings: AdjustmentSettings): string {
       break
     case 'curves':
       for (const [name, points] of [['RGB', settings.channels.rgb], ['红', settings.channels.red], ['绿', settings.channels.green], ['蓝', settings.channels.blue]] as const) {
-        if (points.every(([input, output]) => input === output)) continue
+        if (isStraightCurve(points)) continue
         parts.push(`${name} ${points.map(([input, output]) => `${input}→${output}`).join(' ')}`)
       }
       break
