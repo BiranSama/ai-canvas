@@ -56,6 +56,12 @@ export interface ArtworkRequest {
    * drawn on its own goes past them.
    */
   readonly area?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  /**
+   * Some layers together, as a merge draws them: these (hidden ones too with
+   * showHidden), the base at full opacity and in normal blend, because the
+   * merged layer keeps the base's own.
+   */
+  readonly layers?: { readonly ids: readonly string[]; readonly base?: string; readonly showHidden?: boolean }
 }
 
 const WAIT_MS = 30_000
@@ -165,12 +171,13 @@ export class ArtworkSession {
    * with includeHidden every exported kind, hidden ones too, as a PSD keeps
    * them. A layer that is not drawn never holds an export up.
    */
-  static async prepare(scene: Scene, signal?: AbortSignal, options: { readonly includeHidden?: boolean } = {}): Promise<ArtworkSession> {
+  static async prepare(scene: Scene, signal?: AbortSignal, options: { readonly includeHidden?: boolean; readonly only?: readonly string[] } = {}): Promise<ArtworkSession> {
     const session = new ArtworkSession(scene)
-    const drawable = options.includeHidden === true
+    const only = options.only === undefined ? null : new Set(options.only)
+    const drawable = (options.includeHidden === true
       ? scene.elements.filter((element) => element.type !== 'group' && isFinalContent(element))
-      : exportedLayers(scene)
-    const unblendable = exportedLayers(scene).find((element) => !blendSupported(element))
+      : exportedLayers(scene)).filter((element) => only === null || only.has(element.id))
+    const unblendable = drawable.find((element) => element.visible && !blendSupported(element))
     if (unblendable !== undefined) throw new ArtworkRenderError(`这台电脑的图形环境画不出「${unblendable.name}」的混合模式，导出出来会和画布不一样，所以先停下了。`)
     for (const element of drawable) {
       if (signal?.aborted === true) throw abortError()
@@ -313,9 +320,15 @@ export class ArtworkSession {
     const width = Math.max(1, Math.round(request.width))
     const height = Math.max(1, Math.round(request.height))
     const layer = request.layer
-    const elements = layer === undefined
-      ? exportedLayers(this.scene)
-      : this.scene.elements.filter((element) => element.id === layer.id && element.type !== 'group')
+    const some = request.layers
+    const hiddenInGroups = hiddenByGroups(this.scene.elements)
+    const chosen = some === undefined ? null : new Set(some.ids)
+    const elements = layer !== undefined
+      ? this.scene.elements.filter((element) => element.id === layer.id && element.type !== 'group')
+      : chosen !== null
+        ? [...this.scene.elements].sort((left, right) => left.zIndex - right.zIndex).filter((element) => chosen.has(element.id) && element.type !== 'group' && isFinalContent(element)
+          && (some?.showHidden === true || (element.visible && !hiddenInGroups.has(element.id))))
+        : exportedLayers(this.scene)
     if (layer !== undefined && elements.length === 0) throw new ArtworkRenderError('要导出的图层已经不在了。')
     const background = request.background === 'canvas'
       ? this.scene.canvas.transparent ? null : this.scene.canvas.backgroundColor
@@ -324,7 +337,7 @@ export class ArtworkSession {
     const area = request.area === undefined
       ? { x: 0, y: 0, width, height }
       : { x: Math.round(request.area.x), y: Math.round(request.area.y), width: Math.max(1, Math.round(request.area.width)), height: Math.max(1, Math.round(request.area.height)) }
-    const draws = elements.map((element) => this.#layerDraw(element, layer, width, height))
+    const draws = elements.map((element) => this.#layerDraw(element, layer, width, height, some?.base))
 
     if (this.#container === null) {
       const container = document.createElement('div')
@@ -360,9 +373,9 @@ export class ArtworkSession {
     return result
   }
 
-  #layerDraw(element: SceneElement, layer: LayerRequest | undefined, width: number, height: number): LayerDraw {
+  #layerDraw(element: SceneElement, layer: LayerRequest | undefined, width: number, height: number, base?: string): LayerDraw {
     const use: MaskUse = layer?.mask ?? 'scene'
-    const isolated = layer !== undefined
+    const isolated = layer !== undefined || element.id === base
     const maskOnly = use === 'only'
     if (element.type === 'adjustment') {
       // Over the whole picture; its opacity is how much of the adjustment shows, not a layer's transparency.

@@ -9,6 +9,7 @@ import { CompositeReferenceRenderer } from '../../src/main/reference/composite-r
 import { adjustPixels, defaultAdjustment } from '../../src/shared/adjustments'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { exportThroughPanel } from '../helpers/export-file'
+import { openEditor } from '../helpers/workbench-ui'
 
 /*
  * Adjustments look the same wherever the picture is drawn: the canvas's
@@ -55,6 +56,13 @@ async function projectAssets(userData: string, projectId: string): Promise<(asse
 
 async function raw(source: string | Buffer): Promise<Buffer> {
   return sharp(typeof source === 'string' ? await readFile(source) : source).ensureAlpha().raw().toBuffer()
+}
+
+/** The pixels of a rectangle of the picture, its edge pixels left out. */
+function region(pixels: Buffer, box: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }): Buffer {
+  const rows: Buffer[] = []
+  for (let y = box.y + 1; y < box.y + box.height - 1; y += 1) rows.push(pixels.subarray((y * WIDTH + box.x + 1) * 4, (y * WIDTH + box.x + box.width - 1) * 4))
+  return Buffer.concat(rows)
 }
 
 function worstDifference(left: Buffer, right: Buffer): number {
@@ -143,6 +151,111 @@ test('adjustments draw the same in the export and in Main', async () => {
     const [r, g, b] = at(900, 100)
     expect(Math.max(r!, g!, b!) - Math.min(r!, g!, b!)).toBeLessThan(6)
 
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true })
+    await rm(out, { recursive: true, force: true })
+  }
+})
+
+/** A gradient picture added on top, as a plain image layer; its id. */
+async function addGradient(page: Page): Promise<string> {
+  return page.evaluate(async ({ version, image, width, height }) => {
+    const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
+    const current = (await api.getWorkspaceBootstrap()).scene
+    const rgba = new Uint8Array(image.width * image.height * 4)
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) rgba.set([Math.round(x / image.width * 255), Math.round(y / image.height * 255), 160, 255], (y * image.width + x) * 4)
+    }
+    const picture = await api.importPixels({ projectId: current.projectId, name: '渐变', width: image.width, height: image.height, rgba })
+    const id = crypto.randomUUID()
+    await api.executeSceneCommands({
+      projectId: current.projectId,
+      expectedSceneRevision: current.revision,
+      batch: { id: crypto.randomUUID(), origin: 'user', summary: '加图', commands: [{ kind: 'element.add', element: {
+        id, version, type: 'image', name: '渐变', description: '', zIndex: 0, opacity: 1, visible: true, locked: false, groupId: null,
+        semanticRole: 'content', referencePolicy: 'include', assetId: picture.id,
+        transform: { x: image.x / width, y: image.y / height, width: image.width / width, height: image.height / height, rotation: 0 },
+        crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general'
+      } }] }
+    })
+    return id
+  }, { version: ELEMENT_SCHEMA_VERSION, image: IMAGE, width: WIDTH, height: HEIGHT })
+}
+
+async function element(page: Page, id: string): Promise<Scene['elements'][number] | undefined> {
+  return (await scene(page)).elements.find((candidate) => candidate.id === id)
+}
+
+test('the shortcuts open a previewing dialog; adjustment layers come from the panel, change in the properties and merge down', async () => {
+  test.setTimeout(150_000)
+  const out = await mkdtemp(join(tmpdir(), 'ai-canvas-adjust-out-'))
+  const { app, page, userData } = await openCoffeePoster(out)
+  try {
+    const imageId = await addGradient(page)
+    await openEditor(page)
+    await page.locator(`[data-layer-id="${imageId}"] .layer-copy`).click()
+    await expect(page.locator(`[data-layer-id="${imageId}"]`)).toHaveAttribute('aria-selected', 'true')
+
+    // Ctrl+L opens 色阶; 取消 leaves the layer as it was.
+    await page.keyboard.press('Control+L')
+    const levels = page.getByRole('dialog', { name: '色阶' })
+    await expect(levels).toBeVisible()
+    await levels.getByRole('spinbutton', { name: '输入黑场数值' }).fill('60')
+    await levels.getByRole('spinbutton', { name: '输入黑场数值' }).press('Enter')
+    await levels.getByRole('button', { name: '取消' }).click()
+    await expect(levels).toHaveCount(0)
+    expect((await element(page, imageId)) as { adjustments?: unknown[] }).not.toHaveProperty('adjustments.0')
+
+    // 确定 records one step, which undo takes back and redo brings again.
+    await page.keyboard.press('Control+L')
+    await levels.getByRole('spinbutton', { name: '输入黑场数值' }).fill('60')
+    await levels.getByRole('spinbutton', { name: '输入黑场数值' }).press('Enter')
+    await levels.getByRole('button', { name: '确定' }).click()
+    await expect(levels).toHaveCount(0)
+    await expect.poll(async () => {
+      const image = await element(page, imageId)
+      return image?.type === 'image' ? image.adjustments?.map((adjustment) => adjustment.settings.kind === 'levels' ? adjustment.settings.channels.rgb.inputBlack : adjustment.settings.kind) : null
+    }).toEqual([60])
+    await page.keyboard.press('Control+z')
+    await expect.poll(async () => { const image = await element(page, imageId); return image?.type === 'image' ? image.adjustments?.length ?? 0 : -1 }).toBe(0)
+    await page.keyboard.press('Control+Shift+z')
+    await expect.poll(async () => { const image = await element(page, imageId); return image?.type === 'image' ? image.adjustments?.length ?? 0 : -1 }).toBe(1)
+
+    // Ctrl+I inverts at once; the properties list both.
+    await page.keyboard.press('Control+i')
+    await expect.poll(async () => { const image = await element(page, imageId); return image?.type === 'image' ? image.adjustments?.map((adjustment) => adjustment.settings.kind) : null }).toEqual(['levels', 'invert'])
+    await page.getByRole('tab', { name: '属性' }).click()
+    await expect(page.getByRole('list', { name: '这一层的调整' }).getByRole('listitem')).toHaveCount(2)
+
+    await page.getByRole('tab', { name: '图层' }).click()
+    const before = await raw(await exportThroughPanel(page))
+
+    // 新建调整图层 adds one above the picture and shows its settings; letting go of a value records it.
+    await page.locator(`[data-layer-id="${imageId}"] .layer-copy`).click()
+    await page.getByRole('toolbar', { name: '图层操作' }).getByRole('button', { name: '新建调整图层' }).click()
+    await page.getByRole('menu', { name: '新建调整图层' }).getByRole('menuitem', { name: '亮度/对比度…' }).click()
+    await expect.poll(async () => (await scene(page)).elements.at(-1)?.type).toBe('adjustment')
+    const layer = (await scene(page)).elements.at(-1)!
+    await expect(page.getByRole('tab', { name: '属性' })).toHaveAttribute('aria-selected', 'true')
+    await page.getByRole('spinbutton', { name: '亮度数值' }).fill('40')
+    await page.getByRole('spinbutton', { name: '亮度数值' }).press('Enter')
+    await expect.poll(async () => { const current = await element(page, layer.id); return current?.type === 'adjustment' && current.settings.kind === 'brightness-contrast' ? current.settings.brightness : null }).toBe(40)
+    const adjusted = await raw(await exportThroughPanel(page))
+    expect(worstDifference(before, adjusted)).toBeGreaterThan(10)
+
+    // Merging it down puts the adjustment into the picture's pixels, and only there, as in Photoshop:
+    // the picture keeps its look, the layers below it lose the adjustment.
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-layer-id="${layer.id}"] .layer-copy`).click()
+    await page.keyboard.press('Control+E')
+    await expect.poll(async () => (await scene(page)).elements.some((candidate) => candidate.id === layer.id)).toBe(false)
+    const merged = await element(page, imageId)
+    expect(merged?.type === 'image' && (merged.adjustments ?? []).length).toBe(0)
+    const after = await raw(await exportThroughPanel(page))
+    expect(worstDifference(region(adjusted, IMAGE), region(after, IMAGE))).toBeLessThanOrEqual(2)
+    const outside = { x: 900, y: 1100, width: 40, height: 40 }
+    expect(worstDifference(region(before, outside), region(after, outside))).toBeLessThanOrEqual(2)
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true })

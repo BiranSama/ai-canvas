@@ -50,7 +50,6 @@ import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers
 import { assetPixelsVersion, clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
 import { useMaskState } from './mask-state'
 import { paintClipIds } from '../../../shared/paint-ops'
-import { setLayerRenderer } from './layer-render'
 import { constrainAngle, fillAt, gradientBetween, paintTarget, startStroke, type PaintGeometry, type PaintSession } from './paint-controller'
 import {
   boundsForElements,
@@ -938,10 +937,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     width: artboard.width * zoom,
     height: artboard.height * zoom
   }), [artboard.x, artboard.y, artboard.width, artboard.height, zoom])
+  // An adjustment layer has no box on the canvas: no handles, no bar of actions over it.
   const selectedElements = useMemo(
     () => selectedIds
       .map((id) => scene.elements.find((element) => element.id === id))
-      .filter((element): element is SceneElement => element !== undefined),
+      .filter((element): element is SceneElement => element !== undefined && element.type !== 'adjustment'),
     [scene.elements, selectedIds]
   )
   const selectableElements = useMemo(() => scene.elements.filter((element) => {
@@ -1280,7 +1280,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         const selected = scene.elements.find((element) => element.id === id)
         const node = stage.findOne(`#element-${id}`)
         const editingRootSelected = selected?.type === 'group' && selected.id === editingGroupId
-        return node === undefined || selected?.locked === true || editingRootSelected ? [] : [node]
+        return node === undefined || selected?.locked === true || selected?.type === 'adjustment' || editingRootSelected ? [] : [node]
       })
       transformer.nodes(nodes)
     }
@@ -1534,58 +1534,6 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   }), [pan.x, pan.y, setClampedViewport, viewFit, zoom])
 
   // Merging and rasterizing draw layers as they are shown here, at the canvas's output size, with nothing behind them.
-  useEffect(() => {
-    setLayerRenderer((ids, options) => {
-      const stage = stageRef.current
-      const content = contentLayerRef.current
-      const auxiliary = auxiliaryLayerRef.current
-      if (stage === null || content === null || auxiliary === null) return null
-      const keep = new Set(ids)
-      const nodes = [...content.find('.final-content'), ...content.find('.editor-reference')]
-      const pending = content.find('.image-pending').some((stand) => {
-        const owner = stand.findAncestor((ancestor: Konva.Node) => ancestor.id().startsWith('element-'))
-        return owner !== null && owner !== undefined && keep.has(owner.id().slice('element-'.length))
-      })
-      if (pending) return 'pending'
-      const restore: Array<() => void> = []
-      const change = <T,>(read: () => T, write: (value: T) => void, value: T): void => {
-        const before = read()
-        write(value)
-        restore.push(() => write(before))
-      }
-      for (const node of nodes) {
-        const id = node.id().startsWith('element-') ? node.id().slice('element-'.length) : null
-        if (id === null) continue
-        if (!keep.has(id)) change(() => node.visible(), (value) => node.visible(value), false)
-        else if (options.showHidden === true) change(() => node.visible(), (value) => node.visible(value), true)
-        if (id === options.base) {
-          change(() => node.opacity(), (value) => node.opacity(value), 1)
-          change(() => node.globalCompositeOperation(), (value) => node.globalCompositeOperation(value), 'source-over')
-        }
-      }
-      const background = content.findOne('.artboard-background')
-      if (background !== undefined) change(() => background.visible(), (value) => background.visible(value), false)
-      for (const chrome of stage.find('.editor-chrome')) change(() => chrome.visible(), (value) => chrome.visible(value), false)
-      change(() => auxiliary.visible(), (value) => auxiliary.visible(value), false)
-      try {
-        const renderScale = Math.max(scene.canvas.outputWidth / (artboard.width * zoom), scene.canvas.outputHeight / (artboard.height * zoom))
-        const rendered = stage.toCanvas({ x: artboard.x, y: artboard.y, width: artboard.width * zoom, height: artboard.height * zoom, pixelRatio: renderScale })
-        const output = document.createElement('canvas')
-        output.width = scene.canvas.outputWidth
-        output.height = scene.canvas.outputHeight
-        const context = output.getContext('2d')
-        if (context === null) return null
-        context.imageSmoothingEnabled = true
-        context.imageSmoothingQuality = 'high'
-        context.drawImage(rendered, 0, 0, output.width, output.height)
-        return output
-      } finally {
-        for (const undo of restore.reverse()) undo()
-        stage.draw()
-      }
-    })
-    return () => setLayerRenderer(null)
-  }, [artboard.height, artboard.width, artboard.x, artboard.y, scene.canvas.outputHeight, scene.canvas.outputWidth, zoom])
 
   const handleWheel = useCallback((event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault()

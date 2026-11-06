@@ -7,6 +7,7 @@ import {
   AlignStartVertical,
   Box,
   ChevronRight,
+  Contrast,
   Copy,
   Eye,
   EyeOff,
@@ -19,6 +20,7 @@ import {
   PenLine,
   RectangleCircle,
   Search,
+  SlidersHorizontal,
   SquareDashed,
   Sun,
   Trash2,
@@ -30,6 +32,8 @@ import { pathInBox, type SceneElement } from '../../../domain'
 import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
 import { mergeDown, mergeVisible, rasterizeLayer } from '../canvas/layer-actions'
+import { ADJUSTMENT_LAYER_KINDS, createAdjustmentLayer } from '../adjustments/adjustment-actions'
+import { ADJUSTMENT_LABELS } from '../../../shared/adjustments'
 import { addLayerMask, applyLayerMask, deleteLayerMask, editMask, isMaskable, loadMaskAsSelection, loadTransparencyAsSelection, setMaskEnabled, toggleMaskAlone } from '../canvas/mask-actions'
 import { useMaskState } from '../canvas/mask-state'
 import { layerMaskPixels, pixelLayerCanvas, pixelLayerVersion, subscribePixelLayers } from '../canvas/pixel-layers'
@@ -99,7 +103,7 @@ function PaintedThumb({ element, url }: { readonly element: Extract<SceneElement
  * paints on the mask, Alt+click shows it alone, Shift+click turns it off
  * (a red cross), Ctrl+click loads it as the selection.
  */
-function MaskThumb({ element }: { readonly element: Extract<SceneElement, { type: 'image' | 'text' | 'shape' }> }): React.JSX.Element | null {
+function MaskThumb({ element }: { readonly element: Extract<SceneElement, { type: 'image' | 'text' | 'shape' | 'adjustment' }> }): React.JSX.Element | null {
   const version = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
   const editing = useMaskState((state) => state.editing === element.id)
   const alone = useMaskState((state) => state.view?.elementId === element.id && state.view.mode === 'alone')
@@ -192,6 +196,7 @@ function LayerThumb({ element, open }: { readonly element: SceneElement; readonl
   if (element.type === 'mask') return <span className={`layer-thumb is-icon is-mask-${element.mode}`}><SquareDashed size={14} /></span>
   if (element.type === 'sketch') return <span className="layer-thumb is-icon"><PenLine size={14} /></span>
   if (element.type === 'placeholder') return <span className="layer-thumb is-icon is-placeholder"><Box size={14} /></span>
+  if (element.type === 'adjustment') return <span className="layer-thumb is-icon is-adjustment" title={ADJUSTMENT_LABELS[element.settings.kind]}><SlidersHorizontal size={14} /></span>
   return <span className="layer-thumb is-icon is-group">{open ? <FolderOpen size={15} /> : <Folder size={15} />}</span>
 }
 
@@ -227,6 +232,9 @@ export function LayerPanel(): React.JSX.Element {
   const [filter, setFilter] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  // Photoshop's 新建填充或调整图层 menu, opened from the panel's foot.
+  const [adjustMenu, setAdjustMenu] = useState<{ readonly x: number; readonly y: number } | null>(null)
+  const adjustMenuRef = useRef<HTMLDivElement>(null)
   const [dragged, setDragged] = useState<string | null>(null)
   const [drop, setDrop] = useState<DropTarget | null>(null)
   const [anchor, setAnchor] = useState<string | null>(null)
@@ -269,6 +277,20 @@ export function LayerPanel(): React.JSX.Element {
     const row = listRef.current?.querySelector(`[data-layer-id="${id}"]`)
     if (row instanceof HTMLElement && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'nearest' })
   }, [selectedIds])
+
+  useEffect(() => {
+    if (adjustMenu === null) return
+    const close = (event: PointerEvent): void => {
+      if (!adjustMenuRef.current?.contains(event.target as Node)) setAdjustMenu(null)
+    }
+    const escape = (event: globalThis.KeyboardEvent): void => { if (event.key === 'Escape') setAdjustMenu(null) }
+    window.addEventListener('pointerdown', close, true)
+    window.addEventListener('keydown', escape, true)
+    return () => {
+      window.removeEventListener('pointerdown', close, true)
+      window.removeEventListener('keydown', escape, true)
+    }
+  }, [adjustMenu])
 
   useEffect(() => {
     if (menu === null) return
@@ -524,6 +546,11 @@ export function LayerPanel(): React.JSX.Element {
           <button type="button" title={selectionPresent ? '添加蒙版：只显示选区（Alt：隐藏选区）' : '添加蒙版（Alt：全部隐藏）'} aria-label="添加蒙版"
             disabled={selected.length !== 1 || !isMaskable(selected[0]) || (selected[0].mask !== null && selected[0].mask !== undefined)}
             onClick={(event) => { const element = selected[0]; if (element !== undefined) void addLayerMask(element.id, event.altKey) }}><RectangleCircle size={14} /></button>
+          <button type="button" title={selectionPresent ? '新建调整图层：只调整选区' : '新建调整图层'} aria-label="新建调整图层" aria-haspopup="menu" aria-expanded={adjustMenu !== null}
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect()
+              setAdjustMenu((current) => current === null ? { x: box.left, y: box.top } : null)
+            }}><Contrast size={14} /></button>
           <button type="button" title="复制所选" aria-label="复制所选" disabled={selected.length === 0} onClick={() => void duplicateSelection()}><Copy size={14} /></button>
           <button type="button" title="删除所选" aria-label="删除所选" disabled={selected.length === 0} onClick={() => void deleteSelection()}><Trash2 size={14} /></button>
         </div>
@@ -533,6 +560,14 @@ export function LayerPanel(): React.JSX.Element {
         <button type="button" className="text-action" onClick={() => void distribute('vertical')}>垂直等距分布</button>
       </div>}
 
+      {adjustMenu !== null && createPortal(
+        <div className="layer-menu" role="menu" aria-label="新建调整图层" ref={adjustMenuRef} style={{ left: Math.min(adjustMenu.x, window.innerWidth - 196), top: Math.max(8, adjustMenu.y - 8 - ADJUSTMENT_LAYER_KINDS.length * 30) }}>
+          {ADJUSTMENT_LAYER_KINDS.map((kind) => (
+            <button key={kind} type="button" role="menuitem" onClick={() => { setAdjustMenu(null); void createAdjustmentLayer(kind) }}>{ADJUSTMENT_LABELS[kind]}…</button>
+          ))}
+        </div>,
+        document.body
+      )}
       {/* The island's backdrop filter would make it the containing block of a fixed menu, so the menu lives on the body. */}
       {menu !== null && menuElement !== undefined && createPortal(
         <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: Math.max(8, Math.min(menu.y, window.innerHeight - 540)) }}>
@@ -555,7 +590,7 @@ export function LayerPanel(): React.JSX.Element {
           </>}
           {isMaskable(menuElement) && menuElement.mask !== null && menuElement.mask !== undefined && <>
             <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-toggle')} disabled={menuElement.locked}>{menuElement.mask.enabled ? '停用蒙版' : '启用蒙版'}</button>
-            <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-apply')} disabled={menuElement.locked}>应用蒙版</button>
+            {menuElement.type !== 'adjustment' && <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-apply')} disabled={menuElement.locked}>应用蒙版</button>}
             <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-delete')} disabled={menuElement.locked}>删除蒙版</button>
           </>}
           {(menuElement.type === 'text' || menuElement.type === 'shape') && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}

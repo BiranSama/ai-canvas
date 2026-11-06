@@ -2,6 +2,7 @@ import type { SceneCommand, SceneElement } from '../../../domain'
 import { BLEND_MODES, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible } from '../canvas/layer-actions'
 import { invertLayerMask, toggleMaskOverlay } from '../canvas/mask-actions'
+import { adjustSelectedLayer, autoTone } from '../adjustments/adjustment-actions'
 import { useMaskState } from '../canvas/mask-state'
 import { clearSelected, fillLayer } from '../canvas/paint-controller'
 import { showAppNotice } from '../components/app-notice'
@@ -74,6 +75,20 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+单击蒙版缩略图', action: '把蒙版载入为选区' },
       { keys: '\\', action: '用红色显示蒙版遮住的部分' },
       { keys: 'Ctrl+I', action: '编辑蒙版时：反相蒙版' }
+    ]
+  },
+  {
+    title: '调整',
+    entries: [
+      { keys: 'Ctrl+L', action: '色阶' },
+      { keys: 'Ctrl+M', action: '曲线' },
+      { keys: 'Ctrl+U', action: '色相/饱和度' },
+      { keys: 'Ctrl+B', action: '色彩平衡' },
+      { keys: 'Ctrl+Alt+Shift+B', action: '黑白' },
+      { keys: 'Ctrl+I', action: '反相（编辑蒙版时反相蒙版）' },
+      { keys: 'Ctrl+Shift+U', action: '去色' },
+      { keys: 'Ctrl+Shift+L / Ctrl+Alt+Shift+L', action: '自动色调 / 自动对比度' },
+      { keys: '图层面板底部半圆按钮', action: '新建调整图层（有选区时只调整选区）' }
     ]
   },
   {
@@ -291,15 +306,25 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     if (event.shiftKey && !event.altKey && key === 'd') return run(() => { reselectLast() })
     if (event.shiftKey && !event.altKey && key === 'i') return run(() => { inverseSelection() })
     if (event.shiftKey && !event.altKey && key === 'j') return hasSelection() ? run(() => { void layerViaSelection(true) }) : false
+    // Photoshop's 图像 > 调整: 去色, 自动色调, 自动对比度 and 黑白.
+    if (event.shiftKey && !event.altKey && key === 'u') return run(() => { void adjustSelectedLayer('desaturate') })
+    if (event.shiftKey && !event.altKey && key === 'l') return run(() => { void autoTone('tone') })
+    if (event.shiftKey && event.altKey && event.code === 'KeyL') return run(() => { void autoTone('contrast') })
+    if (event.shiftKey && event.altKey && event.code === 'KeyB') return run(() => { void adjustSelectedLayer('black-white') })
     if (event.altKey || event.shiftKey) return false
     if (key === 'a') return run(selectAll)
     // Ctrl+D drops the pixel selection first; with none, the selected layers, as before.
     if (key === 'd') return run(() => { if (!deselect()) state.setSelection([]) })
     if (key === 'j' && hasSelection()) return run(() => { void layerViaSelection(false) })
     if (key === 'i') {
+      // On a mask Ctrl+I inverts the mask; on a layer, its colours, as in Photoshop.
       const editing = useMaskState.getState().editing
-      return editing === null ? false : run(() => { void invertLayerMask(editing) })
+      return run(() => { void (editing === null ? adjustSelectedLayer('invert') : invertLayerMask(editing)) })
     }
+    if (key === 'l') return run(() => { void adjustSelectedLayer('levels') })
+    if (key === 'm') return run(() => { void adjustSelectedLayer('curves') })
+    if (key === 'u') return run(() => { void adjustSelectedLayer('hue-saturation') })
+    if (key === 'b') return run(() => { void adjustSelectedLayer('color-balance') })
     if (event.code === 'KeyE') return run(() => { void mergeDown() })
     if (key === 't') return run(() => state.setActiveTool('select'))
     if (event.key === ',') {
