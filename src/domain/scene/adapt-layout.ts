@@ -239,11 +239,22 @@ export function adaptedScene(scene: Scene, size: LayoutSize): Scene {
   }
 }
 
-/** The same layout as commands, to apply to a project as one step that can be undone. */
+/**
+ * The same layout as commands, to apply to a project as one step that can
+ * be undone. A locked layer is unlocked, moved and locked again within the
+ * step, since a locked layer takes no other change.
+ */
 export function adaptLayoutCommands(scene: Scene, size: LayoutSize): readonly SceneCommand[] {
   const { canvas, changes } = adaptLayout(scene, size)
+  const locked = new Set(scene.elements.filter((element) => element.locked).map((element) => element.id))
   return [
     { kind: 'scene.set-canvas', canvas },
-    ...[...changes].map(([elementId, change]) => ({ kind: 'element.update' as const, elementId, changes: change }))
+    ...[...changes].flatMap(([elementId, change]): SceneCommand[] => locked.has(elementId)
+      ? [
+          { kind: 'element.update', elementId, changes: { locked: false } },
+          { kind: 'element.update', elementId, changes: change },
+          { kind: 'element.update', elementId, changes: { locked: true } }
+        ]
+      : [{ kind: 'element.update', elementId, changes: change }])
   ]
 }

@@ -25,9 +25,12 @@ export function validExportSize(width: number, height: number): boolean {
   return Number.isInteger(width) && Number.isInteger(height) && width >= MIN_EXPORT_EDGE && height >= MIN_EXPORT_EDGE && width <= MAX_EXPORT_EDGE && height <= MAX_EXPORT_EDGE
 }
 
+/** WebP pictures can be at most 16383 pixels a side, one less than the canvas. */
+export const MAX_WEBP_EDGE = 16_383
+
 /** 1×, 2× or 3× of the canvas, as large as fits when a larger one would pass the edge limit. */
-export function scaledSize(width: number, height: number, scale: number): { readonly width: number; readonly height: number; readonly scale: number } {
-  const fitted = Math.min(scale, MAX_EXPORT_EDGE / Math.max(width, height))
+export function scaledSize(width: number, height: number, scale: number, maxEdge: number = MAX_EXPORT_EDGE): { readonly width: number; readonly height: number; readonly scale: number } {
+  const fitted = Math.min(scale, maxEdge / Math.max(width, height))
   return { width: Math.max(1, Math.round(width * fitted)), height: Math.max(1, Math.round(height * fitted)), scale: fitted }
 }
 

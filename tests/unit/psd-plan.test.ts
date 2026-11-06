@@ -79,6 +79,18 @@ describe('where a PSD layer is drawn', () => {
     expect(turned.y + turned.height).toBeGreaterThanOrEqual(500 + 200 + 24)
   })
 
+  it('leaves room for a sketch stroke drawn to its box edges', () => {
+    const base = named(coffee, '底部色块')
+    const sketch = {
+      ...base, type: 'sketch' as const, transform: { x: 0.25, y: 0.25, width: 0.5, height: 0.5, rotation: 0 }, fidelity: 1, finalVisible: true,
+      strokes: [{ id: '0f0f0f0f-0000-4000-8000-0000000000cc', points: [{ x: 0, y: 0 }, { x: 1, y: 1 }], color: '#000000', width: 0.04, opacity: 1 }]
+    } as unknown as SceneElement
+    const area = layerArea(sketch, 1000, 1000)
+    // The stroke is 20 pixels wide in a 500-pixel box; half of it, and its round cap, lie past the corner.
+    expect(area.x).toBeLessThanOrEqual(250 - 10)
+    expect(area.x + area.width).toBeGreaterThanOrEqual(750 + 10)
+  })
+
   it('cuts an area too large for one picture to the canvas', () => {
     const bar = named(coffee, '底部色块')
     expect(layerArea(box(bar, { x: -10, y: 0, width: 30, height: 1, rotation: 0 }), 1000, 1000)).toMatchObject({ x: 0, width: 1000 })

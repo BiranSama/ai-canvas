@@ -1,7 +1,7 @@
 import { FolderOpen, Plus, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ExportImageFormat } from '../../../shared/artwork-export'
-import { pdfLayout, pdfPageFits, pdfTooLarge, PRINT_WIDTHS, scaledSize, SIZE_PRESETS, validExportSize, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
+import { MAX_WEBP_EDGE, pdfLayout, pdfPageFits, pdfTooLarge, PRINT_WIDTHS, scaledSize, SIZE_PRESETS, validExportSize, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { exportImage, exportPdf, exportPsd, exportSizes, sizePreview, softPrintImages, type ExportOutcome, type ExportProgress, type SoftImage } from '../export/export-artwork'
 import { useModalScope } from '../interaction/use-modal-scope'
 import { useWorkspaceStore } from '../store/workspace-store'
@@ -266,7 +266,7 @@ function ImageOptions({ options, transparent, width, height, disabled, onChange 
       </div>
       <div className="export-segmented" role="radiogroup" aria-label="倍数">
         {[1, 2, 3].map((scale) => {
-          const size = scaledSize(width, height, scale)
+          const size = scaledSize(width, height, scale, options.format === 'webp' ? MAX_WEBP_EDGE : undefined)
           return <button key={scale} type="button" role="radio" aria-checked={options.scale === scale} disabled={disabled} onClick={() => onChange({ scale })}>{scale}×<small>{size.width}×{size.height}</small></button>
         })}
       </div>

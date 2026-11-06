@@ -1,8 +1,8 @@
 import Konva from 'konva'
 import { adaptedScene, hiddenByGroups, type Scene, type SceneElement } from '../../../domain'
 import { hasVisibleEffects } from '../../../shared/layer-effects'
-import type { ExportImageFormat, PsdLayer, PsdNode, PsdText } from '../../../shared/artwork-export'
-import { pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
+import { MAX_EXPORT_EDGE, type ExportImageFormat, type PsdLayer, type PsdNode, type PsdText } from '../../../shared/artwork-export'
+import { MAX_WEBP_EDGE, pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { ArtworkSession, canvasPixels } from '../canvas/artwork-render'
 import { TEXT_SHADOW_OPACITY, textMetrics, textWrap } from '../canvas/layer-drawing'
 import { countLayers, layerArea, psdPlan, type LayerPlan } from './psd-plan'
@@ -56,12 +56,12 @@ export async function exportImage(scene: Scene, projectName: string, options: Im
   const session = await ArtworkSession.prepare(scene, signal)
   try {
     checkAborted(signal)
-    const size = scaledSize(scene.canvas.outputWidth, scene.canvas.outputHeight, options.scale)
+    const size = scaledSize(scene.canvas.outputWidth, scene.canvas.outputHeight, options.scale, options.format === 'webp' ? MAX_WEBP_EDGE : MAX_EXPORT_EDGE)
     const canvas = session.render({ width: size.width, height: size.height, background: options.format === 'jpeg' ? { color: scene.canvas.transparent ? options.jpegBackground : scene.canvas.backgroundColor } : 'canvas' })
     progress({ label: '正在保存', done: 1, total: 2 })
     const result = await window.desktop.writeExportImage({ target: choice.target, format: options.format, width: size.width, height: size.height, pixels: bytes(canvasPixels(canvas)) })
     progress({ label: '已保存', done: 2, total: 2 })
-    return { paths: [result.path], notes: size.scale < options.scale ? [`超过每边 ${16_384} 像素的上限，按 ${size.width}×${size.height} 导出。`] : [] }
+    return { paths: [result.path], notes: size.scale < options.scale ? [`超过每边 ${options.format === 'webp' ? MAX_WEBP_EDGE : MAX_EXPORT_EDGE} 像素的上限，按 ${size.width}×${size.height} 导出。`] : [] }
   } finally {
     session.dispose()
   }
@@ -209,20 +209,10 @@ function crop(image: ImageData, bounds: Bounds): Uint8Array<ArrayBuffer> {
   return out
 }
 
-/**
- * How much of the layer its mask lets through at each pixel, read from the
- * layer drawn with and without it, so the mask lands exactly where the
- * canvas puts it; where the layer has nothing, the mask shows.
- */
-export function maskFrom(plain: ImageData, masked: ImageData, bounds: Bounds): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(bounds.width * bounds.height)
-  for (let y = 0; y < bounds.height; y += 1) {
-    for (let x = 0; x < bounds.width; x += 1) {
-      const index = ((bounds.top + y) * plain.width + bounds.left + x) * 4 + 3
-      const alpha = plain.data[index]!
-      out[y * bounds.width + x] = alpha === 0 ? 255 : Math.min(255, Math.round(masked.data[index]! * 255 / alpha))
-    }
-  }
+/** A drawn picture's transparency, one byte a pixel. */
+function alphaOf(image: ImageData): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(image.width * image.height)
+  for (let index = 0; index < out.length; index += 1) out[index] = image.data[index * 4 + 3]!
   return out
 }
 
@@ -294,8 +284,10 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       const bounds = opaqueBounds(plain)
       let psdMask: PsdLayer['mask'] = null
       if (mask !== null && !bakeMask && bounds !== null) {
-        const masked = canvasPixels(session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: 'on', textEffects: text === null } }))
-        psdMask = { left: area.x + bounds.left, top: area.y + bounds.top, width: bounds.width, height: bounds.height, pixels: maskFrom(plain, masked, bounds), disabled: !mask.enabled }
+        // The mask itself over the layer's whole area, not read back from what is drawn now:
+        // text typed in Photoshop where the mask hides stays hidden.
+        const alone = canvasPixels(session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: 'only', textEffects: false } }))
+        psdMask = { left: area.x, top: area.y, width: alone.width, height: alone.height, pixels: alphaOf(alone), disabled: !mask.enabled }
       }
       if (bakeMask) notes.push(`「${element.name}」带羽化或阴影，蒙版并进了像素。`)
       done += 1

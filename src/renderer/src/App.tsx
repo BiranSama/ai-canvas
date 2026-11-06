@@ -239,7 +239,11 @@ function WorkspaceHeader({
     void runProjectAction(() => window.desktop.saveProjectAs({ suggestedName: `${projectName}-${size.label}` })).then(async () => {
       const copy = useWorkspaceStore.getState()
       if (copy.scene.projectId === original.projectId) return
-      await copy.execute(`改成${size.label} ${size.width}×${size.height}`, adaptLayoutCommands(copy.scene, size))
+      const adapted = await copy.execute(`改成${size.label} ${size.width}×${size.height}`, adaptLayoutCommands(copy.scene, size))
+      if (!adapted) {
+        showAppNotice(`副本已经另存，但没能改成${size.label} ${size.width}×${size.height}。可以在画布尺寸里手动改。`, 'problem')
+        return
+      }
       useWorkspaceStore.getState().setActiveView('conversation')
       useCreationSessionStore.getState().setDraft(`这是从 ${from} 改成 ${size.ratio} 的版本，帮我把排版调好，内容和风格不变`)
     })

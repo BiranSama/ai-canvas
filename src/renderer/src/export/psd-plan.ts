@@ -80,6 +80,8 @@ export function layerArea(element: SceneElement, width: number, height: number):
   let margin = 2
   if (element.type === 'text') margin += element.strokeWidth + element.shadowBlur * 2
   if (element.type === 'shape' && element.stroke !== null) margin += element.strokeWidth * Math.min(box.w, box.h)
+  // Sketch strokes run to the box's edges with round caps, and their curves can bow a little past them.
+  if (element.type === 'sketch') margin += Math.max(1, ...element.strokes.map((stroke) => stroke.width * Math.min(box.w, box.h))) + 0.1 * Math.max(box.w, box.h)
   if (element.type === 'image' && hasVisibleEffects(element.effects) && element.effects?.shadow != null) {
     const shadow = shadowGeometry(element.effects.shadow, box.w, box.h)
     margin += shadow.padding + Math.max(Math.abs(shadow.offsetX), Math.abs(shadow.offsetY))

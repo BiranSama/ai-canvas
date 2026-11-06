@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { exportFileName, safeFileStem } from '../../src/shared/artwork-export'
-import { pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SIZE_PRESETS, validExportSize } from '../../src/shared/export-presets'
+import { MAX_WEBP_EDGE, pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SIZE_PRESETS, validExportSize } from '../../src/shared/export-presets'
 
 describe('export sizes and pages', () => {
   it('scales the picture up to the edge limit and no further', () => {
@@ -8,6 +8,8 @@ describe('export sizes and pages', () => {
     const capped = scaledSize(8000, 6000, 3)
     expect(capped.width).toBe(16_384)
     expect(capped.scale).toBeCloseTo(16_384 / 8000)
+    // WebP stops one pixel short of the canvas limit.
+    expect(scaledSize(8192, 512, 2, MAX_WEBP_EDGE)).toMatchObject({ width: 16_383 })
   })
 
   it('accepts sizes the canvas can have', () => {

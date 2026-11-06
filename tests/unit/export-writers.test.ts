@@ -106,7 +106,7 @@ describe('PSD writer', () => {
     const block = group.children![0]!
     expect(block).toMatchObject({ blendMode: 'multiply', left: 3, top: 2, right: 5, bottom: 4 })
     expect(block.opacity).toBeCloseTo(0.5, 2)
-    expect(block.mask).toMatchObject({ left: 3, top: 2, right: 5, bottom: 4, defaultColor: 255, disabled: true })
+    expect(block.mask).toMatchObject({ left: 3, top: 2, right: 5, bottom: 4, defaultColor: 0, disabled: true })
     expect([...block.mask!.imageData!.data].filter((_value, index) => index % 4 === 0)).toEqual([255, 0, 0, 255])
     expect(group.children![1]).toMatchObject({ hidden: true })
     const title = psd.children![2]!

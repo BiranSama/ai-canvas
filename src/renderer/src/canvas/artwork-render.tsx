@@ -22,8 +22,12 @@ type MaskedElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
 
 export class ArtworkRenderError extends Error {}
 
-/** How a layer's mask applies: as the scene has it, not at all (a PSD keeps it apart), or as if it were on. */
-export type MaskUse = 'scene' | 'off' | 'on'
+/**
+ * How a layer's mask applies: as the scene has it, not at all (a PSD keeps
+ * it apart), as if it were on, or the mask alone: white where it shows the
+ * layer, drawn in the layer's place, for a PSD's layer mask.
+ */
+export type MaskUse = 'scene' | 'off' | 'on' | 'only'
 
 export interface LayerRequest {
   readonly id: string
@@ -134,7 +138,7 @@ function readClips(element: SceneElement, ops: Parameters<typeof paintClipIds>[0
 
 function maskApplies(element: MaskedElement, use: MaskUse): boolean {
   const mask = element.mask ?? null
-  return mask !== null && (use === 'on' || (use === 'scene' && mask.enabled))
+  return mask !== null && (use === 'on' || use === 'only' || (use === 'scene' && mask.enabled))
 }
 
 /**
@@ -219,6 +223,7 @@ export class ArtworkSession {
   #imageSource(element: ImageElement, use: MaskUse): HTMLImageElement | HTMLCanvasElement {
     const image = this.#images.get(element.assetId)
     if (image === undefined) throw new ArtworkRenderError(`图层「${element.name}」的图片还没读出来。`)
+    if (use === 'only') return this.#imageMaskSource(element, image)
     const ops = element.paint ?? []
     const masked = maskApplies(element, use)
     if (ops.length === 0 && !masked) return image
@@ -238,6 +243,26 @@ export class ArtworkSession {
       const coverage = maskCoverage(gray.data, width, height, mask.paint, readClips(element, mask.paint, { width, height }))
       applyMaskAlpha(pixels.data, pixels.data, coverage, width)
     }
+    context.putImageData(pixels, 0, 0)
+    this.#sources.set(key, canvas)
+    return canvas
+  }
+
+  /** An image layer's mask alone, at the image's size: white, as opaque as the mask shows the layer. */
+  #imageMaskSource(element: ImageElement, image: HTMLImageElement): HTMLCanvasElement {
+    const key = `${element.id}|mask`
+    const known = this.#sources.get(key)
+    if (known instanceof HTMLCanvasElement) return known
+    const width = image.naturalWidth
+    const height = image.naturalHeight
+    const mask = element.mask
+    if (mask === null || mask === undefined) throw new ArtworkRenderError(`图层「${element.name}」没有蒙版。`)
+    const gray = grayAssetPixels(mask.assetId, { width, height })
+    if (gray === null) throw new ArtworkRenderError(`图层「${element.name}」的蒙版还没读出来。`)
+    const coverage = maskCoverage(gray.data, width, height, mask.paint, readClips(element, mask.paint, { width, height }))
+    const { canvas, context } = context2d(width, height)
+    const pixels = context.createImageData(width, height)
+    for (let index = 0; index < coverage.length; index += 1) pixels.data.set([255, 255, 255, coverage[index]!], index * 4)
     context.putImageData(pixels, 0, 0)
     this.#sources.set(key, canvas)
     return canvas
@@ -314,8 +339,11 @@ export class ArtworkSession {
   #layerDraw(element: SceneElement, layer: LayerRequest | undefined, width: number, height: number): LayerDraw {
     const use: MaskUse = layer?.mask ?? 'scene'
     const isolated = layer !== undefined
+    const maskOnly = use === 'only'
     return {
-      element,
+      // The mask alone ignores the image's effects: they follow its outline, not the mask.
+      element: maskOnly && element.type === 'image' ? { ...element, effects: undefined } : element,
+      maskOnly,
       x: element.transform.x * width,
       y: element.transform.y * height,
       width: element.transform.width * width,

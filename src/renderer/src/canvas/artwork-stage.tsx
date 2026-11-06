@@ -14,6 +14,8 @@ type ImageElement = Extract<SceneElement, { type: 'image' }>
 
 export interface LayerDraw {
   readonly element: SceneElement
+  /** Draw the mask alone, white where it shows the layer, instead of the layer. */
+  readonly maskOnly: boolean
   readonly x: number
   readonly y: number
   readonly width: number
@@ -53,7 +55,8 @@ export function ArtworkStage({ width, height, background, outputScale, draws, cl
 }
 
 function ArtworkLayer({ draw, outputScale }: { readonly draw: LayerDraw; readonly outputScale: number }): React.JSX.Element {
-  const visual = (
+  // A text or shape mask covers the box: drawn alone, it is the box in white, through the mask.
+  const visual = draw.maskOnly && draw.element.type !== 'image' ? <Rect width={draw.width} height={draw.height} fill="#FFFFFF" /> : (
     <ElementVisual
       element={draw.element}
       width={draw.width}

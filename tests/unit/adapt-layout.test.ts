@@ -1,4 +1,6 @@
+import { produce } from 'immer'
 import { describe, expect, it } from 'vitest'
+import { applySceneCommand } from '../../src/domain/commands/apply-command'
 import { adaptedScene, adaptLayout, adaptLayoutCommands, ELEMENT_SCHEMA_VERSION, hiddenByGroups, sceneSchema, storedAspect, type Scene, type SceneElement } from '../../src/domain'
 import { createMerchantExampleScene, MERCHANT_EXAMPLE_KEYS } from '../../src/renderer/src/fixtures/merchant-examples'
 import { SIZE_PRESETS } from '../../src/shared/export-presets'
@@ -118,6 +120,18 @@ describe('laying an artwork out at another size', () => {
     const scale = Math.min(1920 / 1024, 1080 / 1280)
     expect(offset(wide, byName(wide, '副标题'))).toBeCloseTo(offset(grouped, subtitle) * scale, 3)
     expect(pixels(wide, byName(wide, '标题组')).width).toBeCloseTo(pixels(grouped, group).width * scale, 3)
+  })
+
+  it('moves a locked layer by unlocking and locking it again within the same step', () => {
+    const background = byName(coffee, '奶油色背景')
+    const locked = sceneSchema.parse({ ...coffee, elements: coffee.elements.map((element) => element.id === background.id ? { ...element, locked: true } : element) })
+    const commands = adaptLayoutCommands(locked, { width: 1920, height: 1080 })
+    const forBackground = commands.filter((command) => command.kind === 'element.update' && command.elementId === background.id).map((command) => command.kind === 'element.update' ? Object.keys(command.changes) : [])
+    expect(forBackground[0]).toEqual(['locked'])
+    expect(forBackground.at(-1)).toEqual(['locked'])
+    const after = produce(locked, (draft) => { for (const command of commands) applySceneCommand(draft, command) })
+    expect(byName(after, '奶油色背景').locked).toBe(true)
+    expect(after.canvas).toMatchObject({ outputWidth: 1920, outputHeight: 1080 })
   })
 
   it('makes one command list that sets the canvas and moves the layers', () => {

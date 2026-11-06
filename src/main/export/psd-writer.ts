@@ -119,8 +119,8 @@ async function layerOf(layer: PsdLayer, fonts: PsdFontLookup): Promise<Layer> {
       top: layer.mask.top,
       right: layer.mask.left + layer.mask.width,
       bottom: layer.mask.top + layer.mask.height,
-      // Outside the mask's bounds the layer shows, as a new Photoshop mask does.
-      defaultColor: 255,
+      // The mask covers all the layer can draw; past it the layer is hidden, as the canvas cuts it at its box.
+      defaultColor: 0,
       disabled: layer.mask.disabled,
       imageData: maskData(layer.mask.width, layer.mask.height, layer.mask.pixels)
     }

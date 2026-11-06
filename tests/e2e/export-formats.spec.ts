@@ -71,6 +71,7 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
         expectedSceneRevision: current.revision,
         batch: { id: crypto.randomUUID(), origin: 'user', summary: '导出测试', commands: [
           { kind: 'element.update', elementId: named('价格圆标').id, changes: { mask: { assetId: mask.id, enabled: true } } },
+          { kind: 'element.update', elementId: named('标题').id, changes: { mask: { assetId: mask.id, enabled: true } } },
           { kind: 'element.update', elementId: named('店名').id, changes: { visible: false } },
           // The bottom bar reaches past the canvas: a PSD keeps the part outside it.
           { kind: 'element.update', elementId: named('底部色块').id, changes: { transform: { ...named('底部色块').transform, height: named('底部色块').transform.height + 0.1 } } },
@@ -80,7 +81,7 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
           } }
         ] }
       })
-      return { ok: result.ok, badge: named('价格圆标').transform }
+      return { ok: result.ok, badge: named('价格圆标').transform, title: title.transform }
     }, ELEMENT_SCHEMA_VERSION)
     expect(fixture.ok).toBe(true)
     await expect(page.locator('.conversation-title p')).toContainText(` ${before + 1} 个元素`)
@@ -112,6 +113,19 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
     const layerWidth = badge.right! - badge.left!
     const layerHeight = badge.bottom! - badge.top!
     expect(layerPixels.data[(Math.floor(layerHeight / 2) * layerWidth + Math.floor(layerWidth * 0.75)) * 4 + 3]).toBe(255)
+
+    // The title's mask is the mask itself over the whole box, not read from the letters drawn now:
+    // in the hidden half it hides even where there are no letters, so text typed there in Photoshop stays hidden.
+    const titleLayer = find(psd.children, '标题')!
+    const titleMask = titleLayer.mask!
+    const maskAt = (u: number, v: number): number => {
+      const x = Math.round((fixture.title.x + fixture.title.width * u) * psd.width) - titleMask.left!
+      const y = Math.round((fixture.title.y + fixture.title.height * v) * psd.height) - titleMask.top!
+      return titleMask.imageData!.data[(y * (titleMask.right! - titleMask.left!) + x) * 4]!
+    }
+    expect(maskAt(0.25, 0.1)).toBeGreaterThan(250)
+    expect(maskAt(0.75, 0.1)).toBeLessThan(5)
+    expect(maskAt(0.75, 0.5)).toBeLessThan(5)
 
     // The PSD's picture is the PNG export.
     let worst = 0
