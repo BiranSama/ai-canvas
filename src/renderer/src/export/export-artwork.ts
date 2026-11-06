@@ -59,6 +59,8 @@ export async function exportImage(scene: Scene, projectName: string, options: Im
     const size = scaledSize(scene.canvas.outputWidth, scene.canvas.outputHeight, options.scale, options.format === 'webp' ? MAX_WEBP_EDGE : MAX_EXPORT_EDGE)
     const canvas = session.render({ width: size.width, height: size.height, background: options.format === 'jpeg' ? { color: scene.canvas.transparent ? options.jpegBackground : scene.canvas.backgroundColor } : 'canvas' })
     progress({ label: '正在保存', done: 1, total: 2 })
+    // The last chance to stop: once Main is writing, the file is saved.
+    checkAborted(signal)
     const result = await window.desktop.writeExportImage({ target: choice.target, format: options.format, width: size.width, height: size.height, pixels: bytes(canvasPixels(canvas)) })
     progress({ label: '已保存', done: 2, total: 2 })
     return { paths: [result.path], notes: size.scale < options.scale ? [`超过每边 ${options.format === 'webp' ? MAX_WEBP_EDGE : MAX_EXPORT_EDGE} 像素的上限，按 ${size.width}×${size.height} 导出。`] : [] }
@@ -78,6 +80,7 @@ export async function exportPdf(scene: Scene, projectName: string, page: PdfPage
     checkAborted(signal)
     const canvas = session.render({ width: layout.width, height: layout.height, background: 'canvas' })
     progress({ label: '正在保存', done: 1, total: 2 })
+    checkAborted(signal)
     const result = await window.desktop.writeExportPdf({
       target: choice.target,
       title: projectName,
@@ -135,6 +138,7 @@ export async function exportSizes(scene: Scene, projectName: string, sizes: read
     const session = await ArtworkSession.prepare(adapted, signal)
     try {
       const canvas = session.render({ width: size.width, height: size.height, background: format === 'jpeg' ? { color: scene.canvas.transparent ? '#FFFFFF' : scene.canvas.backgroundColor } : 'canvas' })
+      checkAborted(signal)
       const result = await window.desktop.writeExportImage({
         target: choice.target,
         fileName: `${projectName}-${size.label}-${size.width}x${size.height}`,
@@ -345,6 +349,8 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
     const composite = bytes(canvasPixels(session.render({ width, height, background: 'canvas' })))
     done += 1
     progress({ label: '正在写入 PSD', done, total })
+    // Cancelled while the composite was drawn: nothing has been written yet, so nothing is.
+    checkAborted(signal)
     const result = await window.desktop.writeExportPsd({ target: choice.target, document: { width, height, children, composite } })
     progress({ label: '已保存', done: total, total })
     return { paths: [result.path], notes }
