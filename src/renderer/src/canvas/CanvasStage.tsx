@@ -46,7 +46,7 @@ import { warmMagicTouch } from '../selection/magic-touch'
 import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
-import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
+import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers, paintedSourceKey } from './pixel-layers'
 import { assetPixelsVersion, clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
 import { useMaskState } from './mask-state'
 import { paintClipIds } from '../../../shared/paint-ops'
@@ -136,17 +136,17 @@ function useHtmlImage(url: string | null): HTMLImageElement | null {
 const DRAWN_PIXELS = 16_000_000
 
 /**
- * How many pixels per box unit an image with effects or adjustments is
- * drawn at: the screen's, rounded up to a power of two so zooming redraws
- * only now and then, never more than the picture itself holds.
+ * How many pixels per output pixel an image with effects or adjustments is
+ * worked out at: the screen's (box units are output pixels, zoom is screen
+ * pixels per output pixel), rounded up to a power of two so zooming redraws
+ * only now and then, and never more than the output itself. Exports draw at
+ * output size on their own.
  */
-function drawnDetail(width: number, height: number, zoom: number, image: HTMLImageElement | null): number {
-  const screen = zoom * (window.devicePixelRatio || 1)
-  if (screen <= 1 || image === null) return 1
+function drawnDetail(width: number, height: number, zoom: number): number {
+  const screen = Math.max(1 / 64, zoom * (window.devicePixelRatio || 1))
   const stepped = Math.pow(2, Math.ceil(Math.log2(screen)))
-  const own = Math.max(image.naturalWidth / Math.max(1, width), image.naturalHeight / Math.max(1, height))
   const budget = Math.sqrt(DRAWN_PIXELS / Math.max(1, width * height))
-  return Math.max(1, Math.min(stepped, own, budget))
+  return Math.min(1, stepped, budget)
 }
 
 function ImageVisual({ element, width, height }: { element: Extract<SceneElement, { type: 'image' }>; width: number; height: number }): React.JSX.Element {
@@ -182,13 +182,13 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
     return { ...size, pixels }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pixelsVersion marks a clip read
   }, [image, shownElement.adjustments, preview, pixelsVersion])
-  // Effects and adjustments are worked out in pixels: at the size shown on screen, in steps as the view zooms in.
+  // Effects and adjustments are worked out in pixels: at the screen's resolution, in steps as the view zooms.
   const zoom = useCanvasViewportStore((state) => state.artboard?.zoom ?? 1)
-  const detail = drawnDetail(width, height, zoom, image)
+  const detail = drawnDetail(width, height, zoom)
   const shownWidth = Math.round(width * detail)
   const shownHeight = Math.round(height * detail)
   const effected = useMemo(
-    () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(source, shownElement, shownWidth, shownHeight, adjustmentClips),
+    () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(source, shownElement, shownWidth, shownHeight, adjustmentClips, source instanceof HTMLCanvasElement ? `${paintVersion}|${paintedSourceKey(element.id)}` : 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
     [source, paintVersion, element.crop, element.fit, element.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight]
   )

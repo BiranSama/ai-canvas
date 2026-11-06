@@ -242,6 +242,11 @@ export function paintedSource(elementId: string, image: HTMLImageElement, ops: r
   return layer.canvas
 }
 
+/** What the layer's painted canvas holds now: it is recomposed in place, so anything drawn from it is redrawn when this changes. */
+export function paintedSourceKey(elementId: string): string {
+  return layers.get(elementId)?.composed ?? ''
+}
+
 /** A text or shape layer's mask as transparency over its box, or null without one; also its coverage for viewing. */
 export function maskedBoxSource(elementId: string, mask: LayerMask, gray: { readonly width: number; readonly height: number; readonly data: ClipPixels }, clips: ClipLookup): { readonly alpha: HTMLCanvasElement; readonly mask: MaskPixels } {
   const pixels = ensureMask(elementId, mask, gray.data, gray.width, gray.height, clips)

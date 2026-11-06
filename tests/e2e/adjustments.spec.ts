@@ -109,6 +109,11 @@ test('adjustments draw the same in the export and in Main', async () => {
             transform: { x: image.x / width, y: image.y / height, width: image.width / width, height: image.height / height, rotation: 0 },
             crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general',
             adjustments: [
+              { id: crypto.randomUUID(), enabled: true, settings: { kind: 'brightness-contrast', brightness: 30, contrast: 20 } },
+              { id: crypto.randomUUID(), enabled: true, settings: { kind: 'curves', channels: { rgb: [[0, 0], [100, 130], [255, 255]], red: [[0, 0], [255, 230]], green: [[0, 0], [255, 255]], blue: [[0, 20], [255, 255]] } } },
+              { id: crypto.randomUUID(), enabled: true, settings: { kind: 'exposure', exposure: 0.4, offset: 0.01, gamma: 1.1 } },
+              { id: crypto.randomUUID(), enabled: true, settings: { kind: 'vibrance', vibrance: 40, saturation: 10 } },
+              { id: crypto.randomUUID(), enabled: true, settings: { kind: 'color-balance', shadows: [10, 0, -10], midtones: [-20, 10, 15], highlights: [0, -10, 5], preserveLuminosity: true } },
               { id: crypto.randomUUID(), enabled: true, settings: { kind: 'hue-saturation', hue: 120, saturation: 20, lightness: 0, colorize: null } },
               { id: crypto.randomUUID(), enabled: true, clip: clip.id, settings: { kind: 'levels', channels: {
                 rgb: { inputBlack: 20, inputWhite: 230, gamma: 1.5, outputBlack: 0, outputWhite: 255 },
@@ -119,6 +124,7 @@ test('adjustments draw the same in the export and in Main', async () => {
             ]
           } },
           { kind: 'element.add', element: { ...base, id: invertId, type: 'adjustment', name: '反相 1', opacity: 0.5, semanticRole: 'adjustment', transform: whole, settings: { kind: 'invert' } } },
+          { kind: 'element.add', element: { ...base, id: crypto.randomUUID(), type: 'adjustment', name: '去色 1', opacity: 0.3, semanticRole: 'adjustment', transform: whole, settings: { kind: 'desaturate' }, mask: { assetId: mask.id, enabled: true } } },
           { kind: 'element.add', element: {
             ...base, id: blackWhiteId, type: 'adjustment', name: '黑白 1', opacity: 0.7, semanticRole: 'adjustment', transform: whole,
             settings: { kind: 'black-white', reds: 40, yellows: 60, greens: 40, cyans: 60, blues: 20, magentas: 80, tint: null },
@@ -141,10 +147,16 @@ test('adjustments draw the same in the export and in Main', async () => {
 
     // A pixel in the selected half of the image went through each adjustment in turn.
     const pixel = new Uint8ClampedArray([Math.round(20 / IMAGE.width * 255), Math.round(80 / IMAGE.height * 255), 160, 255])
+    adjustPixels(pixel, { kind: 'brightness-contrast', brightness: 30, contrast: 20 })
+    adjustPixels(pixel, { kind: 'curves', channels: { rgb: [[0, 0], [100, 130], [255, 255]], red: [[0, 0], [255, 230]], green: [[0, 0], [255, 255]], blue: [[0, 20], [255, 255]] } })
+    adjustPixels(pixel, { kind: 'exposure', exposure: 0.4, offset: 0.01, gamma: 1.1 })
+    adjustPixels(pixel, { kind: 'vibrance', vibrance: 40, saturation: 10 })
+    adjustPixels(pixel, { kind: 'color-balance', shadows: [10, 0, -10], midtones: [-20, 10, 15], highlights: [0, -10, 5], preserveLuminosity: true })
     adjustPixels(pixel, { kind: 'hue-saturation', hue: 120, saturation: 20, lightness: 0, colorize: null })
     const identity = { inputBlack: 0, inputWhite: 255, gamma: 1, outputBlack: 0, outputWhite: 255 }
     adjustPixels(pixel, { kind: 'levels', channels: { rgb: { ...identity, inputBlack: 20, inputWhite: 230, gamma: 1.5 }, red: identity, green: identity, blue: identity } })
     adjustPixels(pixel, { kind: 'invert' }, { amount: 0.5 })
+    adjustPixels(pixel, { kind: 'desaturate' }, { amount: 0.3 })
     adjustPixels(pixel, defaultAdjustment('black-white'), { amount: 0.7 })
     const drawnPixel = [...exported.subarray(((IMAGE.y + 80) * WIDTH + IMAGE.x + 20) * 4, ((IMAGE.y + 80) * WIDTH + IMAGE.x + 20) * 4 + 3)]
     drawnPixel.forEach((value, channel) => expect(Math.abs(value - pixel[channel]!)).toBeLessThanOrEqual(2))
@@ -267,6 +279,112 @@ test('the shortcuts open a previewing dialog; adjustment layers come from the pa
     expect(worstDifference(region(adjusted, IMAGE), region(after, IMAGE))).toBeLessThanOrEqual(2)
     const outside = { x: 900, y: 1100, width: 40, height: 40 }
     expect(worstDifference(region(before, outside), region(after, outside))).toBeLessThanOrEqual(2)
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true })
+    await rm(out, { recursive: true, force: true })
+  }
+})
+
+/** Frame gaps from now until stopFrames, while the test drives the mouse. */
+async function startFrames(page: Page): Promise<void> {
+  await page.evaluate(`(() => {
+    const state = { gaps: [], last: performance.now(), on: true }
+    globalThis.__adjustFrames = state
+    const tick = (now) => { state.gaps.push(now - state.last); state.last = now; if (state.on) requestAnimationFrame(tick) }
+    requestAnimationFrame(tick)
+  })()`)
+}
+
+async function stopFrames(page: Page): Promise<{ readonly frames: number; readonly median: number; readonly p95: number; readonly worst: number }> {
+  const gaps = await page.evaluate('(() => { const state = globalThis.__adjustFrames; state.on = false; return state.gaps })()') as number[]
+  const sorted = [...gaps].sort((left, right) => left - right)
+  const at = (share: number): number => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * share))]! * 10) / 10
+  return { frames: gaps.length, median: at(0.5), p95: at(0.95), worst: at(1) }
+}
+
+/** Moves the mouse from one point to another in steps, about one a frame. */
+async function glide(page: Page, from: { x: number; y: number }, to: { x: number; y: number }, steps: number): Promise<void> {
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  for (let step = 1; step <= steps; step += 1) {
+    await page.mouse.move(from.x + (to.x - from.x) * step / steps, from.y + (to.y - from.y) * step / steps)
+    await page.waitForTimeout(16)
+  }
+  await page.mouse.up()
+}
+
+test('a 4000-pixel picture keeps up while a curve is dragged and while a layer moves under an adjustment layer', async () => {
+  test.setTimeout(180_000)
+  const out = await mkdtemp(join(tmpdir(), 'ai-canvas-adjust-out-'))
+  const { app, page, userData } = await openCoffeePoster(out)
+  try {
+    const ids = await page.evaluate(async ({ version }) => {
+      const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
+      const current = (await api.getWorkspaceBootstrap()).scene
+      const side = 4000
+      const rgba = new Uint8Array(side * side * 4)
+      for (let y = 0; y < side; y += 1) for (let x = 0; x < side; x += 1) rgba.set([x * 255 / side, y * 255 / side, (x + y) % 256, 255], (y * side + x) * 4)
+      const picture = await api.importPixels({ projectId: current.projectId, name: '大图', width: side, height: side, rgba })
+      const imageId = crypto.randomUUID()
+      const title = current.elements.find((element) => element.name === '标题')!
+      await api.executeSceneCommands({
+        projectId: current.projectId,
+        expectedSceneRevision: current.revision,
+        batch: { id: crypto.randomUUID(), origin: 'user', summary: '大图', commands: [
+          { kind: 'scene.set-canvas', canvas: { ...current.canvas, aspectWidth: 1, aspectHeight: 1, outputWidth: side, outputHeight: side } },
+          { kind: 'element.add', element: {
+            id: imageId, version, type: 'image', name: '大图', description: '', zIndex: 0, opacity: 1, visible: true, locked: false, groupId: null,
+            semanticRole: 'content', referencePolicy: 'include', assetId: picture.id, transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 },
+            crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general'
+          } },
+          { kind: 'element.reorder', elementId: imageId, toIndex: 1 }
+        ] }
+      })
+      return { imageId, titleId: title.id }
+    }, { version: ELEMENT_SCHEMA_VERSION })
+    await openEditor(page)
+    // As in the selection test: without a graphics card the glass panels blur again in software whenever the canvas changes.
+    await page.addStyleTag({ content: '* { backdrop-filter: none !important; }' })
+    await page.locator(`[data-layer-id="${ids.imageId}"] .layer-copy`).click()
+    await page.keyboard.press('Control+0')
+    await page.waitForTimeout(800)
+
+    // Dragging a point of the curve: each move is a new preview of the 4000-pixel picture on the canvas.
+    await page.keyboard.press('Control+M')
+    const curves = page.getByRole('application', { name: '曲线' })
+    await expect(curves).toBeVisible()
+    await page.waitForTimeout(500)
+    const box = (await curves.boundingBox())!
+    await startFrames(page)
+    await glide(page, { x: box.x + box.width * 0.5, y: box.y + box.height * 0.5 }, { x: box.x + box.width * 0.5, y: box.y + box.height * 0.2 }, 60)
+    const curve = await stopFrames(page)
+    await page.getByRole('dialog', { name: '曲线' }).getByRole('button', { name: '确定' }).click()
+    await expect.poll(async () => { const image = await element(page, ids.imageId); return image?.type === 'image' ? image.adjustments?.length ?? 0 : 0 }).toBe(1)
+
+    // An adjustment layer right above the title (it goes above the selected layer); then the title moves under it.
+    await page.locator(`[data-layer-id="${ids.titleId}"] .layer-copy`).click()
+    await page.getByRole('toolbar', { name: '图层操作' }).getByRole('button', { name: '新建调整图层' }).click()
+    await page.getByRole('menu', { name: '新建调整图层' }).getByRole('menuitem', { name: '色相/饱和度…' }).click()
+    await expect.poll(async () => {
+      const elements = (await scene(page)).elements
+      return elements[elements.findIndex((candidate) => candidate.id === ids.titleId) + 1]?.type
+    }).toBe('adjustment')
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.locator(`[data-layer-id="${ids.titleId}"] .layer-copy`).click()
+    const title = await page.evaluate(`(() => {
+      const root = document.querySelector('[data-testid="canvas-stage"]')
+      const surface = root.querySelector('.konvajs-content').getBoundingClientRect()
+      return { x: surface.left + Number(root.dataset.artboardX) + 0.5 * Number(root.dataset.artboardWidth), y: surface.top + Number(root.dataset.artboardY) + 0.12 * Number(root.dataset.artboardHeight) }
+    })()`) as { x: number; y: number }
+    await startFrames(page)
+    await glide(page, title, { x: title.x + 160, y: title.y + 120 }, 60)
+    const moving = await stopFrames(page)
+    console.log(`PERF-ADJUST-4000 curve=${JSON.stringify(curve)} move-under-adjustment=${JSON.stringify(moving)}`)
+    expect(curve.frames).toBeGreaterThan(20)
+    expect(moving.frames).toBeGreaterThan(20)
+    expect(curve.p95).toBeLessThan(50)
+    expect(moving.p95).toBeLessThan(50)
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true })

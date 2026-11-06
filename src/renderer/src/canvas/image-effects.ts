@@ -52,26 +52,67 @@ function clipCoverage(clip: Uint8Array, size: { readonly width: number; readonly
   return coverage
 }
 
-/**
- * The image with its layer effects and adjustments, drawn at this size,
- * using the same pixel math as Main's composite renderer. Null when it has
- * neither or the browser cannot draw here. Clips must be given for every
- * adjustment made in a selection.
- */
-export function renderImageEffects(image: HTMLImageElement | HTMLCanvasElement, element: ImageElement, width: number, height: number, clips: AdjustmentClips | null = null): EffectedImage | null {
+interface DrawnBase {
+  /** The image in its box with its colour match and feather, before its adjustments. */
+  readonly pixels: ImageData
+  readonly shadow: EffectedImage['shadow']
+}
+
+/** The few last bases drawn from each picture, so moving an adjustment's control only adjusts again. */
+const bases = new WeakMap<HTMLImageElement | HTMLCanvasElement, Map<string, DrawnBase>>()
+const BASES_KEPT = 2
+
+function drawnBase(image: HTMLImageElement | HTMLCanvasElement, element: ImageElement, w: number, h: number, sourceVersion: string | number): DrawnBase | null {
   const effects = element.effects
-  const adjustments = activeAdjustments(element.adjustments)
-  const visibleEffects = hasVisibleEffects(effects)
-  if (!visibleEffects && adjustments.length === 0) return null
-  const w = Math.max(1, Math.round(width))
-  const h = Math.max(1, Math.round(height))
+  const key = `${sourceVersion}|${w}x${h}|${element.crop.x},${element.crop.y},${element.crop.width},${element.crop.height}|${element.fit}|${JSON.stringify(effects ?? null)}`
+  let kept = bases.get(image)
+  if (kept === undefined) { kept = new Map(); bases.set(image, kept) }
+  const found = kept.get(key)
+  if (found !== undefined) return found
   const target = canvas(w, h)
   if (target === null) return null
   const { crop, draw } = drawRect(image, element, w, h)
   target.context.drawImage(image, crop.x, crop.y, crop.width, crop.height, draw.x, draw.y, draw.width, draw.height)
   const pixels = target.context.getImageData(0, 0, w, h)
-  // Colour match and feather first, then the layer's own adjustments, as Main draws it.
-  if (visibleEffects) applyImageEffects(pixels.data, w, h, effects)
+  let shadow: EffectedImage['shadow'] = null
+  if (hasVisibleEffects(effects)) {
+    applyImageEffects(pixels.data, w, h, effects)
+    // The shadow follows the image's outline, which adjustments never change.
+    if (effects.shadow !== null && effects.shadow.opacity > 0) {
+      const geometry = shadowGeometry(effects.shadow, w, h)
+      const silhouette = canvas(w, h)
+      const blurred = canvas(w + geometry.padding * 2, h + geometry.padding * 2)
+      if (silhouette !== null && blurred !== null) {
+        silhouette.context.putImageData(new ImageData(shadowSilhouette(pixels.data, w, h, effects.shadow), w, h), 0, 0)
+        if (geometry.sigma >= 0.3) blurred.context.filter = `blur(${geometry.sigma}px)`
+        blurred.context.drawImage(silhouette.canvas, geometry.padding, geometry.padding)
+        shadow = { canvas: blurred.canvas, x: geometry.offsetX - geometry.padding, y: geometry.offsetY - geometry.padding }
+      }
+    }
+  }
+  const base = { pixels, shadow }
+  kept.set(key, base)
+  while (kept.size > BASES_KEPT) kept.delete(kept.keys().next().value!)
+  return base
+}
+
+/**
+ * The image with its layer effects and adjustments, drawn at this size,
+ * using the same pixel math as Main's composite renderer. Null when it has
+ * neither or the browser cannot draw here. Clips must be given for every
+ * adjustment made in a selection. sourceVersion marks a source canvas
+ * painted on in place, so what was drawn from it before is not reused.
+ */
+export function renderImageEffects(image: HTMLImageElement | HTMLCanvasElement, element: ImageElement, width: number, height: number, clips: AdjustmentClips | null = null, sourceVersion: string | number = 0): EffectedImage | null {
+  const adjustments = activeAdjustments(element.adjustments)
+  if (!hasVisibleEffects(element.effects) && adjustments.length === 0) return null
+  const w = Math.max(1, Math.round(width))
+  const h = Math.max(1, Math.round(height))
+  const base = drawnBase(image, element, w, h, sourceVersion)
+  const target = canvas(w, h)
+  if (base === null || target === null) return null
+  // Colour match and feather first (in the base), then the layer's own adjustments, as Main draws it.
+  const pixels = new ImageData(new Uint8ClampedArray(base.pixels.data), w, h)
   if (adjustments.length > 0) {
     const coverages = new Map<string, Uint8Array | null>()
     adjustLayerPixels(pixels.data, adjustments, (clipId) => {
@@ -83,17 +124,5 @@ export function renderImageEffects(image: HTMLImageElement | HTMLCanvasElement, 
     })
   }
   target.context.putImageData(pixels, 0, 0)
-  if (!visibleEffects || effects.shadow === null || effects.shadow.opacity <= 0) return { drawn: target.canvas, shadow: null }
-
-  const geometry = shadowGeometry(effects.shadow, w, h)
-  const silhouette = canvas(w, h)
-  const blurred = canvas(w + geometry.padding * 2, h + geometry.padding * 2)
-  if (silhouette === null || blurred === null) return { drawn: target.canvas, shadow: null }
-  silhouette.context.putImageData(new ImageData(shadowSilhouette(pixels.data, w, h, effects.shadow), w, h), 0, 0)
-  if (geometry.sigma >= 0.3) blurred.context.filter = `blur(${geometry.sigma}px)`
-  blurred.context.drawImage(silhouette.canvas, geometry.padding, geometry.padding)
-  return {
-    drawn: target.canvas,
-    shadow: { canvas: blurred.canvas, x: geometry.offsetX - geometry.padding, y: geometry.offsetY - geometry.padding }
-  }
+  return { drawn: target.canvas, shadow: base.shadow }
 }
