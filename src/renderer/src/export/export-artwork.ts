@@ -2,7 +2,7 @@ import Konva from 'konva'
 import { adaptedScene, hiddenByGroups, type Scene, type SceneElement } from '../../../domain'
 import { hasVisibleEffects } from '../../../shared/layer-effects'
 import type { ExportImageFormat, PsdLayer, PsdNode, PsdText } from '../../../shared/artwork-export'
-import { pdfLayout, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
+import { pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { ArtworkSession, canvasPixels } from '../canvas/artwork-render'
 import { TEXT_SHADOW_OPACITY, textMetrics, textWrap } from '../canvas/layer-drawing'
 import { countLayers, layerArea, psdPlan, type LayerPlan } from './psd-plan'
@@ -68,10 +68,11 @@ export async function exportImage(scene: Scene, projectName: string, options: Im
 }
 
 export async function exportPdf(scene: Scene, projectName: string, page: PdfPageChoice, signal: AbortSignal, progress: ProgressListener): Promise<ExportOutcome | null> {
+  const layout = pdfLayout(scene.canvas, page)
+  if (!pdfPageFits(layout)) throw new Error(pdfTooLarge(layout))
   const choice = await window.desktop.chooseExportFile({ suggestedName: projectName, kind: 'pdf' })
   if (choice.cancelled) return null
   progress({ label: '正在画图', done: 0, total: 2 })
-  const layout = pdfLayout(scene.canvas, page)
   const session = await ArtworkSession.prepare(scene, signal)
   try {
     checkAborted(signal)
@@ -278,7 +279,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
   progress({ label: '正在读取图层', done, total })
   const session = await ArtworkSession.prepare(scene, signal, { includeHidden: true })
   try {
-    const layerOf = async (element: SceneElement): Promise<PsdLayer> => {
+    const layerOf = async (element: SceneElement, hidden: boolean): Promise<PsdLayer> => {
       checkAborted(signal)
       progress({ label: `正在导出「${element.name}」`, done, total })
       await breathe()
@@ -301,7 +302,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       return {
         kind: 'layer',
         name: element.name,
-        hidden: !element.visible,
+        hidden,
         opacity: element.opacity,
         blendMode: element.blendMode ?? 'normal',
         left: bounds === null ? 0 : area.x + bounds.left,
@@ -316,8 +317,8 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
     const nodesOf = async (plans: readonly LayerPlan[]): Promise<PsdNode[]> => {
       const nodes: PsdNode[] = []
       for (const item of plans) {
-        if (item.kind === 'layer') nodes.push(await layerOf(item.element))
-        else nodes.push({ kind: 'group', name: item.element.name, hidden: !item.element.visible, opacity: 1, children: await nodesOf(item.children) })
+        if (item.kind === 'layer') nodes.push(await layerOf(item.element, item.hidden))
+        else nodes.push({ kind: 'group', name: item.element.name, hidden: item.hidden, opacity: 1, children: await nodesOf(item.children) })
       }
       return nodes
     }

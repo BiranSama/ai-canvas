@@ -11,9 +11,10 @@ import { isFinalContent } from '../canvas/layer-drawing'
  * go in flat, in their own places.
  */
 
+/** hidden: the layer or group is hidden itself, or a group laid out flat around it was. */
 export type LayerPlan =
-  | { readonly kind: 'layer'; readonly element: SceneElement }
-  | { readonly kind: 'group'; readonly element: Extract<SceneElement, { type: 'group' }>; readonly children: readonly LayerPlan[] }
+  | { readonly kind: 'layer'; readonly element: SceneElement; readonly hidden: boolean }
+  | { readonly kind: 'group'; readonly element: Extract<SceneElement, { type: 'group' }>; readonly hidden: boolean; readonly children: readonly LayerPlan[] }
 
 export interface PsdPlan {
   readonly layers: readonly LayerPlan[]
@@ -32,20 +33,23 @@ export function psdPlan(scene: Scene): PsdPlan {
     return (childIds.get(groupId) ?? []).flatMap((child) => child.type === 'group' ? leavesIn(child.id, seen) : place.has(child.id) ? [place.get(child.id)!] : [])
   }
   const flattened: string[] = []
-  const childrenOf = (groupId: string | null, seen: ReadonlySet<string>): LayerPlan[] => (childIds.get(groupId) ?? []).flatMap((element): LayerPlan[] => {
-    if (element.type !== 'group') return place.has(element.id) ? [{ kind: 'layer', element }] : []
+  // hiddenAbove: a group laid out flat above these was hidden, so they stay hidden without it.
+  const childrenOf = (groupId: string | null, seen: ReadonlySet<string>, hiddenAbove: boolean): LayerPlan[] => (childIds.get(groupId) ?? []).flatMap((element): LayerPlan[] => {
+    const hidden = hiddenAbove || !element.visible
+    if (element.type !== 'group') return place.has(element.id) ? [{ kind: 'layer', element, hidden }] : []
     if (seen.has(element.id)) return []
     const inside = new Set([...seen, element.id])
     const indices = leavesIn(element.id)
     if (indices.length === 0) return []
     const together = Math.max(...indices) - Math.min(...indices) + 1 === indices.length
-    if (together) return [{ kind: 'group', element, children: sorted(childrenOf(element.id, inside)) }]
+    // A Photoshop group hides what is in it, so its children need only their own eyes.
+    if (together) return [{ kind: 'group', element, hidden, children: sorted(childrenOf(element.id, inside, false)) }]
     flattened.push(element.name)
-    return childrenOf(element.id, inside)
+    return childrenOf(element.id, inside, hidden)
   })
   const positionOf = (plan: LayerPlan): number => plan.kind === 'layer' ? place.get(plan.element.id)! : Math.max(...plan.children.map(positionOf))
   const sorted = (plans: LayerPlan[]): LayerPlan[] => plans.sort((left, right) => positionOf(left) - positionOf(right))
-  return { layers: sorted(childrenOf(null, new Set())), flattened }
+  return { layers: sorted(childrenOf(null, new Set(), false)), flattened }
 }
 
 export function countLayers(plans: readonly LayerPlan[]): number {

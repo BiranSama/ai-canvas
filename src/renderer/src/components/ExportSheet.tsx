@@ -1,7 +1,7 @@
 import { FolderOpen, Plus, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ExportImageFormat } from '../../../shared/artwork-export'
-import { pdfLayout, PRINT_WIDTHS, scaledSize, SIZE_PRESETS, validExportSize, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
+import { pdfLayout, pdfPageFits, pdfTooLarge, PRINT_WIDTHS, scaledSize, SIZE_PRESETS, validExportSize, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { exportImage, exportPdf, exportPsd, exportSizes, sizePreview, softPrintImages, type ExportOutcome, type ExportProgress, type SoftImage } from '../export/export-artwork'
 import { useModalScope } from '../interaction/use-modal-scope'
 import { useWorkspaceStore } from '../store/workspace-store'
@@ -22,16 +22,22 @@ interface Remembered {
   readonly page: 'screen' | 'print'
   readonly printWidthMm: number
   readonly sizes: readonly string[]
+  /** The sizes typed in, kept with the choice of which to export. */
+  readonly customSizes: readonly SizePreset[]
   readonly sizesFormat: 'png' | 'jpeg'
 }
 
 const STORAGE_KEY = 'ai-canvas.export-options'
-const DEFAULTS: Remembered = { kind: 'image', format: 'png', scale: 1, jpegBackground: '#F5F4F1', editableText: true, page: 'screen', printWidthMm: 210, sizes: ['xiaohongshu', 'square'], sizesFormat: 'png' }
+const DEFAULTS: Remembered = { kind: 'image', format: 'png', scale: 1, jpegBackground: '#F5F4F1', editableText: true, page: 'screen', printWidthMm: 210, sizes: ['xiaohongshu', 'square'], customSizes: [], sizesFormat: 'png' }
 
 function remembered(): Remembered {
   try {
     const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<Remembered> | null
-    return stored === null || typeof stored !== 'object' ? DEFAULTS : { ...DEFAULTS, ...stored }
+    if (stored === null || typeof stored !== 'object') return DEFAULTS
+    const customSizes = Array.isArray(stored.customSizes)
+      ? stored.customSizes.filter((size) => typeof size?.id === 'string' && validExportSize(size.width, size.height)).map((size) => ({ id: `custom-${size.width}x${size.height}`, label: '自定义', ratio: `${size.width}:${size.height}`, width: size.width, height: size.height }))
+      : []
+    return { ...DEFAULTS, ...stored, customSizes }
   } catch {
     return DEFAULTS
   }
@@ -73,7 +79,6 @@ export function ExportSheet({ onClose, onSaveSizeAsProject }: {
   const modalRef = useRef<HTMLElement>(null)
   const closeRef = useRef<HTMLButtonElement>(null)
   const [options, setOptions] = useState<Remembered>(remembered)
-  const [custom, setCustom] = useState<readonly SizePreset[]>([])
   const [customWidth, setCustomWidth] = useState('')
   const [customHeight, setCustomHeight] = useState('')
   const [run, setRun] = useState<Run>({ state: 'idle' })
@@ -98,7 +103,7 @@ export function ExportSheet({ onClose, onSaveSizeAsProject }: {
   const height = scene.canvas.outputHeight
   const page: PdfPageChoice = options.page === 'screen' ? { kind: 'screen' } : { kind: 'print', widthMm: options.printWidthMm }
   const layout = pdfLayout(scene.canvas, page)
-  const allSizes = useMemo(() => [...SIZE_PRESETS, ...custom], [custom])
+  const allSizes = useMemo(() => [...SIZE_PRESETS, ...options.customSizes], [options.customSizes])
   const chosenSizes = allSizes.filter((size) => options.sizes.includes(size.id))
 
   const start = (): void => {
@@ -137,14 +142,15 @@ export function ExportSheet({ onClose, onSaveSizeAsProject }: {
     const h = Number(customHeight)
     if (!validExportSize(w, h)) return
     const id = `custom-${w}x${h}`
-    if (!allSizes.some((size) => size.id === id)) setCustom((current) => [...current, { id, label: '自定义', ratio: `${w}:${h}`, width: w, height: h }])
-    update({ sizes: [...new Set([...options.sizes, id])] })
+    const customSizes = allSizes.some((size) => size.id === id) ? options.customSizes : [...options.customSizes, { id, label: '自定义', ratio: `${w}:${h}`, width: w, height: h }]
+    update({ customSizes, sizes: [...new Set([...options.sizes, id])] })
     setCustomWidth('')
     setCustomHeight('')
   }
 
   const customValid = validExportSize(Number(customWidth), Number(customHeight))
-  const canExport = !running && (options.kind !== 'sizes' || chosenSizes.length > 0)
+  const pageFits = options.kind !== 'pdf' || pdfPageFits(layout)
+  const canExport = !running && pageFits && (options.kind !== 'sizes' || chosenSizes.length > 0)
 
   return (
     <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !running) close() }}>
@@ -184,7 +190,7 @@ export function ExportSheet({ onClose, onSaveSizeAsProject }: {
               </section>
             )}
             {options.kind === 'pdf' && (
-              <PdfOptions options={options} page={page} layoutText={`${Math.round(layout.widthMm)} × ${Math.round(layout.heightMm)} mm · ${layout.width}×${layout.height} 像素${layout.dpi === null ? '' : ` · ${layout.dpi} DPI`}`} disabled={running} onChange={update} />
+              <PdfOptions options={options} page={page} tooLarge={pdfPageFits(layout) ? null : pdfTooLarge(layout)} layoutText={`${Math.round(layout.widthMm)} × ${Math.round(layout.heightMm)} mm · ${layout.width}×${layout.height} 像素${layout.dpi === null ? '' : ` · ${layout.dpi} DPI`}`} disabled={running} onChange={update} />
             )}
             {options.kind === 'sizes' && (
               <section aria-label="多尺寸选项">
@@ -278,9 +284,11 @@ function ImageOptions({ options, transparent, width, height, disabled, onChange 
   )
 }
 
-function PdfOptions({ options, page, layoutText, disabled, onChange }: {
+function PdfOptions({ options, page, tooLarge, layoutText, disabled, onChange }: {
   readonly options: Remembered
   readonly page: PdfPageChoice
+  /** Why this page is past what a PDF can hold, or null. */
+  readonly tooLarge: string | null
   readonly layoutText: string
   readonly disabled: boolean
   onChange(change: Partial<Remembered>): void
@@ -319,6 +327,7 @@ function PdfOptions({ options, page, layoutText, disabled, onChange }: {
         </div>
       )}
       <p className="export-layout">{layoutText}</p>
+      {tooLarge !== null && <p className="export-layout is-problem" role="alert">{tooLarge}</p>}
       <ul className="export-notes">
         {options.page === 'screen' ? <li>页面大小按画布像素算，适合发给客户在屏幕上看。</li> : <li>高度按画布比例；按 300 DPI 渲染，图文店一般够用。</li>}
         <li>PDF 里是一整张高清图，文字不能在 PDF 里选中或修改；要改字，回到项目或导出 PSD。颜色是 RGB。</li>

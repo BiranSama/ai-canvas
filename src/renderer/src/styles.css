@@ -2235,6 +2235,7 @@ select:focus-visible {
 .export-check, .export-color { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .export-color input { width: 32px; height: 26px; padding: 2px; border: 1px solid var(--hairline); border-radius: 7px; background: transparent; }
 .export-layout { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
+.export-layout.is-problem { color: #9c534d; }
 .export-notes { display: grid; gap: 4px; margin: 0; padding-left: 18px; color: var(--muted-slate); font-size: 12px; line-height: 1.55; }
 .export-notes .is-warning { color: #9c6a2d; }
 .export-size-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }

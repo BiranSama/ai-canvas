@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { exportFileName, safeFileStem } from '../../src/shared/artwork-export'
-import { pdfLayout, printedResolution, scaledSize, SIZE_PRESETS, validExportSize } from '../../src/shared/export-presets'
+import { pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SIZE_PRESETS, validExportSize } from '../../src/shared/export-presets'
 
 describe('export sizes and pages', () => {
   it('scales the picture up to the edge limit and no further', () => {
@@ -30,6 +30,15 @@ describe('export sizes and pages', () => {
     const poster = pdfLayout({ outputWidth: 1000, outputHeight: 3000 }, { kind: 'print', widthMm: 594 })
     expect(Math.max(poster.width, poster.height)).toBeLessThanOrEqual(16_384)
     expect(poster.dpi).toBeLessThan(300)
+  })
+
+  it('refuses a page past what a PDF can hold, and says how wide this picture can go', () => {
+    const canvas = { outputWidth: 1024, outputHeight: 1280 }
+    const huge = pdfLayout(canvas, { kind: 'print', widthMm: 5000 })
+    expect(pdfPageFits(huge)).toBe(false)
+    expect(pdfTooLarge(huge)).toContain('宽度最多 4064 mm')
+    expect(pdfPageFits(pdfLayout(canvas, { kind: 'print', widthMm: 4064 }))).toBe(true)
+    expect(pdfPageFits(pdfLayout(canvas, { kind: 'screen' }))).toBe(true)
   })
 
   it('finds images that would print soft', () => {

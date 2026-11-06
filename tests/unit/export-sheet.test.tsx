@@ -56,6 +56,31 @@ it('remembers what was chosen for next time', () => {
   expect(within(dialog).getByLabelText('文字保留为可编辑文字')).not.toBeChecked()
 })
 
+it('keeps a size typed in for next time, chosen as it was', () => {
+  const first = sheet()
+  fireEvent.click(within(first.dialog).getByRole('button', { name: /^多尺寸/ }))
+  fireEvent.change(within(first.dialog).getByLabelText('自定义宽度'), { target: { value: '1200' } })
+  fireEvent.change(within(first.dialog).getByLabelText('自定义高度'), { target: { value: '628' } })
+  fireEvent.click(within(first.dialog).getByRole('button', { name: '加上' }))
+  first.dialog.remove()
+  const second = render(<ExportSheet onClose={vi.fn()} onSaveSizeAsProject={vi.fn()} />)
+  const dialog = within(second.container).getByRole('dialog', { name: '导出' })
+  expect(within(dialog).getByRole('checkbox', { name: /1200×628/ })).toBeChecked()
+  expect(within(dialog).getByRole('button', { name: '导出 3 个尺寸' })).toBeEnabled()
+})
+
+it('will not start a PDF page larger than a PDF can hold', () => {
+  const { dialog } = sheet()
+  fireEvent.click(within(dialog).getByRole('button', { name: /^PDF/ }))
+  fireEvent.click(within(dialog).getByRole('radio', { name: '打印' }))
+  fireEvent.change(within(dialog).getByLabelText('打印宽度（毫米）'), { target: { value: '5000' } })
+  expect(within(dialog).getByRole('alert')).toHaveTextContent('PDF 每边最多 5080 mm')
+  expect(within(dialog).getByRole('button', { name: '导出' })).toBeDisabled()
+  fireEvent.change(within(dialog).getByLabelText('打印宽度（毫米）'), { target: { value: '4000' } })
+  expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument()
+  expect(within(dialog).getByRole('button', { name: '导出' })).toBeEnabled()
+})
+
 it('exports a PSD with text kept editable or as pixels', async () => {
   exports.exportPsd.mockResolvedValue({ paths: ['/out/咖啡店海报.psd'], notes: ['「主图」带羽化或阴影，蒙版并进了像素。'] })
   const { dialog } = sheet()

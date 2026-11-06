@@ -43,6 +43,22 @@ describe('what a PSD gets', () => {
   })
 })
 
+describe('hidden groups laid out flat', () => {
+  it('keep their layers hidden in the PSD, while a kept group hides its own', () => {
+    const interleaved = grouped(coffee, '交错的组', ['标题', '价格圆标'])
+    const hiddenGroup = sceneSchema.parse({ ...interleaved, elements: interleaved.elements.map((element) => element.name === '交错的组' ? { ...element, visible: false } : element) })
+    const flat = psdPlan(hiddenGroup).layers
+    const hidden = Object.fromEntries(flat.map((plan) => [plan.element.name, plan.hidden]))
+    expect(hidden).toMatchObject({ 标题: true, 价格圆标: true, 副标题: false, 价格: false })
+
+    const together = grouped(coffee, '标题组', ['标题', '副标题'])
+    const hiddenTogether = sceneSchema.parse({ ...together, elements: together.elements.map((element) => element.name === '标题组' ? { ...element, visible: false } : element) })
+    const group = psdPlan(hiddenTogether).layers.find((plan) => plan.kind === 'group')!
+    expect(group.hidden).toBe(true)
+    expect(group.kind === 'group' && group.children.map((child) => child.hidden)).toEqual([false, false])
+  })
+})
+
 describe('where a PSD layer is drawn', () => {
   const box = (element: SceneElement, transform: SceneElement['transform']): SceneElement => ({ ...element, transform })
 

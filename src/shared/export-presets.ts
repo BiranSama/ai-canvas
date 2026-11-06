@@ -61,6 +61,19 @@ const POINTS_PER_INCH = 72
 /** How screens count: 96 pixels make an inch. */
 const SCREEN_PIXELS_PER_INCH = 96
 
+/** The largest PDF page readers accept: 200 inches, 5080 mm, a side. */
+export const MAX_PDF_PAGE_POINTS = 14_400
+
+export function pdfPageFits(layout: PdfLayout): boolean {
+  return layout.pageWidth <= MAX_PDF_PAGE_POINTS && layout.pageHeight <= MAX_PDF_PAGE_POINTS
+}
+
+/** Why a page is too large, with the largest width this picture can have. */
+export function pdfTooLarge(layout: PdfLayout): string {
+  const widest = Math.floor(5080 * Math.min(1, layout.widthMm / layout.heightMm))
+  return `页面 ${Math.round(layout.widthMm)} × ${Math.round(layout.heightMm)} mm 太大了：PDF 每边最多 5080 mm（200 英寸）。这张作品打印时宽度最多 ${widest} mm。`
+}
+
 export function pdfLayout(canvas: { readonly outputWidth: number; readonly outputHeight: number }, choice: PdfPageChoice): PdfLayout {
   const ratio = canvas.outputHeight / canvas.outputWidth
   if (choice.kind === 'screen') {
