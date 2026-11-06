@@ -33,17 +33,18 @@ function nameTable(names: readonly Name[]): Buffer {
   return Buffer.concat([header, ...strings])
 }
 
-function os2Table(codePages: number): Buffer {
+function os2Table(codePages: number, weight = 0): Buffer {
   const table = Buffer.alloc(96)
   table.writeUInt16BE(4, 0)
+  table.writeUInt16BE(weight, 4)
   table.writeUInt32BE(codePages >>> 0, 78)
   return table
 }
 
 /** One sfnt face whose tables start at `base` in the file. */
-function face(base: number, names: readonly Name[], codePages = 0): Buffer {
+function face(base: number, names: readonly Name[], codePages = 0, weight = 0): Buffer {
   const name = nameTable(names)
-  const os2 = os2Table(codePages)
+  const os2 = os2Table(codePages, weight)
   const directory = Buffer.alloc(12 + 2 * 16)
   directory.writeUInt32BE(0x00010000, 0)
   directory.writeUInt16BE(2, 4)
@@ -63,10 +64,12 @@ const CHINESE_CODE_PAGE = 1 << 18
 
 describe('local font catalog', () => {
   it('reads the English family, the Chinese name, the style and Chinese coverage', () => {
-    const names: Name[] = [[3, EN, 1, 'Microsoft YaHei UI'], [3, EN, 16, 'Microsoft YaHei'], [3, EN, 2, 'Bold'], [3, ZH, 1, '微软雅黑']]
-    expect(faceNames(nameTable(names), os2Table(CHINESE_CODE_PAGE))).toEqual({ family: 'Microsoft YaHei', localName: '微软雅黑', style: 'Bold', chinese: true })
+    const names: Name[] = [[3, EN, 1, 'Microsoft YaHei UI'], [3, EN, 16, 'Microsoft YaHei'], [3, EN, 2, 'Bold'], [3, ZH, 1, '微软雅黑'], [3, EN, 6, 'MicrosoftYaHei-Bold']]
+    // With no weight class, a style named Bold is taken as 700.
+    expect(faceNames(nameTable(names), os2Table(CHINESE_CODE_PAGE))).toEqual({ family: 'Microsoft YaHei', localName: '微软雅黑', style: 'Bold', chinese: true, postScriptName: 'MicrosoftYaHei-Bold', weight: 700, italic: false })
+    expect(faceNames(nameTable(names), os2Table(CHINESE_CODE_PAGE, 600))?.weight).toBe(600)
     // Mac-only names still give a family; no code page and no Chinese name means not Chinese.
-    expect(faceNames(nameTable([[1, 0, 1, 'Georgia'], [1, 0, 2, 'Italic']]), null)).toEqual({ family: 'Georgia', localName: null, style: 'Italic', chinese: false })
+    expect(faceNames(nameTable([[1, 0, 1, 'Georgia'], [1, 0, 2, 'Italic']]), null)).toEqual({ family: 'Georgia', localName: null, style: 'Italic', chinese: false, postScriptName: null, weight: 400, italic: true })
     // Hidden system faces are skipped.
     expect(faceNames(nameTable([[3, EN, 1, '.SF NS']]), null)).toBeNull()
   })
@@ -108,10 +111,27 @@ describe('local font catalog', () => {
     expect(searchLocalFonts(fonts, '').map(fontLabel)).toEqual(['宋体 (SimSun)', '新宋体 (NSimSun)', 'Georgia'])
   })
 
+  it('names the installed face Photoshop sets a family in, nearest weight first', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fonts-'))
+    roots.push(root)
+    await writeFile(join(root, 'georgia.ttf'), face(0, [[3, EN, 1, 'Georgia'], [3, EN, 2, 'Regular'], [3, EN, 6, 'Georgia']], 0, 400))
+    await writeFile(join(root, 'georgia-bold.ttf'), face(0, [[3, EN, 1, 'Georgia'], [3, EN, 2, 'Bold'], [3, EN, 6, 'Georgia-Bold']], 0, 700))
+    await writeFile(join(root, 'georgia-italic.ttf'), face(0, [[3, EN, 1, 'Georgia'], [3, EN, 2, 'Bold Italic'], [3, EN, 6, 'Georgia-BoldItalic']], 0, 700))
+    await writeFile(join(root, 'simsun.ttf'), face(0, [[3, EN, 1, 'SimSun'], [3, ZH, 1, '宋体'], [3, EN, 2, 'Regular'], [3, EN, 6, 'SimSun']], CHINESE_CODE_PAGE, 400))
+    const catalog = new LocalFontCatalog(() => [root])
+
+    expect(await catalog.face('Georgia', 700)).toEqual({ postScriptName: 'Georgia-Bold', fauxBold: false })
+    expect(await catalog.face('georgia', 400)).toEqual({ postScriptName: 'Georgia', fauxBold: false })
+    // A family with no heavy face is set bold by Photoshop; a Chinese name finds the family too.
+    expect(await catalog.face('宋体', 700)).toEqual({ postScriptName: 'SimSun', fauxBold: true })
+    // Not installed: its name without spaces, which Photoshop offers to replace.
+    expect(await catalog.face('Source Han Sans', 400)).toEqual({ postScriptName: 'SourceHanSans', fauxBold: false })
+  })
+
   it('merges faces of one family and looks in each system folder', () => {
     expect(groupFontFaces([
-      { family: 'Inter', localName: null, style: 'Bold', chinese: false },
-      { family: 'inter', localName: null, style: 'Regular', chinese: false }
+      { family: 'Inter', localName: null, style: 'Bold', chinese: false, postScriptName: 'Inter-Bold', weight: 700, italic: false },
+      { family: 'inter', localName: null, style: 'Regular', chinese: false, postScriptName: 'Inter-Regular', weight: 400, italic: false }
     ])).toEqual([{ family: 'Inter', localName: null, styles: ['Bold', 'Regular'], chinese: false }])
     expect(systemFontDirectories('win32', { WINDIR: 'D:\\Win', LOCALAPPDATA: 'C:\\Users\\a\\AppData\\Local' }))
       .toEqual([join('D:\\Win', 'Fonts'), join('C:\\Users\\a\\AppData\\Local', 'Microsoft', 'Windows', 'Fonts')])

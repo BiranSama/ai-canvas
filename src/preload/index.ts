@@ -32,12 +32,19 @@ import type { DesignDirectionSelectionInput } from '../shared/design-direction-s
 import type { ProjectWorkContext } from '../shared/project-work-context'
 import type { SubjectModelDownloadInput, SubjectModelStatus, SubjectSegmentInput } from '../shared/segmentation'
 import type { AppUpdateSnapshot } from '../shared/app-update'
+import type { ExportFileChoice, ExportImageWrite, ExportPdfWrite, ExportPsdWrite, ExportTargetChoice, ExportWriteResult } from '../shared/artwork-export'
 
 const desktopApi: DesktopApi = Object.freeze({
   getRuntimeInfo: (): Promise<RuntimeInfo> => ipcRenderer.invoke(DESKTOP_CHANNELS.runtimeInfo),
   getAppUpdate: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke(DESKTOP_CHANNELS.appUpdate),
   checkForAppUpdate: (): Promise<AppUpdateSnapshot> => ipcRenderer.invoke(DESKTOP_CHANNELS.appUpdateCheck),
   installAppUpdate: (): Promise<boolean> => ipcRenderer.invoke(DESKTOP_CHANNELS.appUpdateInstall),
+  chooseExportFile: (choice: ExportFileChoice): Promise<ExportTargetChoice> => ipcRenderer.invoke(DESKTOP_CHANNELS.exportChooseFile, choice),
+  chooseExportFolder: (suggestedName: string): Promise<ExportTargetChoice> => ipcRenderer.invoke(DESKTOP_CHANNELS.exportChooseFolder, { suggestedName }),
+  writeExportImage: (input: ExportImageWrite): Promise<ExportWriteResult> => ipcRenderer.invoke(DESKTOP_CHANNELS.exportWriteImage, input),
+  writeExportPdf: (input: ExportPdfWrite): Promise<ExportWriteResult> => ipcRenderer.invoke(DESKTOP_CHANNELS.exportWritePdf, input),
+  writeExportPsd: (input: ExportPsdWrite): Promise<ExportWriteResult> => ipcRenderer.invoke(DESKTOP_CHANNELS.exportWritePsd, input),
+  revealExport: (path: string): Promise<void> => ipcRenderer.invoke(DESKTOP_CHANNELS.exportReveal, { path }),
   onAppUpdate: (listener: (snapshot: AppUpdateSnapshot) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, value: AppUpdateSnapshot): void => listener(value)
     ipcRenderer.on(DESKTOP_EVENTS.appUpdateChanged, handler)

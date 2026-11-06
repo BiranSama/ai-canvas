@@ -1,5 +1,5 @@
 import sharp from 'sharp'
-import { pathInBox, sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
+import { hiddenByGroups, pathInBox, sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
@@ -270,7 +270,9 @@ export class CompositeReferenceRenderer {
     const height = scene.canvas.outputHeight
     const warnings: string[] = []
     const layers: string[] = []
+    const hiddenInGroups = hiddenByGroups(scene.elements)
     for (const element of scene.elements) {
+      if (hiddenInGroups.has(element.id)) continue
       layers.push(await elementSvg(element, mode, width, height, this.#resolveAsset, warnings))
     }
     const background = scene.canvas.transparent ? 'none' : escapeXml(scene.canvas.backgroundColor)

@@ -14,20 +14,18 @@ import {
 } from 'react'
 import {
   Circle,
-  Ellipse,
   Group,
   Image as KonvaImage,
   Label,
   Layer,
   Line,
-  Path,
   Rect,
   Stage,
   Tag,
   Text,
   Transformer
 } from 'react-konva'
-import { ELEMENT_SCHEMA_VERSION, pathInBox, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
+import { ELEMENT_SCHEMA_VERSION, hiddenByGroups, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
 import type { EphemeralAnnotationRegion } from '../../../shared/agent'
 import { blendModeLabel, blendModeToCanvasOperation, resolveBlendMode } from '../../../shared/blend-mode'
 import {
@@ -71,8 +69,9 @@ import {
   type CanvasRect,
   type SnapGuide
 } from './direct-canvas-geometry'
-import { SemanticSketchVisual } from './SemanticSketchVisual'
 import { drawRect, renderImageEffects } from './image-effects'
+import { ElementVisual } from './element-visual'
+import { isFinalContent } from './layer-drawing'
 
 interface Size {
   width: number
@@ -92,7 +91,6 @@ function canvasSupportsBlendMode(blendMode: ReturnType<typeof resolveBlendMode>)
 type Guide = SnapGuide
 
 export interface CanvasStageHandle {
-  exportDataUrl(format: 'png' | 'jpeg' | 'webp', jpegBackground?: string): string | null
   viewFit(): void
   viewActualSize(): void
   viewScalePercentage(percentage: number): void
@@ -130,72 +128,6 @@ function useHtmlImage(url: string | null): HTMLImageElement | null {
     }
   }, [url])
   return loaded?.url === url ? loaded.image : null
-}
-
-function PlaceholderVisual({ element, width, height }: { element: Extract<SceneElement, { type: 'placeholder' }>; width: number; height: number }): React.JSX.Element {
-  const inset = Math.max(3, Math.min(width, height) * 0.035)
-  const corner = Math.max(10, Math.min(width, height) * 0.12)
-  const outline = { fill: 'rgba(229, 236, 243, 0.16)', stroke: 'rgba(139, 166, 197, 0.78)', strokeWidth: Math.max(1.5, inset * 0.52), dash: [inset * 2.2, inset * 1.65] }
-  const visualKind = element.visualKind ?? 'generic'
-  const usesGenericFrame = visualKind === 'generic' || visualKind === 'portrait'
-  return (
-    <Group>
-      {usesGenericFrame && element.frameShape === 'rectangle' && <Rect width={width} height={height} cornerRadius={Math.min(width, height) * 0.055} {...outline} />}
-      {usesGenericFrame && element.frameShape === 'ellipse' && <Ellipse x={width / 2} y={height / 2} radiusX={width / 2} radiusY={height / 2} {...outline} />}
-      {usesGenericFrame && element.frameShape === 'free' && <Line closed tension={0.16} points={[width * 0.08, height * 0.18, width * 0.54, height * 0.04, width * 0.92, height * 0.28, width * 0.78, height * 0.88, width * 0.22, height * 0.94, width * 0.03, height * 0.58]} {...outline} />}
-      {usesGenericFrame && element.frameShape === 'portrait' && <Group><Circle x={width * 0.5} y={height * 0.3} radius={Math.min(width, height) * 0.17} {...outline} /><Line closed tension={0.35} points={[width * 0.18, height * 0.82, width * 0.25, height * 0.57, width * 0.5, height * 0.5, width * 0.75, height * 0.57, width * 0.82, height * 0.82]} {...outline} /></Group>}
-      {usesGenericFrame && element.frameShape === 'rectangle' && [
-        [inset * 2 + corner, inset * 2, inset * 2, inset * 2, inset * 2, inset * 2 + corner],
-        [width - inset * 2 - corner, inset * 2, width - inset * 2, inset * 2, width - inset * 2, inset * 2 + corner],
-        [inset * 2 + corner, height - inset * 2, inset * 2, height - inset * 2, inset * 2, height - inset * 2 - corner],
-        [width - inset * 2 - corner, height - inset * 2, width - inset * 2, height - inset * 2, width - inset * 2, height - inset * 2 - corner]
-      ].map((points, index) => (
-        <Line
-          key={index}
-          points={points}
-          stroke="rgba(205, 221, 237, 0.92)"
-          strokeWidth={Math.max(1.5, inset * 0.5)}
-          lineCap="round"
-          lineJoin="round"
-        />
-      ))}
-      {usesGenericFrame && element.frameShape === 'rectangle' && <Group>
-        <Circle
-          x={width / 2}
-          y={height * 0.44}
-          radius={Math.max(4, Math.min(width, height) * 0.035)}
-          fill="rgba(216, 228, 240, 0.72)"
-          stroke="rgba(112, 143, 179, 0.78)"
-          strokeWidth={Math.max(1, inset * 0.36)}
-        />
-        <Line points={[width * 0.35, height * 0.44, width * 0.65, height * 0.44]} stroke="rgba(180, 202, 224, 0.58)" strokeWidth={Math.max(1, inset * 0.32)} dash={[inset * 1.2, inset]} />
-        <Line points={[width * 0.5, height * 0.28, width * 0.5, height * 0.6]} stroke="rgba(180, 202, 224, 0.58)" strokeWidth={Math.max(1, inset * 0.32)} dash={[inset * 1.2, inset]} />
-      </Group>}
-      {usesGenericFrame && element.frameShape === 'ellipse' && <Group>
-        {[0.39, 0.3, 0.2].map((scale) => (
-          <Ellipse key={scale} x={width / 2} y={height * 0.46} radiusX={width * scale} radiusY={height * scale} stroke="rgba(188, 210, 231, 0.58)" strokeWidth={Math.max(1, inset * 0.28)} />
-        ))}
-        <Circle x={width / 2} y={height * 0.46} radius={Math.max(5, Math.min(width, height) * 0.075)} fill="rgba(218, 229, 240, 0.42)" stroke="rgba(133, 163, 197, 0.82)" strokeWidth={Math.max(1, inset * 0.34)} />
-        <Line points={[width * 0.28, height * 0.25, width * 0.7, height * 0.66]} stroke="rgba(229, 239, 248, 0.46)" strokeWidth={Math.max(1, inset * 0.24)} lineCap="round" />
-      </Group>}
-      {usesGenericFrame && element.frameShape === 'portrait' && <Group>
-        <Line points={[width * 0.38, height * 0.29, width * 0.47, height * 0.34, width * 0.57, height * 0.3]} stroke="rgba(210, 225, 239, 0.62)" strokeWidth={Math.max(1, inset * 0.28)} tension={0.4} lineCap="round" />
-        <Line points={[width * 0.3, height * 0.7, width * 0.5, height * 0.61, width * 0.7, height * 0.7]} stroke="rgba(184, 207, 229, 0.58)" strokeWidth={Math.max(1, inset * 0.3)} tension={0.45} dash={[inset * 1.5, inset]} />
-      </Group>}
-      {usesGenericFrame && element.frameShape === 'free' && <Line points={[width * 0.15, height * 0.55, width * 0.3, height * 0.36, width * 0.46, height * 0.5, width * 0.61, height * 0.29, width * 0.82, height * 0.48]} stroke="rgba(198, 218, 236, 0.64)" strokeWidth={Math.max(1, inset * 0.3)} tension={0.46} dash={[inset * 1.4, inset * 0.9]} lineCap="round" />}
-      {!usesGenericFrame && <SemanticSketchVisual element={element} width={width} height={height} />}
-      <Label x={inset} y={inset} opacity={0.92}>
-        <Tag fill="rgba(252, 253, 255, 0.82)" stroke="rgba(23, 32, 51, 0.09)" strokeWidth={1} cornerRadius={6} />
-        <Text
-          text={element.subject}
-          fill="#3A4656"
-          fontFamily="Segoe UI Variable"
-          fontSize={Math.max(9, Math.min(13, width * 0.045))}
-          padding={5}
-        />
-      </Label>
-    </Group>
-  )
 }
 
 function ImageVisual({ element, width, height }: { element: Extract<SceneElement, { type: 'image' }>; width: number; height: number }): React.JSX.Element {
@@ -330,97 +262,8 @@ function MaskedBox({ element, width, height, zoom, children }: { element: Extrac
   )
 }
 
-function ElementVisual({ element, width, height, outputScale }: { element: SceneElement; width: number; height: number; outputScale: number }): React.JSX.Element | null {
-  switch (element.type) {
-    case 'image':
-      return <ImageVisual element={element} width={width} height={height} />
-    case 'text':
-      return (
-        <Text
-          width={width}
-          height={height}
-          text={element.orientation === 'vertical' ? [...element.content].join('\n') : element.content}
-          align={element.align === 'start' ? 'left' : element.align === 'end' ? 'right' : element.align}
-          verticalAlign="middle"
-          fill={element.fill}
-          {...(element.stroke === null ? {} : { stroke: element.stroke })}
-          strokeWidth={element.strokeWidth * outputScale}
-          {...(element.shadowColor === null ? {} : {
-            shadowColor: element.shadowColor,
-            shadowBlur: element.shadowBlur * outputScale,
-            shadowOpacity: 0.62
-          })}
-          fontFamily={element.fontFamily}
-          fontSize={Math.min(height * 0.95, Math.max(7, element.fontSize * outputScale))}
-          fontStyle={String(element.fontWeight)}
-          letterSpacing={Math.min(element.letterSpacing, width * 0.03)}
-          lineHeight={element.lineHeight}
-          wrap={element.orientation === 'vertical' ? 'char' : element.wrapping === 'none' ? 'none' : element.wrapping === 'character' ? 'char' : 'word'}
-          ellipsis={element.orientation !== 'vertical'}
-        />
-      )
-    case 'sketch':
-      return (
-        <Group>
-          {element.strokes.map((stroke) => (
-            <Line
-              key={stroke.id}
-              points={stroke.points.flatMap((point) => [point.x * width, point.y * height])}
-              stroke={stroke.color}
-              strokeWidth={Math.max(1, stroke.width * Math.min(width, height))}
-              opacity={stroke.opacity}
-              lineCap="round"
-              lineJoin="round"
-              tension={0.18}
-            />
-          ))}
-        </Group>
-      )
-    case 'shape':
-      if (element.shape === 'path' && element.path !== undefined) {
-        return <Path data={pathInBox(element.path, width, height)} fill={element.fill} {...(element.stroke === null ? {} : { stroke: element.stroke })} strokeWidth={element.strokeWidth * Math.min(width, height)} lineJoin="round" lineCap="round" />
-      }
-      if (element.shape === 'ellipse') {
-        return <Ellipse x={width / 2} y={height / 2} radiusX={width / 2} radiusY={height / 2} fill={element.fill} {...(element.stroke === null ? {} : { stroke: element.stroke })} strokeWidth={element.strokeWidth * Math.min(width, height)} />
-      }
-      if (element.shape === 'line') {
-        return <Line points={[0, height / 2, width, height / 2]} stroke={element.stroke ?? element.fill} strokeWidth={Math.max(1, element.strokeWidth * Math.min(width, height))} />
-      }
-      return <Rect width={width} height={height} fill={element.fill} {...(element.stroke === null ? {} : { stroke: element.stroke })} strokeWidth={element.strokeWidth * Math.min(width, height)} cornerRadius={Math.min(width, height) * element.cornerRadius} />
-    case 'placeholder':
-      return <PlaceholderVisual element={element} width={width} height={height} />
-    case 'light':
-      return (
-        <Ellipse
-          x={width / 2}
-          y={height / 2}
-          radiusX={width * 0.4}
-          radiusY={height * 0.4}
-          fill={element.color}
-          opacity={element.intensity * 0.24}
-          shadowColor={element.color}
-          shadowBlur={Math.min(width, height) * element.softness * 0.55}
-          shadowOpacity={element.intensity * 0.8}
-        />
-      )
-    case 'mask': {
-      const path = element.paths[0]
-      if (path === undefined) return null
-      const color = element.mode === 'protect' ? '#5AA9FF' : element.mode === 'generate' ? '#7DCB9C' : '#FF7C72'
-      return (
-        <Line
-          points={path.points.flatMap((point) => [point.x * width, point.y * height])}
-          closed={path.closed}
-          fill={`${color}42`}
-          stroke={color}
-          strokeWidth={2}
-          dash={[7, 5]}
-        />
-      )
-    }
-    case 'group':
-      return null
-  }
+function renderLiveImage(element: Extract<SceneElement, { type: 'image' }>, width: number, height: number): React.JSX.Element {
+  return <ImageVisual element={element} width={width} height={height} />
 }
 
 interface ElementNodeProps {
@@ -442,15 +285,11 @@ interface ElementNodeProps {
   blendModeSupported: boolean
   /** Another layer's mask is being looked at alone (Alt+click on its thumbnail). */
   soloHidden: boolean
+  /** A group it is in is hidden. */
+  groupHidden: boolean
 }
 
-function isFinalContent(element: SceneElement): boolean {
-  if (element.type === 'sketch') return element.finalVisible
-  if (element.type === 'shape') return element.role === 'final'
-  return element.type === 'image' || element.type === 'text'
-}
-
-function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag, onFinishDrag, isDragCommitOwner, isDragCancelled, onRequestEdit, isInlineEditing, viewportPanReady, cropOverride, shapeCornerRadiusOverride, shapeTransformOverride, blendModeSupported, soloHidden }: ElementNodeProps): React.JSX.Element | null {
+function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag, onFinishDrag, isDragCommitOwner, isDragCancelled, onRequestEdit, isInlineEditing, viewportPanReady, cropOverride, shapeCornerRadiusOverride, shapeTransformOverride, blendModeSupported, soloHidden, groupHidden }: ElementNodeProps): React.JSX.Element | null {
   const updateElement = useWorkspaceStore((state) => state.updateElement)
   const execute = useWorkspaceStore((state) => state.execute)
   const scene = useWorkspaceStore((state) => state.scene)
@@ -646,7 +485,7 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
       rotation={displayTransform.rotation}
       opacity={element.opacity}
       globalCompositeOperation={blendModeToCanvasOperation(resolveBlendMode(element))}
-      visible={element.visible && !isInlineEditing && blendModeSupported && !soloHidden}
+      visible={element.visible && !groupHidden && !isInlineEditing && blendModeSupported && !soloHidden}
       draggable={!viewportPanReady && !element.locked && (element.groupId === null || element.groupId === editingGroupId) && activeTool === 'select'}
       onMouseDown={() => { dragOccurredRef.current = false }}
       onMouseUp={(event) => { if (event.evt.altKey && !dragOccurredRef.current) onSelect(event) }}
@@ -793,6 +632,7 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
             width={width}
             height={height}
             outputScale={artboard.height / scene.canvas.outputHeight}
+            renderImage={renderLiveImage}
           />
         )
         return (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
@@ -1599,56 +1439,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       const nextZoom = Math.min(32, Math.max(0.05, zoom * factor))
       const ratio = nextZoom / Math.max(zoom, 0.0001)
       setClampedViewport(nextZoom, { x: pan.x * ratio, y: pan.y * ratio })
-    },
-    exportDataUrl(format, jpegBackground = '#FFFFFF') {
-      if (unsupportedBlendModes.length > 0) return null
-      const stage = stageRef.current
-      const auxiliary = auxiliaryLayerRef.current
-      if (stage === null || auxiliary === null) return null
-      const editorReferences = stage.find('.editor-reference')
-      const editorReferenceVisibility = editorReferences.map((node) => node.visible())
-      const editorChrome = stage.find('.editor-chrome')
-      const editorChromeVisibility = editorChrome.map((node) => node.visible())
-      auxiliary.hide()
-      editorReferences.forEach((node) => node.hide())
-      editorChrome.forEach((node) => node.hide())
-      stage.draw()
-      try {
-        const renderScale = Math.max(
-          scene.canvas.outputWidth / (artboard.width * zoom),
-          scene.canvas.outputHeight / (artboard.height * zoom)
-        )
-        const rendered = stage.toCanvas({
-          x: artboard.x,
-          y: artboard.y,
-          width: artboard.width * zoom,
-          height: artboard.height * zoom,
-          pixelRatio: renderScale
-        })
-        const output = document.createElement('canvas')
-        output.width = scene.canvas.outputWidth
-        output.height = scene.canvas.outputHeight
-        const context = output.getContext('2d')
-        if (context === null) return null
-        if (format === 'jpeg') {
-          context.fillStyle = jpegBackground
-          context.fillRect(0, 0, output.width, output.height)
-        }
-        context.imageSmoothingEnabled = true
-        context.imageSmoothingQuality = 'high'
-        context.drawImage(rendered, 0, 0, output.width, output.height)
-        return output.toDataURL(
-          format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp',
-          0.94
-        )
-      } finally {
-        editorReferences.forEach((node, index) => node.visible(editorReferenceVisibility[index] ?? false))
-        editorChrome.forEach((node, index) => node.visible(editorChromeVisibility[index] ?? false))
-        auxiliary.show()
-        stage.draw()
-      }
     }
-  }), [artboard.height, artboard.width, artboard.x, artboard.y, pan.x, pan.y, scene.canvas.outputHeight, scene.canvas.outputWidth, setClampedViewport, unsupportedBlendModes.length, viewFit, zoom])
+  }), [pan.x, pan.y, setClampedViewport, viewFit, zoom])
 
   // Merging and rasterizing draw layers as they are shown here, at the canvas's output size, with nothing behind them.
   useEffect(() => {
@@ -1762,6 +1554,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     })
   }, [baseArtboard.height, baseArtboard.width, cropElement, cropSession, displayedArtboard, pan.x, pan.y, setClampedViewport, size.height, size.width, zoom])
 
+  const hiddenInGroups = useMemo(() => hiddenByGroups(scene.elements), [scene.elements])
   const sortedElements = [...scene.elements]
     .sort((left, right) => left.zIndex - right.zIndex)
     .filter((element) => element.type !== 'mask' || activeTool === 'mask' || selectedIds.includes(element.id))
@@ -2456,6 +2249,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
                 shapeTransformOverride={shapeLineDraft?.elementId === element.id ? shapeLineDraft.transform : undefined}
                 blendModeSupported={blendSupportByElement.get(element.id) !== false}
                 soloHidden={maskAlone !== null && maskAlone !== element.id && maskAlone !== element.groupId}
+                groupHidden={hiddenInGroups.has(element.id)}
               />
             ))}
           </Group>

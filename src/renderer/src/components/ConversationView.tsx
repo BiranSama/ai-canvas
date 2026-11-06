@@ -9,7 +9,6 @@ import { agentEventsForTurn, subscribeAgentUpdates, subscribeAgentTransportUpdat
 import { buildEphemeralAnnotationSaveCommands } from '../agent/ephemeral-annotation'
 import { currentEphemeralAnnotation, useEphemeralAnnotationStore } from '../agent/ephemeral-annotation-store'
 import { CanvasStage, type CanvasStageHandle } from '../canvas/CanvasStage'
-import { exportCanvasImage, type ExportFormat } from '../canvas/export-canvas'
 import { projectAgentExecutionFlow } from '../agent/agent-execution-flow'
 import { generatesWithoutAsking, MAX_REFERENCES, useCreationSessionStore } from '../store/creation-session-store'
 import { useFirstRunStore } from '../store/first-run-store'
@@ -191,7 +190,7 @@ function timeCopy(startedAt: string | null, endedAt: string | null): string {
 
 export function ConversationView({ Header, onShowLibrary }: {
   /** The workspace header; its 导出 exports from the live canvas beside the conversation. */
-  readonly Header: ComponentType<{ readonly onExport?: (format: ExportFormat, jpegBackground: string) => void; readonly onShowLibrary: () => void }>
+  readonly Header: ComponentType<{ readonly canExport?: boolean; readonly onShowLibrary: () => void }>
   readonly onShowLibrary: () => void
 }): React.JSX.Element {
   const scene = useWorkspaceStore((state) => state.scene)
@@ -222,7 +221,6 @@ export function ConversationView({ Header, onShowLibrary }: {
   const removeReference = useCreationSessionStore((state) => state.removeReference)
   const attachInputRef = useRef<HTMLInputElement>(null)
   const previewStageRef = useRef<CanvasStageHandle>(null)
-  const projectName = useWorkspaceStore((state) => state.projectName)
   const [scope, setScope] = useState<'selection' | 'canvas'>('selection')
   const [inputModesOpen, setInputModesOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
@@ -449,10 +447,6 @@ export function ConversationView({ Header, onShowLibrary }: {
     window.addEventListener('keydown', closeCompactPreview)
     return () => window.removeEventListener('keydown', closeCompactPreview)
   }, [])
-
-  const exportFromPreview = useCallback((format: ExportFormat, jpegBackground: string): void => {
-    exportCanvasImage(previewStageRef.current, projectName, format, jpegBackground)
-  }, [projectName])
 
   const updateConversationRatio = useCallback((clientX: number): void => {
     const bounds = workspaceRef.current?.getBoundingClientRect()
@@ -893,7 +887,7 @@ export function ConversationView({ Header, onShowLibrary }: {
   const settledProcessOpen = settledReceiptId !== undefined && openProcessIds.has(settledReceiptId)
   return (
     <div className="conversation-view">
-      <Header onExport={exportFromPreview} onShowLibrary={onShowLibrary} />
+      <Header canExport onShowLibrary={onShowLibrary} />
       <main
         ref={workspaceRef}
         className={`conversation-workspace${compactRecordOpen ? ' is-record-open' : ''}`}

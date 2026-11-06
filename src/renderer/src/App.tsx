@@ -20,7 +20,7 @@ import {
   Undo2
 } from 'lucide-react'
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { SceneElement } from '../../domain'
+import { adaptLayoutCommands, type SceneElement } from '../../domain'
 import type { DesktopApi, RuntimeInfo } from '../../shared/desktop-api'
 import type { RecentProjectSummary, WorkspaceBootstrap } from '../../shared/project'
 import appIconUrl from '../../../build/icon.png'
@@ -34,7 +34,10 @@ import { clearEphemeralAnnotation } from './agent/ephemeral-annotation-store'
 import { CanvasStage, type CanvasStageHandle } from './canvas/CanvasStage'
 import { ActionTrace } from './canvas/ActionTrace'
 import { createElementForTool } from './canvas/element-factory'
-import { exportCanvasImage } from './canvas/export-canvas'
+import { ExportSheet } from './components/ExportSheet'
+import { useExportSheet } from './store/export-sheet-store'
+import { useCreationSessionStore } from './store/creation-session-store'
+import type { SizePreset } from '../../shared/export-presets'
 import { CanvasToolbar } from './components/CanvasToolbar'
 import { PaintOptionsBar } from './components/PaintOptionsBar'
 import { SelectionOptionsBar } from './components/SelectionOptionsBar'
@@ -129,10 +132,11 @@ function useRuntimeStatus(): { ready: boolean; detail: string } {
 }
 
 function WorkspaceHeader({
-  onExport,
+  canExport = false,
   onShowLibrary
 }: {
-  onExport?: ((format: 'png' | 'jpeg' | 'webp', jpegBackground: string) => void) | undefined
+  /** Shows 导出, which opens the export panel. */
+  canExport?: boolean
   onShowLibrary(): void
 }): React.JSX.Element {
   const activeView = useWorkspaceStore((state) => state.activeView)
@@ -144,8 +148,7 @@ function WorkspaceHeader({
   const redo = useWorkspaceStore((state) => state.redo)
   const inspectorOpen = useWorkspaceStore((state) => state.inspectorOpen)
   const setInspectorOpen = useWorkspaceStore((state) => state.setInspectorOpen)
-  const [format, setFormat] = useState<'png' | 'jpeg' | 'webp'>('png')
-  const [jpegBackground, setJpegBackground] = useState('#F5F4F1')
+  const exportOpen = useExportSheet((state) => state.open)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsProviderId, setSettingsProviderId] = useState<ConfigurableProviderId | null>(null)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
@@ -229,6 +232,23 @@ function WorkspaceHeader({
     })
   }
 
+  /** A copy of the project laid out at this size, opened, with a first message ready for the agent to tidy it. */
+  const saveSizeAsProject = (size: SizePreset): void => {
+    const original = useWorkspaceStore.getState().scene
+    const from = `${original.canvas.aspectWidth}:${original.canvas.aspectHeight}`
+    void runProjectAction(() => window.desktop.saveProjectAs({ suggestedName: `${projectName}-${size.label}` })).then(async () => {
+      const copy = useWorkspaceStore.getState()
+      if (copy.scene.projectId === original.projectId) return
+      const adapted = await copy.execute(`改成${size.label} ${size.width}×${size.height}`, adaptLayoutCommands(copy.scene, size))
+      if (!adapted) {
+        showAppNotice(`副本已经另存，但没能改成${size.label} ${size.width}×${size.height}。可以在画布尺寸里手动改。`, 'problem')
+        return
+      }
+      useWorkspaceStore.getState().setActiveView('conversation')
+      useCreationSessionStore.getState().setDraft(`这是从 ${from} 改成 ${size.ratio} 的版本，帮我把排版调好，内容和风格不变`)
+    })
+  }
+
   useLayoutEffect(() => {
     fileShortcutsRef.current = {
       create: () => { clearEphemeralAnnotation(); void runProjectAction(() => window.desktop.createProject({ suggestedName: 'Untitled' })) },
@@ -243,6 +263,7 @@ function WorkspaceHeader({
       const key = event.key.toLowerCase()
       const handle = (action: () => void): void => { event.preventDefault(); action() }
       if (event.altKey && event.shiftKey && event.code === 'KeyK') handle(() => setShortcutsOpen(true))
+      else if (event.altKey && event.shiftKey && event.code === 'KeyW') handle(() => useExportSheet.getState().show())
       else if (event.altKey) return
       else if (!event.shiftKey && key === 'n') handle(() => fileShortcutsRef.current?.create())
       else if (!event.shiftKey && key === 'o') handle(() => projectImageInputRef.current?.click())
@@ -275,25 +296,7 @@ function WorkspaceHeader({
         <span className="header-divider" />
         {!inspectorOpen && <button type="button" className="icon-button" aria-label="打开图层检查器" onClick={() => setInspectorOpen(true)}><Layers3 size={17} /></button>}
         <button ref={settingsButtonRef} type="button" className="icon-button" data-testid="open-settings" aria-label="设置" onClick={() => { setSettingsProviderId(null); setSettingsOpen(true) }}><Settings2 size={16} /></button>
-        {onExport !== undefined && (
-          <div className="export-control">
-            <button type="button" onClick={() => onExport(format, jpegBackground)}><Download size={15} />导出</button>
-            <label aria-label="导出格式">
-              <select value={format} onChange={(event) => setFormat(event.currentTarget.value as typeof format)}>
-                <option value="png">PNG</option>
-                <option value="jpeg">JPEG</option>
-                <option value="webp">WebP</option>
-              </select>
-              <ChevronDown size={12} aria-hidden="true" />
-            </label>
-            {format === 'jpeg' && (
-              <label className="jpeg-background" title="JPEG 不支持透明背景，请选择填充色">
-                <span className="visually-hidden">JPEG 背景色</span>
-                <input type="color" aria-label="JPEG 背景色" value={jpegBackground} onChange={(event) => setJpegBackground(event.currentTarget.value)} />
-              </label>
-            )}
-          </div>
-        )}
+        {canExport && <div className="export-control"><button type="button" title="导出（Ctrl+Alt+Shift+W）" onClick={() => useExportSheet.getState().show()}><Download size={15} />导出</button></div>}
       </div>
     </header>
     {projectMenuOpen && (
@@ -320,6 +323,7 @@ function WorkspaceHeader({
     }} />
     {settingsOpen && <ProviderSettingsSheet initialProviderId={settingsProviderId} onClose={closeSettings} />}
     {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
+    {exportOpen && <ExportSheet onClose={() => useExportSheet.getState().hide()} onSaveSizeAsProject={saveSizeAsProject} />}
     <EditDialogs />
     <SubjectModelDialog />
     </>
@@ -340,7 +344,6 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
   const canvasUtilityStyles = useCanvasStatusPlacement(workspaceRef, canvasStatusRef, canvasSizeRef, focusMode)
   const importModalRef = useRef<HTMLDivElement>(null)
   const scene = useWorkspaceStore((state) => state.scene)
-  const projectName = useWorkspaceStore((state) => state.projectName)
   const selectedIds = useWorkspaceStore((state) => state.selectedIds)
   const editingGroupId = useWorkspaceStore((state) => state.editingGroupId)
   const activeTool = useWorkspaceStore((state) => state.activeTool)
@@ -573,15 +576,13 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
     }
   }, [chooseTool, copySelection, cutSelection, deleteSelection, duplicateSelection, editingGroupId, enterGroupEditing, exitGroupEditing, groupSelection, importFile, pasteSelection, redo, reorderElement, scene.elements, selectedIds, setActiveTool, setSelection, undo, ungroupSelection])
 
-  const exportCanvas = (format: 'png' | 'jpeg' | 'webp', jpegBackground: string): void => exportCanvasImage(stageRef.current, projectName, format, jpegBackground)
-
   const editingGroup = editingGroupId === null
     ? undefined
     : scene.elements.find((element) => element.id === editingGroupId && element.type === 'group')
 
   return (
     <div className="canvas-view">
-      <WorkspaceHeader onExport={exportCanvas} onShowLibrary={onShowLibrary} />
+      <WorkspaceHeader canExport onShowLibrary={onShowLibrary} />
       <main
         ref={workspaceRef}
         className={`canvas-workspace${inspectorOpen ? '' : ' inspector-collapsed'}${focusMode ? ' is-focus-mode' : ''}${isPaintTool(activeTool) ? ' is-painting' : ''}`}

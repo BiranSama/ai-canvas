@@ -43,6 +43,10 @@ async function renderWorkspace(selected: readonly string[] = []): Promise<void> 
   useWorkspaceStore.getState().setSelection(selected)
   render(<App />)
   await screen.findByTestId('canvas-stage')
+  // The stage is on screen before every mount effect has run (the key listeners among them) and
+  // before the runtime and fonts have answered: let them settle, so a key pressed next is heard
+  // and what it changes is drawn.
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
 }
 
 describe('Photoshop shortcuts on the canvas', () => {
@@ -191,7 +195,7 @@ describe('Photoshop shortcuts on the canvas', () => {
     await renderWorkspace()
     press({ key: 'b', code: 'KeyB' })
     expect(useWorkspaceStore.getState().activeTool).toBe('brush')
-    const options = screen.getByRole('toolbar', { name: '画笔选项' })
+    const options = await screen.findByRole('toolbar', { name: '画笔选项' })
     press({ key: ']', code: 'BracketRight' })
     expect(useWorkspaceStore.getState().paintSettings.brush.size).toBe(34)
     press({ key: '[', code: 'BracketLeft' })
@@ -313,7 +317,7 @@ describe('Photoshop shortcuts on the canvas', () => {
     const tool = () => useWorkspaceStore.getState().activeTool
     press({ key: 'm', code: 'KeyM' })
     expect(tool()).toBe('marquee-rect')
-    expect(screen.getByRole('toolbar', { name: '矩形选框选项' })).toBeInTheDocument()
+    expect(await screen.findByRole('toolbar', { name: '矩形选框选项' })).toBeInTheDocument()
     press({ key: 'M', code: 'KeyM', shiftKey: true })
     expect(tool()).toBe('marquee-ellipse')
     press({ key: 'v', code: 'KeyV' })
