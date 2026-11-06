@@ -82,16 +82,23 @@ export async function commitLayerAdjustment(open: AdjustmentDialogState, setting
     if (clipId === null) return refuse('选区没有存好，没有调整。')
     adjustment = { ...adjustment, clip: clipId }
   }
-  const current = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === open.elementId)
-  if (current?.type !== 'image') return false
-  const list = current.adjustments ?? []
-  const next = open.isNew ? [...list, adjustment] : list.map((candidate) => candidate.id === adjustment.id ? adjustment : candidate)
-  return useWorkspaceStore.getState().updateElement(current.id, { adjustments: next }, ADJUSTMENT_LABELS[settings.kind])
+  // Built when the step runs, on the list the steps queued before it left, so two quick ones both count.
+  return useWorkspaceStore.getState().execute(ADJUSTMENT_LABELS[settings.kind], (scene) => {
+    const current = scene.elements.find((candidate) => candidate.id === open.elementId)
+    if (current?.type !== 'image') return null
+    const list = current.adjustments ?? []
+    const next = open.isNew ? [...list, adjustment] : list.map((candidate) => candidate.id === adjustment.id ? adjustment : candidate)
+    return [{ kind: 'element.update', elementId: current.id, changes: { adjustments: next } }]
+  })
 }
 
-/** Changes an image layer's list of adjustments: on or off, order, or one taken out. */
-export function changeLayerAdjustments(element: ImageElement, next: readonly LayerAdjustment[], summary: string): Promise<boolean> {
-  return useWorkspaceStore.getState().updateElement(element.id, { adjustments: next }, summary)
+/** Changes an image layer's list of adjustments (on or off, order, one taken out), from the list as it is when the step runs. */
+export function changeLayerAdjustments(element: ImageElement, change: (list: readonly LayerAdjustment[]) => readonly LayerAdjustment[], summary: string): Promise<boolean> {
+  return useWorkspaceStore.getState().execute(summary, (scene) => {
+    const current = scene.elements.find((candidate) => candidate.id === element.id)
+    if (current?.type !== 'image') return null
+    return [{ kind: 'element.update', elementId: current.id, changes: { adjustments: change(current.adjustments ?? []) } }]
+  })
 }
 
 /** Opens one of an image layer's adjustments again in its dialog. */

@@ -237,11 +237,12 @@ test('the shortcuts open a previewing dialog; adjustment layers come from the pa
     await page.keyboard.press('Control+Shift+z')
     await expect.poll(async () => { const image = await element(page, imageId); return image?.type === 'image' ? image.adjustments?.length ?? 0 : -1 }).toBe(1)
 
-    // Ctrl+I inverts at once; the properties list both.
+    // Ctrl+I inverts at once; pressed twice quickly, both count. The properties list all three.
     await page.keyboard.press('Control+i')
-    await expect.poll(async () => { const image = await element(page, imageId); return image?.type === 'image' ? image.adjustments?.map((adjustment) => adjustment.settings.kind) : null }).toEqual(['levels', 'invert'])
+    await page.keyboard.press('Control+i')
+    await expect.poll(async () => { const image = await element(page, imageId); return image?.type === 'image' ? image.adjustments?.map((adjustment) => adjustment.settings.kind) : null }).toEqual(['levels', 'invert', 'invert'])
     await page.getByRole('tab', { name: '属性' }).click()
-    await expect(page.getByRole('list', { name: '这一层的调整' }).getByRole('listitem')).toHaveCount(2)
+    await expect(page.getByRole('list', { name: '这一层的调整' }).getByRole('listitem')).toHaveCount(3)
 
     await page.getByRole('tab', { name: '图层' }).click()
     const before = await raw(await exportThroughPanel(page))
@@ -263,7 +264,7 @@ test('the shortcuts open a previewing dialog; adjustment layers come from the pa
     const psd = readPsd(await readFile(await exportThroughPanel(page, { kind: 'psd' })), { useImageData: true })
     const names = (psd.children ?? []).map((child) => [child.name, child.adjustment?.type ?? null, child.clipping === true])
     const at = names.findIndex(([name]) => name === '渐变')
-    expect(names.slice(at, at + 4)).toEqual([['渐变', null, false], ['色阶', 'levels', true], ['反相', 'invert', true], [layer.name, 'brightness/contrast', false]])
+    expect(names.slice(at, at + 5)).toEqual([['渐变', null, false], ['色阶', 'levels', true], ['反相', 'invert', true], ['反相', 'invert', true], [layer.name, 'brightness/contrast', false]])
     const composite = Buffer.from(psd.imageData!.data.buffer, psd.imageData!.data.byteOffset, psd.imageData!.data.byteLength)
     expect(worstDifference(composite, adjusted)).toBeLessThanOrEqual(2)
 
@@ -279,6 +280,23 @@ test('the shortcuts open a previewing dialog; adjustment layers come from the pa
     expect(worstDifference(region(adjusted, IMAGE), region(after, IMAGE))).toBeLessThanOrEqual(2)
     const outside = { x: 900, y: 1100, width: 40, height: 40 }
     expect(worstDifference(region(before, outside), region(after, outside))).toBeLessThanOrEqual(2)
+
+    // An adjustment layer's mask takes paint: a brush stroke on it is kept.
+    await page.getByRole('toolbar', { name: '图层操作' }).getByRole('button', { name: '新建调整图层' }).click()
+    await page.getByRole('menu', { name: '新建调整图层' }).getByRole('menuitem', { name: '反相…' }).click()
+    await expect.poll(async () => (await scene(page)).elements.filter((candidate) => candidate.type === 'adjustment').length).toBe(1)
+    const invert = (await scene(page)).elements.find((candidate) => candidate.type === 'adjustment')!
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.getByRole('toolbar', { name: '图层操作' }).getByRole('button', { name: '添加蒙版' }).click()
+    await expect.poll(async () => { const current = await element(page, invert.id); return current?.type === 'adjustment' && current.mask !== null && current.mask !== undefined }).toBe(true)
+    await page.keyboard.press('b')
+    const board = await page.evaluate(`(() => {
+      const root = document.querySelector('[data-testid="canvas-stage"]')
+      const surface = root.querySelector('.konvajs-content').getBoundingClientRect()
+      return { x: surface.left + Number(root.dataset.artboardX), y: surface.top + Number(root.dataset.artboardY), width: Number(root.dataset.artboardWidth), height: Number(root.dataset.artboardHeight) }
+    })()`) as { x: number; y: number; width: number; height: number }
+    await glide(page, { x: board.x + board.width * 0.3, y: board.y + board.height * 0.5 }, { x: board.x + board.width * 0.7, y: board.y + board.height * 0.5 }, 12)
+    await expect.poll(async () => { const current = await element(page, invert.id); return current?.type === 'adjustment' ? current.mask?.paint?.length ?? 0 : -1 }).toBe(1)
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true })
@@ -385,6 +403,38 @@ test('a 4000-pixel picture keeps up while a curve is dragged and while a layer m
     expect(moving.frames).toBeGreaterThan(20)
     expect(curve.p95).toBeLessThan(50)
     expect(moving.p95).toBeLessThan(50)
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true })
+    await rm(out, { recursive: true, force: true })
+  }
+})
+
+test('a JPEG of a transparent canvas keeps its background colour under an adjustment layer', async () => {
+  test.setTimeout(120_000)
+  const out = await mkdtemp(join(tmpdir(), 'ai-canvas-adjust-out-'))
+  const { app, page, userData } = await openCoffeePoster(out)
+  try {
+    await page.evaluate(async ({ version }) => {
+      const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
+      const current = (await api.getWorkspaceBootstrap()).scene
+      await api.executeSceneCommands({
+        projectId: current.projectId,
+        expectedSceneRevision: current.revision,
+        batch: { id: crypto.randomUUID(), origin: 'user', summary: '透明画布', commands: [
+          { kind: 'scene.set-canvas', canvas: { ...current.canvas, transparent: true } },
+          ...current.elements.map((element) => ({ kind: 'element.update' as const, elementId: element.id, changes: { visible: false } })),
+          { kind: 'element.add', element: {
+            id: crypto.randomUUID(), version, type: 'adjustment', name: '反相 1', description: '', transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 },
+            zIndex: 0, opacity: 1, visible: true, locked: false, groupId: null, semanticRole: 'adjustment', referencePolicy: 'include', settings: { kind: 'invert' }
+          } }
+        ] }
+      })
+    }, { version: ELEMENT_SCHEMA_VERSION })
+    // Nothing is drawn, so the JPEG's background colour (the panel's default #F5F4F1) stays as it is:
+    // the adjustment changes the picture, not the colour behind it. Inverted it would be near black.
+    const jpeg = await raw(await exportThroughPanel(page, { kind: 'image', format: 'JPEG' }))
+    for (const [channel, expected] of [[0, 0xF5], [1, 0xF4], [2, 0xF1]] as const) expect(Math.abs(jpeg[channel]! - expected)).toBeLessThanOrEqual(3)
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true })

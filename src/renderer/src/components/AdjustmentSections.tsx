@@ -21,12 +21,16 @@ const SHORTCUTS: Partial<Record<AdjustmentKind, string>> = {
  */
 export function LayerAdjustmentsSection({ element }: { readonly element: ImageElement }): React.JSX.Element {
   const list = element.adjustments ?? []
-  const move = (index: number, by: number): void => {
-    const next = [...list]
-    const [item] = next.splice(index, 1)
-    if (item === undefined) return
-    next.splice(index + by, 0, item)
-    void changeLayerAdjustments(element, next, '调整顺序')
+  // Each change is made to the list as it is when the step runs, by id, so quick clicks do not undo each other.
+  const move = (id: string, by: number): void => {
+    void changeLayerAdjustments(element, (current) => {
+      const next = [...current]
+      const index = next.findIndex((candidate) => candidate.id === id)
+      const [item] = index < 0 ? [] : next.splice(index, 1)
+      if (item === undefined) return current
+      next.splice(Math.max(0, Math.min(next.length, index + by)), 0, item)
+      return next
+    }, '调整顺序')
   }
   return (
     <div className="inspector-section adjustment-section">
@@ -38,7 +42,7 @@ export function LayerAdjustmentsSection({ element }: { readonly element: ImageEl
             <li key={adjustment.id} className={adjustment.enabled ? '' : 'is-off'}>
               <button type="button" className="icon-button quiet" aria-label={adjustment.enabled ? `关闭${ADJUSTMENT_LABELS[adjustment.settings.kind]}` : `打开${ADJUSTMENT_LABELS[adjustment.settings.kind]}`} title={adjustment.enabled ? '关闭' : '打开'}
                 disabled={element.locked}
-                onClick={() => void changeLayerAdjustments(element, list.map((candidate) => candidate.id === adjustment.id ? { ...candidate, enabled: !candidate.enabled } : candidate), adjustment.enabled ? '关闭调整' : '打开调整')}>
+                onClick={() => void changeLayerAdjustments(element, (current) => current.map((candidate) => candidate.id === adjustment.id ? { ...candidate, enabled: !adjustment.enabled } : candidate), adjustment.enabled ? '关闭调整' : '打开调整')}>
                 {adjustment.enabled ? <Eye size={13} /> : <EyeOff size={13} />}
               </button>
               <span className="adjustment-name" title={describeAdjustment(adjustment.settings)}>
@@ -47,10 +51,10 @@ export function LayerAdjustmentsSection({ element }: { readonly element: ImageEl
               {adjustment.settings.kind !== 'invert' && adjustment.settings.kind !== 'desaturate' && (
                 <button type="button" className="icon-button quiet" aria-label={`编辑${ADJUSTMENT_LABELS[adjustment.settings.kind]}`} title="编辑" disabled={element.locked} onClick={() => editLayerAdjustment(element, adjustment.id)}><Pencil size={13} /></button>
               )}
-              <button type="button" className="icon-button quiet" aria-label="上移" title="上移（后应用）" disabled={element.locked || index === list.length - 1} onClick={() => move(index, 1)}><ArrowDown size={13} /></button>
-              <button type="button" className="icon-button quiet" aria-label="下移" title="下移（先应用）" disabled={element.locked || index === 0} onClick={() => move(index, -1)}><ArrowUp size={13} /></button>
+              <button type="button" className="icon-button quiet" aria-label="上移" title="上移（后应用）" disabled={element.locked || index === list.length - 1} onClick={() => move(adjustment.id, 1)}><ArrowDown size={13} /></button>
+              <button type="button" className="icon-button quiet" aria-label="下移" title="下移（先应用）" disabled={element.locked || index === 0} onClick={() => move(adjustment.id, -1)}><ArrowUp size={13} /></button>
               <button type="button" className="icon-button quiet" aria-label={`删除${ADJUSTMENT_LABELS[adjustment.settings.kind]}`} title="删除" disabled={element.locked}
-                onClick={() => void changeLayerAdjustments(element, list.filter((candidate) => candidate.id !== adjustment.id), `删除${ADJUSTMENT_LABELS[adjustment.settings.kind]}`)}><Trash2 size={13} /></button>
+                onClick={() => void changeLayerAdjustments(element, (current) => current.filter((candidate) => candidate.id !== adjustment.id), `删除${ADJUSTMENT_LABELS[adjustment.settings.kind]}`)}><Trash2 size={13} /></button>
             </li>
           ))}
         </ol>

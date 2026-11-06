@@ -341,9 +341,10 @@ export class ArtworkSession {
           && (some?.showHidden === true || (element.visible && !hiddenInGroups.has(element.id))))
         : exportedLayers(this.scene)
     if (layer !== undefined && elements.length === 0) throw new ArtworkRenderError('要导出的图层已经不在了。')
-    const background = request.background === 'canvas'
-      ? this.scene.canvas.transparent ? null : this.scene.canvas.backgroundColor
-      : request.background === 'none' ? null : request.background.color
+    // The canvas colour is part of the picture, so adjustment layers change it; a colour asked for here
+    // (a JPEG's matte behind a transparent canvas) only fills what the picture leaves see-through.
+    const background = request.background === 'canvas' && !this.scene.canvas.transparent ? this.scene.canvas.backgroundColor : null
+    const matte = typeof request.background === 'object' ? request.background.color : null
     const outputScale = height / this.scene.canvas.outputHeight
     const area = request.area === undefined
       ? { x: 0, y: 0, width, height }
@@ -381,7 +382,13 @@ export class ArtworkSession {
     })
     if (failure !== null) throw failure instanceof Error ? failure : new ArtworkRenderError(String(failure))
     if (result === null) throw new ArtworkRenderError('这一层没画出来，请再试一次。')
-    return result
+    if (matte === null) return result
+    const drawn: HTMLCanvasElement = result
+    const { canvas, context } = context2d(drawn.width, drawn.height)
+    context.fillStyle = matte
+    context.fillRect(0, 0, drawn.width, drawn.height)
+    context.drawImage(drawn, 0, 0)
+    return canvas
   }
 
   #layerDraw(element: SceneElement, layer: LayerRequest | undefined, width: number, height: number, base?: string): LayerDraw {

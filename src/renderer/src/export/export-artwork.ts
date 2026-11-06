@@ -58,7 +58,7 @@ export async function exportImage(scene: Scene, projectName: string, options: Im
   try {
     checkAborted(signal)
     const size = scaledSize(scene.canvas.outputWidth, scene.canvas.outputHeight, options.scale, options.format === 'webp' ? MAX_WEBP_EDGE : MAX_EXPORT_EDGE)
-    const canvas = session.render({ width: size.width, height: size.height, background: options.format === 'jpeg' ? { color: scene.canvas.transparent ? options.jpegBackground : scene.canvas.backgroundColor } : 'canvas' })
+    const canvas = session.render({ width: size.width, height: size.height, background: options.format === 'jpeg' && scene.canvas.transparent ? { color: options.jpegBackground } : 'canvas' })
     progress({ label: '正在保存', done: 1, total: 2 })
     // The last chance to stop: once Main is writing, the file is saved.
     checkAborted(signal)
@@ -138,7 +138,7 @@ export async function exportSizes(scene: Scene, projectName: string, sizes: read
     const adapted = adaptedScene(scene, size)
     const session = await ArtworkSession.prepare(adapted, signal)
     try {
-      const canvas = session.render({ width: size.width, height: size.height, background: format === 'jpeg' ? { color: scene.canvas.transparent ? '#FFFFFF' : scene.canvas.backgroundColor } : 'canvas' })
+      const canvas = session.render({ width: size.width, height: size.height, background: format === 'jpeg' && scene.canvas.transparent ? { color: '#FFFFFF' } : 'canvas' })
       checkAborted(signal)
       const result = await window.desktop.writeExportImage({
         target: choice.target,

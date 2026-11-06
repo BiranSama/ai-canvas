@@ -22,7 +22,7 @@ function isPicture(element: SceneElement): boolean {
 
 /** What the picture as shown is made of: the picture layers, and sketches kept in the final picture; editing marks are not. */
 function inPicture(element: SceneElement): boolean {
-  return isPicture(element) || (element.type === 'sketch' && element.finalVisible)
+  return isPicture(element) || element.type === 'adjustment' || (element.type === 'sketch' && element.finalVisible)
 }
 
 let cached: { readonly key: string; readonly pixels: SampledPixels } | null = null

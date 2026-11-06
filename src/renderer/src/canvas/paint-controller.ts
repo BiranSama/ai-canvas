@@ -143,7 +143,7 @@ async function record(target: PaintTarget, op: PaintOp, clip: SelectionClip, sum
   // Appended to the record as it is when the batch runs, so a stroke whose save is still on its way keeps its place.
   const saved = await useWorkspaceStore.getState().execute(target.onMask ? `${summary}（蒙版）` : summary, (scene) => {
     const element = scene.elements.find((candidate) => candidate.id === elementId)
-    if (element === undefined || (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape')) return null
+    if (element === undefined || (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape' && element.type !== 'adjustment')) return null
     if (target.onMask) {
       const mask = element.mask
       if (mask === null || mask === undefined) return null
@@ -362,7 +362,7 @@ export function gradientBetween(target: PaintTarget, geometry: PaintGeometry, fr
 function actionTarget(element: SceneElement): PaintTarget | null {
   const onMask = useMaskState.getState().editing === element.id
   if (!onMask && element.type !== 'image') return null
-  if (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape') return null
+  if (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape' && element.type !== 'adjustment') return null
   const space = spaceFor(element, onMask)
   if (space !== null) return { element, onMask, space }
   // Only a selection needs the layer placed; without one the operation applies to every pixel.
