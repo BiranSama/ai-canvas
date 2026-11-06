@@ -1,6 +1,6 @@
 import sharp from 'sharp'
 import type { Scene, SceneElement } from '../../domain'
-import { boxLayerSpace, boxMaskSize, canvasToLayer, imageLayerSpace, maskInLayerSpace, type LayerSpace, type Size } from '../../shared/layer-space'
+import { boxLayerSpace, boxMaskSize, canvasToLayer, imageLayerSpace, layerMaskOnCanvas, maskInLayerSpace, type LayerSpace, type Size } from '../../shared/layer-space'
 import { combineMasks, createMask, ellipseMask, featherMask, invertMask, polygonMask, rectMask, type GrayMask, type MaskCombine } from '../../shared/mask-raster'
 import { imageBytes } from '../storage/image-file'
 import { layerMaskCoverage, paintedImageBytes, type PaintAssetResolver } from './painted-image'
@@ -12,11 +12,12 @@ import { layerMaskCoverage, paintedImageBytes, type PaintAssetResolver } from '.
  * the subject of a picture layer is found in its own pixels.
  */
 
-type PictureLayer = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
+type PictureLayer = Extract<SceneElement, { type: 'image' | 'text' | 'shape' | 'adjustment' }>
 type Outline = readonly { readonly x: number; readonly y: number }[]
 
 export type LayerMaskShape =
-  | { readonly kind: 'subject' }
+  /** The subject of the layer's picture, or of another image layer's (for an adjustment layer, which has none). */
+  | { readonly kind: 'subject'; readonly of?: string }
   /** The layer's mask as it is now, to invert or feather it. */
   | { readonly kind: 'current' }
   /** Fractions of the canvas. */
@@ -46,7 +47,7 @@ export interface LayerMaskDeps {
 const FAINT = 16
 
 function isPictureLayer(element: SceneElement): element is PictureLayer {
-  return element.type === 'image' || element.type === 'text' || element.type === 'shape'
+  return element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment'
 }
 
 async function layerSpace(element: PictureLayer, scene: Scene, deps: LayerMaskDeps): Promise<LayerSpace | string> {
@@ -58,6 +59,17 @@ async function layerSpace(element: PictureLayer, scene: Scene, deps: LayerMaskDe
   // A mask already on the layer keeps its size, so the new one lines up with it.
   const current = element.mask === null || element.mask === undefined ? null : await deps.assetSize(element.mask.assetId)
   return boxLayerSpace(element, current ?? boxMaskSize(element, canvas), canvas)
+}
+
+/** Another image layer's subject, read onto the canvas and into this layer's pixels. */
+async function subjectFrom(of: SceneElement | undefined, scene: Scene, space: LayerSpace, deps: LayerMaskDeps): Promise<GrayMask | string> {
+  if (of?.type !== 'image') return '主体要从一个图片图层里找。'
+  const found = await subjectOf(of, deps)
+  if (typeof found === 'string') return found
+  const ofSpace = await layerSpace(of, scene, deps)
+  if (typeof ofSpace === 'string') return ofSpace
+  const canvas = { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }
+  return { width: space.width, height: space.height, data: maskInLayerSpace(layerMaskOnCanvas(found.data, ofSpace, canvas), space) }
 }
 
 async function subjectOf(element: PictureLayer, deps: LayerMaskDeps): Promise<GrayMask | string> {
@@ -88,7 +100,7 @@ function shapeOnCanvas(shape: Extract<LayerMaskShape, { kind: 'box' | 'ellipse' 
 /** The new mask's pixels in the layer's space, or why it cannot be built. */
 export async function buildLayerMask(scene: Scene, spec: LayerMaskSpec, deps: LayerMaskDeps): Promise<GrayMask | string> {
   const element = scene.elements.find((candidate) => candidate.id === spec.elementId)
-  if (element === undefined || !isPictureLayer(element)) return '只能给图片、文字和形状图层加蒙版。'
+  if (element === undefined || !isPictureLayer(element)) return '只能给图片、文字、形状和调整图层加蒙版。'
   const space = await layerSpace(element, scene, deps)
   if (typeof space === 'string') return space
   const current = element.mask === null || element.mask === undefined ? null : await layerMaskCoverage(element.mask, deps.resolveAsset, space)
@@ -96,7 +108,8 @@ export async function buildLayerMask(scene: Scene, spec: LayerMaskSpec, deps: La
 
   let shape: GrayMask
   if (spec.shape.kind === 'subject') {
-    const found = await subjectOf(element, deps)
+    const of = spec.shape.of
+    const found = of === undefined || of === element.id ? await subjectOf(element, deps) : await subjectFrom(scene.elements.find((candidate) => candidate.id === of), scene, space, deps)
     if (typeof found === 'string') return found
     shape = found
   } else if (spec.shape.kind === 'current') {

@@ -70,8 +70,8 @@ class Harness {
 describe('small agent tools', () => {
   it('keeps the whole catalogue small, uniquely named and valid for every protocol', () => {
     const definitions = llmToolDefinitions(AGENT_TOOLS as never)
-    expect(definitions).toHaveLength(26)
-    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(26)
+    expect(definitions).toHaveLength(27)
+    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(27)
     for (const definition of definitions) expect(definition.name).toMatch(/^[a-z_]{1,64}$/)
     expect(JSON.stringify(definitions).length).toBeLessThan(20_000)
   })
@@ -427,6 +427,35 @@ describe('fill and merge_layers', () => {
     await harness.call('add_text', { content: '晨雾', role: 'title' })
     expect((await harness.call('fill', { target: 'E2', color: '#FF0000' })).result).toMatchObject({ ok: false, summary: 'E2 是文字，不是像素图层。' })
     expect((await harness.call('fill', { target: 'E1', color: '#FF0000', direction: 'radial' })).result).toMatchObject({ ok: false, summary: 'direction 只用于渐变。' })
+  })
+
+  it('adjusts an image layer alone, changing the same kind again rather than stacking it, and adds adjustment layers over the rest', async () => {
+    const harness = new Harness()
+    withImage(harness)
+    const image = (): Extract<Scene['elements'][number], { type: 'image' }> => harness.scene.elements[0] as Extract<Scene['elements'][number], { type: 'image' }>
+    const levels = await harness.call('adjust', { kind: 'levels', target: 'E1', values: { midtone: 1.4, input_white: 230 } })
+    expect(levels.result).toMatchObject({ ok: true, summary: '已给 E1 的色阶（RGB 输入 0–230，中间调 1.40，输出 0–255），只改这一层' })
+    expect(image().adjustments?.map((adjustment) => adjustment.settings.kind)).toEqual(['levels'])
+    // The same kind again changes the one there, keeping what was not given.
+    await harness.call('adjust', { kind: 'levels', target: 'E1', values: { input_black: 10 } })
+    expect(image().adjustments).toHaveLength(1)
+    expect(image().adjustments?.[0]?.settings).toMatchObject({ channels: { rgb: { inputBlack: 10, inputWhite: 230, gamma: 1.4 } } })
+    await harness.call('adjust', { kind: 'hue-saturation', target: 'E1', values: { hue: 200, saturation: 50, colorize: true } })
+    expect(image().adjustments?.[1]?.settings).toEqual({ kind: 'hue-saturation', hue: 0, saturation: 0, lightness: 0, colorize: { hue: 200, saturation: 50, lightness: 0 } })
+    expect((await harness.call('adjust', { kind: 'levels', target: 'E1', remove: true })).result.ok).toBe(true)
+    expect(image().adjustments?.map((adjustment) => adjustment.settings.kind)).toEqual(['hue-saturation'])
+
+    // Without a target: an adjustment layer over the whole canvas, on top or above a given layer.
+    const layer = await harness.call('adjust', { kind: 'black-white', values: { tint: '#C8A070' }, opacity: 0.6 })
+    expect(layer.result.summary).toContain('已新建调整图层「黑白 调整」')
+    expect(harness.scene.elements.at(-1)).toMatchObject({ type: 'adjustment', opacity: 0.6, transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, settings: { kind: 'black-white', tint: '#C8A070', reds: 40 } })
+    await harness.call('adjust', { kind: 'vibrance', target: 'E2', values: { vibrance: 30 } })
+    expect(harness.scene.elements.at(-1)).toMatchObject({ type: 'adjustment', settings: { kind: 'vibrance', vibrance: 30, saturation: 0 } })
+
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    expect((await harness.call('adjust', { kind: 'invert', target: 'E3' })).result).toMatchObject({ ok: false, summary: 'E3 是文字，不能直接调整。' })
+    expect((await harness.call('adjust', { kind: 'levels', target: 'E1', values: { input_black: 200, input_white: 201 } })).result.ok).toBe(false)
+    expect((await harness.call('adjust', { kind: 'levels', target: 'E1', values: { midtones: 1 } })).result).toMatchObject({ ok: false })
   })
 
   it('fills a new canvas-sized layer when no target is given', async () => {
