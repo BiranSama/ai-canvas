@@ -43,6 +43,12 @@ export interface ArtworkRequest {
    * left out.
    */
   readonly layer?: LayerRequest
+  /**
+   * The part to draw, in the picture's pixels, which may reach past its
+   * edges; the whole picture, cut at its edges, when left out. Only a layer
+   * drawn on its own goes past them.
+   */
+  readonly area?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 }
 
 const WAIT_MS = 30_000
@@ -119,6 +125,13 @@ export function exportedLayers(scene: Scene): readonly SceneElement[] {
     .filter((element) => element.type !== 'group' && isFinalContent(element) && element.visible && !hidden.has(element.id))
 }
 
+/** The clips a layer's paint was limited to, read beforehand; an export never draws paint without them. */
+function readClips(element: SceneElement, ops: Parameters<typeof paintClipIds>[0], size: { readonly width: number; readonly height: number }): ReadonlyMap<string, Uint8Array> {
+  const clips = clipLookup(paintClipIds(ops), size)
+  if (clips === null) throw new ArtworkRenderError(`图层「${element.name}」的笔触范围还没读出来，请稍后再导出。`)
+  return clips
+}
+
 function maskApplies(element: MaskedElement, use: MaskUse): boolean {
   const mask = element.mask ?? null
   return mask !== null && (use === 'on' || (use === 'scene' && mask.enabled))
@@ -164,13 +177,16 @@ export class ArtworkSession {
   }
 
   async #readImage(element: ImageElement, signal: AbortSignal | undefined): Promise<void> {
-    if (this.#images.has(element.assetId)) return
-    const url = await waitFor(() => {
-      if (isRuntimeAssetMissing(element.assetId)) throw new ArtworkRenderError(`图层「${element.name}」的图片读不出来，请重新导入原文件后再导出。`)
-      return getRuntimeAssetUrl(element.assetId)
-    }, subscribeRuntimeAssets, signal, `图层「${element.name}」的图片`)
-    const image = await loadImage(url)
-    this.#images.set(element.assetId, image)
+    let image = this.#images.get(element.assetId)
+    if (image === undefined) {
+      const url = await waitFor(() => {
+        if (isRuntimeAssetMissing(element.assetId)) throw new ArtworkRenderError(`图层「${element.name}」的图片读不出来，请重新导入原文件后再导出。`)
+        return getRuntimeAssetUrl(element.assetId)
+      }, subscribeRuntimeAssets, signal, `图层「${element.name}」的图片`)
+      image = await loadImage(url)
+      this.#images.set(element.assetId, image)
+    }
+    // Layers can share a picture and still be painted differently: each waits for its own clips.
     const size = { width: image.naturalWidth, height: image.naturalHeight }
     const clipIds = paintClipIds(element.paint)
     if (clipIds.length > 0) await waitFor(() => clipLookup(clipIds, size), subscribeAssetPixels, signal, `图层「${element.name}」的笔触范围`)
@@ -214,12 +230,12 @@ export class ArtworkSession {
     const { canvas, context } = context2d(width, height)
     context.drawImage(image, 0, 0)
     const pixels = context.getImageData(0, 0, width, height)
-    if (ops.length > 0) applyPaintOps(pixels.data, width, height, ops, clipLookup(paintClipIds(ops), { width, height }) ?? new Map())
+    if (ops.length > 0) applyPaintOps(pixels.data, width, height, ops, readClips(element, ops, { width, height }))
     if (masked) {
       const mask = element.mask!
       const gray = grayAssetPixels(mask.assetId, { width, height })
       if (gray === null) throw new ArtworkRenderError(`图层「${element.name}」的蒙版还没读出来。`)
-      const coverage = maskCoverage(gray.data, width, height, mask.paint, clipLookup(paintClipIds(mask.paint), { width, height }) ?? new Map())
+      const coverage = maskCoverage(gray.data, width, height, mask.paint, readClips(element, mask.paint, { width, height }))
       applyMaskAlpha(pixels.data, pixels.data, coverage, width)
     }
     context.putImageData(pixels, 0, 0)
@@ -234,7 +250,7 @@ export class ArtworkSession {
     const mask = element.mask!
     const gray = grayAssetPixels(mask.assetId)
     if (gray === null) throw new ArtworkRenderError(`图层「${element.name}」的蒙版还没读出来。`)
-    const coverage = maskCoverage(gray.data, gray.width, gray.height, mask.paint, clipLookup(paintClipIds(mask.paint), { width: gray.width, height: gray.height }) ?? new Map())
+    const coverage = maskCoverage(gray.data, gray.width, gray.height, mask.paint, readClips(element, mask.paint, { width: gray.width, height: gray.height }))
     const { canvas, context } = context2d(gray.width, gray.height)
     const image = context.createImageData(gray.width, gray.height)
     for (let index = 0; index < coverage.length; index += 1) image.data[index * 4 + 3] = coverage[index]!
@@ -256,6 +272,9 @@ export class ArtworkSession {
       ? this.scene.canvas.transparent ? null : this.scene.canvas.backgroundColor
       : request.background === 'none' ? null : request.background.color
     const outputScale = height / this.scene.canvas.outputHeight
+    const area = request.area === undefined
+      ? { x: 0, y: 0, width, height }
+      : { x: Math.round(request.area.x), y: Math.round(request.area.y), width: Math.max(1, Math.round(request.area.width)), height: Math.max(1, Math.round(request.area.height)) }
     const draws = elements.map((element) => this.#layerDraw(element, layer, width, height))
 
     if (this.#container === null) {
@@ -276,9 +295,10 @@ export class ArtworkSession {
           background={background}
           outputScale={outputScale}
           draws={draws}
+          clip={request.area === undefined}
           onDrawn={(layerNode) => {
             try {
-              result = layerNode.toCanvas({ x: 0, y: 0, width, height, pixelRatio: 1 })
+              result = layerNode.toCanvas({ x: area.x, y: area.y, width: area.width, height: area.height, pixelRatio: 1 })
             } catch (error) {
               failure = error
             }

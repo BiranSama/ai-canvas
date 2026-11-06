@@ -109,8 +109,10 @@ it('exports the chosen sizes, adds a custom one and opens one as a new project',
   expect(onSaveSizeAsProject).toHaveBeenCalledWith(banner)
 })
 
-it('stops an export that is under way', async () => {
-  exports.exportImage.mockImplementation((_scene: unknown, _name: string, _options: unknown, signal: AbortSignal) => new Promise((_resolve, reject) => {
+it('stops an export that is under way, and a step it reports afterwards does not bring it back', async () => {
+  let report: ((progress: { label: string; done: number; total: number }) => void) | null = null
+  exports.exportImage.mockImplementation((_scene: unknown, _name: string, _options: unknown, signal: AbortSignal, progress: typeof report) => new Promise((_resolve, reject) => {
+    report = progress
     signal.addEventListener('abort', () => reject(new DOMException('导出已取消。', 'AbortError')))
   }))
   const { dialog } = sheet()
@@ -118,6 +120,9 @@ it('stops an export that is under way', async () => {
   expect(within(dialog).getByRole('status')).toHaveTextContent('正在准备')
   expect(within(dialog).getByRole('button', { name: /^PSD/ })).toBeDisabled()
   await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '取消' })) })
+  expect(within(dialog).getByRole('status')).toHaveTextContent('已取消，没有保存文件。')
+  // The write that was under way finishes and reports it; the panel stays cancelled.
+  await act(async () => { report!({ label: '已保存', done: 2, total: 2 }) })
   expect(within(dialog).getByRole('status')).toHaveTextContent('已取消，没有保存文件。')
   expect(within(dialog).getByRole('button', { name: '导出' })).toBeEnabled()
 })

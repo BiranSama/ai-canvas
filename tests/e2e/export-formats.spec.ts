@@ -56,7 +56,7 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
   const { app, page, userData } = await openCoffeePoster(out)
   try {
     const before = (await scene(page)).elements.length
-    // A mask that shows the left half of the price badge, the title and subtitle grouped, the shop name hidden.
+    // A mask that shows the left half of the price badge, the title and subtitle grouped, the shop name hidden, the bottom bar past the edge.
     const fixture = await page.evaluate(async (version) => {
       const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
       const current = (await api.getWorkspaceBootstrap()).scene
@@ -72,6 +72,8 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
         batch: { id: crypto.randomUUID(), origin: 'user', summary: '导出测试', commands: [
           { kind: 'element.update', elementId: named('价格圆标').id, changes: { mask: { assetId: mask.id, enabled: true } } },
           { kind: 'element.update', elementId: named('店名').id, changes: { visible: false } },
+          // The bottom bar reaches past the canvas: a PSD keeps the part outside it.
+          { kind: 'element.update', elementId: named('底部色块').id, changes: { transform: { ...named('底部色块').transform, height: named('底部色块').transform.height + 0.1 } } },
           { kind: 'element.group', elementIds: [title.id, subtitle.id], group: {
             id: crypto.randomUUID(), version, type: 'group', name: '标题组', description: '', transform: title.transform, zIndex: 0, opacity: 1,
             visible: true, locked: false, groupId: null, semanticRole: 'composition', referencePolicy: 'include', childIds: [title.id, subtitle.id]
@@ -93,6 +95,8 @@ test('a PSD keeps groups, masks, hidden layers and editable text, and matches th
     const group = find(psd.children, '标题组')
     expect(group?.children?.map((layer) => layer.name)).toEqual(['标题', '副标题'])
     expect(find(psd.children, '店名')?.hidden).toBe(true)
+    const bar = find(psd.children, '底部色块')!
+    expect(bar.bottom).toBeGreaterThan(psd.height + 100)
     expect(find(psd.children, '标题')?.text?.text).toBe('秋日拿铁')
     expect(find(psd.children, '价格')?.text?.text).toBe('¥18')
 

@@ -4,7 +4,8 @@ import { hasVisibleEffects } from '../../../shared/layer-effects'
 import type { ExportImageFormat, PsdLayer, PsdNode, PsdText } from '../../../shared/artwork-export'
 import { pdfLayout, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { ArtworkSession, canvasPixels } from '../canvas/artwork-render'
-import { isFinalContent, TEXT_SHADOW_OPACITY, textMetrics, textWrap } from '../canvas/layer-drawing'
+import { TEXT_SHADOW_OPACITY, textMetrics, textWrap } from '../canvas/layer-drawing'
+import { countLayers, layerArea, psdPlan, type LayerPlan } from './psd-plan'
 import { getRuntimeAssetUrl } from '../assets/runtime-assets'
 
 /*
@@ -266,36 +267,14 @@ function psdText(element: Extract<SceneElement, { type: 'text' }>, scene: Scene)
   }
 }
 
-type LayerPlan = { readonly kind: 'layer'; readonly element: SceneElement } | { readonly kind: 'group'; readonly element: Extract<SceneElement, { type: 'group' }>; readonly children: readonly LayerPlan[] }
-
-/** The layers a PSD gets, as nested groups, bottom first: what the picture can show, hidden ones too. */
-function psdPlan(scene: Scene): readonly LayerPlan[] {
-  const childrenOf = (groupId: string | null): readonly LayerPlan[] => scene.elements
-    .filter((element) => element.groupId === groupId)
-    .flatMap((element): LayerPlan[] => {
-      if (element.type === 'group') {
-        const children = childrenOf(element.id)
-        return children.length === 0 ? [] : [{ kind: 'group', element, children }]
-      }
-      return isFinalContent(element) ? [{ kind: 'layer', element }] : []
-    })
-    .sort((left, right) => topOf(left) - topOf(right))
-  const topOf = (plan: LayerPlan): number => plan.kind === 'layer' ? plan.element.zIndex : Math.max(...plan.children.map(topOf))
-  return childrenOf(null)
-}
-
-function countLayers(plans: readonly LayerPlan[]): number {
-  return plans.reduce((total, plan) => total + (plan.kind === 'group' ? countLayers(plan.children) : 1), 0)
-}
-
 export async function exportPsd(scene: Scene, projectName: string, options: PsdExportOptions, signal: AbortSignal, progress: ProgressListener): Promise<ExportOutcome | null> {
   const choice = await window.desktop.chooseExportFile({ suggestedName: projectName, kind: 'psd' })
   if (choice.cancelled) return null
   const { outputWidth: width, outputHeight: height } = scene.canvas
   const plan = psdPlan(scene)
-  const total = countLayers(plan) + 2
+  const total = countLayers(plan.layers) + 2
   let done = 0
-  const notes: string[] = []
+  const notes: string[] = plan.flattened.map((name) => `「${name}」里的图层和组外的图层上下交错，为了不改变画面，PSD 里按原来的顺序平铺，没有建组。`)
   progress({ label: '正在读取图层', done, total })
   const session = await ArtworkSession.prepare(scene, signal, { includeHidden: true })
   try {
@@ -307,13 +286,15 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       const mask = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.mask ?? null : null
       // An image whose effects follow its outline (feather, shadow) cannot have its mask apart from it: the mask goes into its pixels.
       const bakeMask = mask !== null && mask.enabled && element.type === 'image' && hasVisibleEffects(element.effects)
-      const plainCanvas = session.render({ width, height, background: 'none', layer: { id: element.id, mask: mask === null || bakeMask ? 'scene' : 'off', textEffects: text === null } })
+      // Drawn over the layer's own area, past the canvas edge too, so nothing outside the canvas is lost.
+      const area = layerArea(element, width, height)
+      const plainCanvas = session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: mask === null || bakeMask ? 'scene' : 'off', textEffects: text === null } })
       const plain = canvasPixels(plainCanvas)
       const bounds = opaqueBounds(plain)
       let psdMask: PsdLayer['mask'] = null
       if (mask !== null && !bakeMask && bounds !== null) {
-        const masked = canvasPixels(session.render({ width, height, background: 'none', layer: { id: element.id, mask: 'on', textEffects: text === null } }))
-        psdMask = { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height, pixels: maskFrom(plain, masked, bounds), disabled: !mask.enabled }
+        const masked = canvasPixels(session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: 'on', textEffects: text === null } }))
+        psdMask = { left: area.x + bounds.left, top: area.y + bounds.top, width: bounds.width, height: bounds.height, pixels: maskFrom(plain, masked, bounds), disabled: !mask.enabled }
       }
       if (bakeMask) notes.push(`「${element.name}」带羽化或阴影，蒙版并进了像素。`)
       done += 1
@@ -323,8 +304,8 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
         hidden: !element.visible,
         opacity: element.opacity,
         blendMode: element.blendMode ?? 'normal',
-        left: bounds?.left ?? 0,
-        top: bounds?.top ?? 0,
+        left: bounds === null ? 0 : area.x + bounds.left,
+        top: bounds === null ? 0 : area.y + bounds.top,
         width: bounds?.width ?? 0,
         height: bounds?.height ?? 0,
         pixels: bounds === null ? new Uint8Array(0) : crop(plain, bounds),
@@ -340,7 +321,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       }
       return nodes
     }
-    const children = await nodesOf(plan)
+    const children = await nodesOf(plan.layers)
     if (!scene.canvas.transparent) {
       children.unshift({ kind: 'layer', name: '背景色', hidden: false, opacity: 1, blendMode: 'normal', left: 0, top: 0, width, height, pixels: solidColor(scene.canvas.backgroundColor, width, height), mask: null, text: null })
     }

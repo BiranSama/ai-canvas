@@ -25,12 +25,14 @@ export interface LayerDraw {
   readonly maskAlpha: HTMLCanvasElement | null
 }
 
-export function ArtworkStage({ width, height, background, outputScale, draws, onDrawn }: {
+export function ArtworkStage({ width, height, background, outputScale, draws, clip, onDrawn }: {
   readonly width: number
   readonly height: number
   readonly background: string | null
   readonly outputScale: number
   readonly draws: readonly LayerDraw[]
+  /** Cut at the picture's edges, as the canvas shows it; a layer drawn for a PSD keeps what lies past them. */
+  readonly clip: boolean
   onDrawn(layer: Konva.Layer): void
 }): React.JSX.Element {
   const layerRef = useRef<Konva.Layer>(null)
@@ -41,7 +43,7 @@ export function ArtworkStage({ width, height, background, outputScale, draws, on
   return (
     <Stage width={1} height={1} listening={false}>
       <Layer ref={layerRef} listening={false}>
-        <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
+        <Group {...(clip ? { clipX: 0, clipY: 0, clipWidth: width, clipHeight: height } : {})}>
           {background !== null && <Rect width={width} height={height} fill={background} />}
           {draws.map((draw) => <ArtworkLayer key={draw.element.id} draw={draw} outputScale={outputScale} />)}
         </Group>

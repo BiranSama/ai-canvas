@@ -169,8 +169,8 @@ export function adaptLayout(scene: Scene, size: LayoutSize): LayoutAdaptation {
   for (const element of backgrounds) {
     set(element, {
       transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 },
-      // A photo fills the new shape by cropping, never by stretching.
-      ...(element.type === 'image' && element.fit === 'fill' ? { fit: 'cover' as const } : {})
+      // A photo fills the new shape by cropping: never stretched, never left with empty strips beside it.
+      ...(element.type === 'image' && element.fit !== 'cover' ? { fit: 'cover' as const } : {})
     })
   }
   const backgroundIds = new Set(backgrounds.map((element) => element.id))

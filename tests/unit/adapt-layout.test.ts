@@ -61,6 +61,18 @@ describe('laying an artwork out at another size', () => {
     }
   })
 
+  it('makes a fitted or stretched background photo fill the new shape by cropping', () => {
+    const photo = { ...byName(coffee, '奶油色背景') }
+    const scene = sceneSchema.parse({ ...coffee, elements: coffee.elements.map((element) => element.id === photo.id ? {
+      id: element.id, version: element.version, type: 'image', name: '背景照片', description: '', transform: element.transform, zIndex: element.zIndex, opacity: 1,
+      visible: true, locked: false, groupId: null, semanticRole: 'background', referencePolicy: 'include', assetId: '0f0f0f0f-0000-4000-8000-0000000000bb',
+      crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'contain', referenceRole: 'general'
+    } : element) })
+    const wide = byName(adaptedScene(scene, { width: 1920, height: 1080 }), '背景照片')
+    expect(wide.type === 'image' && wide.fit).toBe('cover')
+    expect(wide.transform).toEqual({ x: 0, y: 0, width: 1, height: 1, rotation: 0 })
+  })
+
   it('keeps the top together, the bottom at the bottom and the full-width bar full width', () => {
     const tall = adaptedScene(coffee, { width: 1080, height: 1920 })
     const scale = Math.min(1080 / 1024, 1920 / 1280)

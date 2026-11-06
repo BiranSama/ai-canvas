@@ -106,7 +106,8 @@ export function ExportSheet({ onClose, onSaveSizeAsProject }: {
     const controller = new AbortController()
     abortRef.current = controller
     setRun({ state: 'running', progress: null })
-    const progress = (value: ExportProgress): void => setRun({ state: 'running', progress: value })
+    // A cancelled run may still report a step it was in the middle of; only the current one shows.
+    const progress = (value: ExportProgress): void => { if (abortRef.current === controller) setRun({ state: 'running', progress: value }) }
     const name = projectName
     const work = options.kind === 'image'
       ? exportImage(scene, name, { format: options.format, scale: options.scale, jpegBackground: options.jpegBackground }, controller.signal, progress)
