@@ -170,6 +170,9 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       clipBase = null
       return
     }
+    // A layer that is not clipped is the base of whatever is clipped above it, whatever it is.
+    const base = clipBase
+    if (layer.clipping !== true) clipBase = null
     if (layer.adjustment !== undefined) {
       const imported = fromPsdAdjustment(layer.adjustment)
       if (imported === null) { notes.adjustments += 1; return }
@@ -178,8 +181,8 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       const mask = documentMask(layer, psd.width, psd.height)
       const blend = layer.blendMode ?? 'normal'
       // Clipped to a pixel layer, plain: that layer's own adjustment does the same.
-      if (layer.clipping === true && clipBase !== null && (blend === 'normal' || blend === 'pass through') && (layer.opacity ?? 1) >= 1 && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))) {
-        clipBase.adjustments.push({ settings: imported.settings, enabled: layer.hidden !== true })
+      if (layer.clipping === true && base !== null && (blend === 'normal' || blend === 'pass through') && (layer.opacity ?? 1) >= 1 && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))) {
+        base.adjustments.push({ settings: imported.settings, enabled: layer.hidden !== true })
         return
       }
       if (layer.clipping === true) notes.clipped += 1
@@ -193,7 +196,6 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
         settings: imported.settings,
         mask: mask === null ? null : { png: await grayPng(mask.gray, mask.width, mask.height), enabled: mask.enabled }
       })
-      clipBase = null
       return
     }
     const left = layer.left ?? 0

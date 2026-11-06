@@ -105,4 +105,20 @@ describe('adjustments in a PSD', () => {
     expect(document.approximations.join('；')).toContain('1 个调整图层或填充图层没有带过来')
     expect(document.approximations.join('；')).toContain('1 个剪贴蒙版按普通图层导入')
   })
+
+  it('clips to the nearest unclipped layer below, even one it cannot bring', async () => {
+    const imageData = { width: 4, height: 4, data: new Uint8ClampedArray(64).fill(180) }
+    const bytes = writePsdUint8Array({
+      width: 4, height: 4,
+      children: [
+        { name: '照片', left: 0, top: 0, right: 4, bottom: 4, imageData },
+        { name: '照片滤镜', adjustment: { type: 'photo filter', density: 0.25 } },
+        { name: '剪贴在滤镜上', clipping: true, adjustment: toPsdAdjustment({ kind: 'invert' }) }
+      ]
+    }, { noBackground: true })
+    const document = await readPsdForImport(bytes)
+    const photo = document.layers[0]!
+    expect(photo.kind === 'pixels' && photo.adjustments).toEqual([])
+    expect(document.layers.map((layer) => layer.name)).toEqual(['照片', '剪贴在滤镜上'])
+  })
 })
