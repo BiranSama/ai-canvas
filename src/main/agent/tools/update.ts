@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { normalizeSvgPath, type SceneElement } from '../../../domain'
+import { blendModeSchema, canBeClipped, clipBases, clipStacks, normalizeSvgPath, type SceneElement } from '../../../domain'
+import { elementSupportsBlendMode } from '../../../shared/blend-mode'
 import type { sceneElementChangesSchema } from '../../../shared/agent-atomic-tools'
 import { boxToTransform, colorSchema, percentBoxSchema } from './geometry'
 import { sceneWrite } from './scene-write'
@@ -24,7 +25,8 @@ const setSchema = z.object({
   letterSpacing: z.number().min(-100).max(100).optional(),
   lineHeight: z.number().min(0.5).max(5).optional(),
   opacity: z.number().min(0).max(1).optional(),
-  blend: z.enum(['normal', 'multiply', 'screen', 'overlay', 'soft-light']).optional().describe('混合模式'),
+  blend: blendModeSchema.optional().describe('混合模式'),
+  clip: z.boolean().optional().describe('true 剪贴到紧挨在下面的图层（剪贴蒙版），false 释放'),
   visible: z.boolean().optional(),
   locked: z.boolean().optional(),
   subject: z.string().min(1).max(1_000).optional().describe('主体占位的主体描述'),
@@ -64,8 +66,12 @@ function changesFor(element: SceneElement, set: SetArgs): Changes | string {
   if (set.name !== undefined) changes.name = set.name
   if (set.opacity !== undefined) changes.opacity = set.opacity
   if (set.blend !== undefined) {
-    if (set.blend !== 'normal' && ['placeholder', 'mask', 'group'].includes(element.type)) return '这类对象不支持混合模式。'
+    if (set.blend !== 'normal' && !elementSupportsBlendMode(element.type)) return '这类对象不支持混合模式。'
     changes.blendMode = set.blend
+  }
+  if (set.clip !== undefined) {
+    if (set.clip && !canBeClipped(element)) return '只有图片、文字、形状和调整图层能剪贴。'
+    if ((element.clipped === true) !== set.clip) changes.clipped = set.clip
   }
   if (set.visible !== undefined) changes.visible = set.visible
   if (set.locked !== undefined) changes.locked = set.locked
@@ -127,17 +133,35 @@ export const updateTool = defineTool({
     const set = font === null ? args.set : { ...args.set, font: font.family }
     const targets = resolveTargets(args.targets, context, { allowLocked: onlyUnlocks(set) })
     if (typeof targets === 'string') return rejected(targets, targets.includes('锁定') ? '先确认是否真的要改锁定的对象；需要时用 update 设 locked=false。' : undefined)
-    const updates = []
+    const updates: { elementId: string; changes: Changes }[] = []
     for (const element of targets) {
       const changes = changesFor(element, set)
       if (typeof changes === 'string') return rejected(`${context.refs.ref(element.id)}「${element.name}」：${changes}`)
       updates.push({ elementId: element.id, changes })
+    }
+    let released: string[] = []
+    if (set.clip === true) {
+      // Each must sit right above a layer it can clip to.
+      const after = context.scene.elements.map((element) => targets.some((target) => target.id === element.id) ? { ...element, clipped: true } as SceneElement : element)
+      const bases = clipBases(after)
+      const orphan = targets.find((element) => !bases.has(element.id))
+      if (orphan !== undefined) return rejected(`${context.refs.ref(orphan.id)}「${orphan.name}」下面没有可以剪贴到的图层。`, '要紧挨在同一组里的图片、文字或成品形状上面；先用 reorder 挪过去。')
+    } else if (set.clip === false) {
+      // Released, the layers clipped above it in its stack go too, as in Photoshop.
+      const stacks = [...clipStacks(context.scene.elements).values()]
+      const above = new Set<string>()
+      for (const target of targets) {
+        const stack = stacks.find((candidate) => candidate.memberIds.includes(target.id))
+        for (const id of stack?.memberIds.slice(stack.memberIds.indexOf(target.id) + 1) ?? []) if (!targets.some((candidate) => candidate.id === id)) above.add(id)
+      }
+      released = [...above]
+      for (const id of released) updates.push({ elementId: id, changes: { clipped: false } })
     }
     return sceneWrite({
       kind: 'scene.update_elements',
       expectedSceneRevision: context.scene.revision,
       summary: `修改 ${targets.length} 个对象`,
       updates
-    } as const, context, `已修改 ${targets.map((element) => context.refs.ref(element.id)).join('、')}`, targets.map((element) => element.id))
+    } as const, context, `已修改 ${targets.map((element) => context.refs.ref(element.id)).join('、')}${released.length === 0 ? '' : `；剪贴在它上面的 ${released.map((id) => context.refs.ref(id)).join('、')} 一并释放`}`, [...targets.map((element) => element.id), ...released])
   }
 })

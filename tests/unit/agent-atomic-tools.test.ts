@@ -3,6 +3,7 @@ import { blendModeCommandViolation, compileAtomicSceneCommands } from '../../src
 import { AgentToolRegistry } from '../../src/main/agent/agent-tool-registry'
 import { agentToolPlanSchema } from '../../src/shared/agent'
 import { makeAllElementTypesScene } from '../fixtures/scene-fixtures'
+import { blendModeSchema } from '../../src/domain'
 
 const ID = '00000000-0000-4000-8000-000000000001'
 
@@ -48,7 +49,7 @@ describe('AT1 atomic Scene tools', () => {
   })
 
   it('allows only the approved blend modes through the controlled Scene update tool', () => {
-    for (const blendMode of ['normal', 'multiply', 'screen', 'overlay', 'soft-light'] as const) {
+    for (const blendMode of blendModeSchema.options) {
       const parsed = agentToolPlanSchema.safeParse({
         kind: 'scene.update_elements',
         expectedSceneRevision: 4,
@@ -61,7 +62,7 @@ describe('AT1 atomic Scene tools', () => {
       kind: 'scene.update_elements',
       expectedSceneRevision: 4,
       summary: '非法混合',
-      updates: [{ elementId: ID, changes: { blendMode: 'difference' } }]
+      updates: [{ elementId: ID, changes: { blendMode: 'linear-burn' } }]
     }).success).toBe(false)
   })
 

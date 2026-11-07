@@ -1,17 +1,22 @@
 import { z } from 'zod'
-import type { NormalizedTransform, Scene, SceneElement } from '../../../domain'
+import { clipStacks, type ClipStack, type NormalizedTransform, type Scene, type SceneElement } from '../../../domain'
 import { describeAdjustment, describeLayerSettings } from '../../../shared/adjustments'
+import { describeLayerStyle, hasLayerStyles } from '../../../shared/layer-styles'
 import type { ElementRefs } from './refs'
 
 /** [x, y, width, height] in percent of the canvas, origin top left. */
 export type PercentBox = readonly [number, number, number, number]
 
-export const percentBoxSchema = z.tuple([
-  z.number().min(-100).max(200),
-  z.number().min(-100).max(200),
-  z.number().gt(0).max(400),
-  z.number().gt(0).max(400)
-]).describe('[x, y, 宽, 高]，单位是画布宽高的百分比，原点在左上角')
+/**
+ * A box as four numbers. The model is told only that much (seven tools take
+ * a box, and the ranges written out each time cost a tenth of the tool
+ * list); the ranges are checked here and named when one is off.
+ */
+export const percentBoxSchema = z.array(z.number()).length(4).superRefine((box, context) => {
+  const [x, y, width, height] = box
+  if (x! < -100 || x! > 200 || y! < -100 || y! > 200) context.addIssue({ code: 'custom', message: 'x、y 要在 -100~200 之间' })
+  if (!(width! > 0) || width! > 400 || !(height! > 0) || height! > 400) context.addIssue({ code: 'custom', message: '宽、高要大于 0、不超过 400' })
+}).transform((box) => box as unknown as readonly [number, number, number, number]).describe('[x, y, 宽, 高]，单位是画布宽高的百分比，原点在左上角')
 
 export const colorSchema = z.string().trim().regex(/^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i, '颜色用 #RRGGBB')
 
@@ -61,6 +66,29 @@ export function typeLabel(element: SceneElement): string {
   return TYPE_LABELS[element.type]
 }
 
+const clippingByElements = new WeakMap<readonly SceneElement[], { readonly bases: ReadonlyMap<string, string>; readonly stacks: ReadonlyMap<string, ClipStack> }>()
+
+/** The scene's clipping masks, worked out once for all its elements. */
+function clippingOf(elements: readonly SceneElement[]): { readonly bases: ReadonlyMap<string, string>; readonly stacks: ReadonlyMap<string, ClipStack> } {
+  let found = clippingByElements.get(elements)
+  if (found === undefined) {
+    const stacks = clipStacks(elements)
+    found = { stacks, bases: new Map([...stacks.values()].flatMap((stack) => stack.memberIds.map((id) => [id, stack.baseId] as const))) }
+    clippingByElements.set(elements, found)
+  }
+  return found
+}
+
+/** What a layer's clipping mask is, if it has one. */
+function clippingFacts(element: SceneElement, refs: ElementRefs, scene: Pick<Scene, 'elements'>): string[] {
+  const { bases, stacks } = clippingOf(scene.elements)
+  const base = bases.get(element.id)
+  if (base !== undefined) return [`剪贴到 ${refOrUnknown(refs, base)}，只在它有内容的地方显示`]
+  if (element.clipped === true) return ['设了剪贴但下面没有能剪贴到的图层，按普通图层画']
+  const stack = stacks.get(element.id)
+  return stack === undefined ? [] : [`剪贴蒙版的底层：${stack.memberIds.map((id) => refOrUnknown(refs, id)).join('、')} 剪贴在它上面`]
+}
+
 /** One line of exact facts about an element, for `inspect` and the scene summary. */
 export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pick<Scene, 'elements'>): string {
   const facts: string[] = [
@@ -74,7 +102,9 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
     ...(element.visible ? [] : ['隐藏']),
     ...(element.locked ? ['已锁定'] : []),
     ...(element.groupId === null ? [] : [`属于 ${refOrUnknown(refs, element.groupId)}`]),
-    ...('mask' in element && element.mask !== null && element.mask !== undefined ? [element.mask.enabled ? '有图层蒙版' : '图层蒙版已停用'] : [])
+    ...('mask' in element && element.mask !== null && element.mask !== undefined ? [element.mask.enabled ? '有图层蒙版' : '图层蒙版已停用'] : []),
+    ...clippingFacts(element, refs, scene),
+    ...((element.type === 'image' || element.type === 'text' || element.type === 'shape') && hasLayerStyles(element.style) ? [`图层样式：${describeLayerStyle(element.style)}`] : [])
   ]
   if (element.type === 'text') {
     facts.push(`内容「${element.content}」`, `字体 ${element.fontFamily}`, `字号 ${element.fontSize}`, `字重 ${element.fontWeight}`,
@@ -103,7 +133,7 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
   } else if (element.type === 'mask') {
     facts.push(`${element.mode === 'protect' ? '保护区' : '修改区'}`, `作用于 ${refOrUnknown(refs, element.targetElementId)}`)
   } else if (element.type === 'adjustment') {
-    facts.push(describeAdjustment(element.settings), '作用于下面所有图层')
+    facts.push(describeAdjustment(element.settings), clippingOf(scene.elements).bases.has(element.id) ? '只作用于它剪贴到的那组图层' : '作用于下面所有图层')
   } else if (element.type === 'group') {
     facts.push(`包含 ${element.childIds.filter((id) => scene.elements.some((child) => child.id === id)).map((id) => refOrUnknown(refs, id)).join('、')}`)
   }
