@@ -14,9 +14,12 @@ import { CanvasSizeControl } from './CanvasSizeControl'
 import { FontPicker } from './FontPicker'
 import { ImageBlendSection } from './ImageBlendSection'
 import { AdjustmentLayerSection, LayerAdjustmentsSection } from './AdjustmentSections'
+import { LayerStyleSection } from './LayerStyleSection'
+import { isStylable } from '../layer-styles/style-actions'
 import { LayerPanel } from './LayerPanel'
 import { UnifiedRenderSection } from './UnifiedRenderSection'
 import { ImeSafeInput, ImeSafeTextarea } from './ImeSafeTextField'
+import { BlendModeOptions } from './BlendModeOptions'
 import { simplePropertiesFor, type SimplePropertyDefinition } from '../inspector/property-schema'
 
 const elementLabels: Record<SceneElement['type'], string> = {
@@ -292,12 +295,12 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
           {ratioLocked ? <Link2 size={13} /> : <Unlink2 size={13} />}{ratioLocked ? '已锁定宽高比例' : '自由改变宽高'}
         </button>
       </div>}
-      {elementSupportsBlendMode(element.type) && showSection('混合 模式 正片叠底 滤色 叠加 柔光 blend mode multiply screen overlay soft-light') && <div className="inspector-section element-blend">
+      {elementSupportsBlendMode(element.type) && showSection('混合 模式 正片叠底 滤色 叠加 柔光 变暗 变亮 颜色加深 颜色减淡 强光 差值 排除 色相 饱和度 颜色 明度 blend mode') && <div className="inspector-section element-blend">
         <p className="section-kicker">图层混合</p>
         <label className="wide-field"><span>混合</span><select aria-label="混合" value={resolveBlendMode(element)} onChange={(event) => {
           const blendMode = event.currentTarget.value as Parameters<typeof blendModeLabel>[0]
           updateElement(element.id, { blendMode }, `将“${element.name}”混合改为${blendModeLabel(blendMode)}`)
-        }}>{BLEND_MODES.map((blendMode) => <option key={blendMode} value={blendMode}>{blendModeLabel(blendMode)}</option>)}</select></label>
+        }}><BlendModeOptions /></select></label>
         <p className="field-note">混合只作用于作品元素；工具玻璃与选择控件不参与合成。</p>
       </div>}
       {element.type === 'text' && (
@@ -458,13 +461,16 @@ export function Inspector({ onRequestCollapse, projection = 'vertical' }: { read
                   <div className="simple-property-title"><span>{selectedTypeLabel}</span><strong>{selected.name}</strong><small>{properties.length} 个常用属性</small></div>
                   {selected.type === 'adjustment' && <AdjustmentLayerSection element={selected} />}
                   <SimpleElementProperties element={selected} canvas={scene.canvas} horizontal={horizontal} />
-                  {selected.type === 'image' && <LayerAdjustmentsSection element={selected} />}
+                  {/* Docked along the top or bottom, the panel is one strip of the common fields; the lists stay in the vertical panel and their menus. */}
+                  {!horizontal && selected.type === 'image' && <LayerAdjustmentsSection element={selected} />}
+                  {!horizontal && isStylable(selected) && <LayerStyleSection element={selected} />}
                 </>
               : <>
                   <label className="property-search"><Search size={13} /><span className="visually-hidden">搜索高级属性</span><input aria-label="搜索高级属性" value={propertySearch} placeholder="搜索属性…" onChange={(event) => setPropertySearch(event.currentTarget.value)} /></label>
                   {selected.type === 'adjustment' && <AdjustmentLayerSection element={selected} />}
                   <ElementProperties element={selected} canvas={scene.canvas} search={propertySearch} />
                   {selected.type === 'image' && <LayerAdjustmentsSection element={selected} />}
+                  {isStylable(selected) && <LayerStyleSection element={selected} />}
                 </>}
         </div>
       )}

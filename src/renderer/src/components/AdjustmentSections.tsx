@@ -1,8 +1,9 @@
 import { ArrowDown, ArrowUp, Eye, EyeOff, Pencil, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { ADJUSTMENT_KINDS, type AdjustmentKind, type SceneElement } from '../../../domain'
-import { ADJUSTMENT_LABELS, describeAdjustment, type Histogram } from '../../../shared/adjustments'
-import { adjustSelectedLayer, belowHistogram, changeLayerAdjustments, editLayerAdjustment, setAdjustmentLayerSettings } from '../adjustments/adjustment-actions'
+import { ADJUSTMENT_KINDS, FILTER_KINDS, type AdjustmentKind, type FilterKind, type SceneElement } from '../../../domain'
+import { ADJUSTMENT_LABELS, describeLayerSettings, layerSettingsLabel, type Histogram } from '../../../shared/adjustments'
+import { FILTER_LABELS } from '../../../shared/filters'
+import { adjustSelectedLayer, belowHistogram, changeLayerAdjustments, editLayerAdjustment, filterSelectedLayer, setAdjustmentLayerSettings } from '../adjustments/adjustment-actions'
 import { adjustmentLayerSettings, useAdjustmentPreview } from '../canvas/adjustment-preview'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { AdjustmentControls } from './AdjustmentControls'
@@ -15,9 +16,9 @@ const SHORTCUTS: Partial<Record<AdjustmentKind, string>> = {
 }
 
 /**
- * An image layer's own adjustments, oldest first, as they apply: each can
- * be opened again, turned off, moved or taken out. 添加调整 opens the same
- * dialog as the shortcuts.
+ * An image layer's own adjustments and filters, oldest first, as they
+ * apply: each can be opened again, turned off, moved or taken out. 添加调整
+ * and 添加滤镜 open the same dialogs as the shortcuts.
  */
 export function LayerAdjustmentsSection({ element }: { readonly element: ImageElement }): React.JSX.Element {
   const list = element.adjustments ?? []
@@ -34,29 +35,32 @@ export function LayerAdjustmentsSection({ element }: { readonly element: ImageEl
   }
   return (
     <div className="inspector-section adjustment-section">
-      <p className="section-kicker">调整</p>
-      {list.length === 0 && <p className="field-note">只改这一层的颜色，不改原图。快捷键同 PS：Ctrl+L 色阶、Ctrl+M 曲线、Ctrl+U 色相/饱和度。</p>}
+      <p className="section-kicker">调整与滤镜</p>
+      {list.length === 0 && <p className="field-note">只改这一层，不改原图。快捷键同 PS：Ctrl+L 色阶、Ctrl+M 曲线、Ctrl+U 色相/饱和度，Ctrl+Alt+F 再用一次上次的滤镜。</p>}
       {list.length > 0 && (
-        <ol className="adjustment-list" aria-label="这一层的调整">
-          {list.map((adjustment, index) => (
+        <ol className="adjustment-list" aria-label="这一层的调整与滤镜">
+          {list.map((adjustment, index) => {
+            const label = layerSettingsLabel(adjustment.settings)
+            return (
             <li key={adjustment.id} className={adjustment.enabled ? '' : 'is-off'}>
-              <button type="button" className="icon-button quiet" aria-label={adjustment.enabled ? `关闭${ADJUSTMENT_LABELS[adjustment.settings.kind]}` : `打开${ADJUSTMENT_LABELS[adjustment.settings.kind]}`} title={adjustment.enabled ? '关闭' : '打开'}
+              <button type="button" className="icon-button quiet" aria-label={adjustment.enabled ? `关闭${label}` : `打开${label}`} title={adjustment.enabled ? '关闭' : '打开'}
                 disabled={element.locked}
                 onClick={() => void changeLayerAdjustments(element, (current) => current.map((candidate) => candidate.id === adjustment.id ? { ...candidate, enabled: !adjustment.enabled } : candidate), adjustment.enabled ? '关闭调整' : '打开调整')}>
                 {adjustment.enabled ? <Eye size={13} /> : <EyeOff size={13} />}
               </button>
-              <span className="adjustment-name" title={describeAdjustment(adjustment.settings)}>
-                {ADJUSTMENT_LABELS[adjustment.settings.kind]}{adjustment.clip !== undefined && <small>选区</small>}
+              <span className="adjustment-name" title={describeLayerSettings(adjustment.settings)}>
+                {label}{adjustment.clip !== undefined && <small>选区</small>}
               </span>
               {adjustment.settings.kind !== 'invert' && adjustment.settings.kind !== 'desaturate' && (
-                <button type="button" className="icon-button quiet" aria-label={`编辑${ADJUSTMENT_LABELS[adjustment.settings.kind]}`} title="编辑" disabled={element.locked} onClick={() => editLayerAdjustment(element, adjustment.id)}><Pencil size={13} /></button>
+                <button type="button" className="icon-button quiet" aria-label={`编辑${label}`} title="编辑" disabled={element.locked} onClick={() => editLayerAdjustment(element, adjustment.id)}><Pencil size={13} /></button>
               )}
               <button type="button" className="icon-button quiet" aria-label="上移" title="上移（后应用）" disabled={element.locked || index === list.length - 1} onClick={() => move(adjustment.id, 1)}><ArrowDown size={13} /></button>
               <button type="button" className="icon-button quiet" aria-label="下移" title="下移（先应用）" disabled={element.locked || index === 0} onClick={() => move(adjustment.id, -1)}><ArrowUp size={13} /></button>
-              <button type="button" className="icon-button quiet" aria-label={`删除${ADJUSTMENT_LABELS[adjustment.settings.kind]}`} title="删除" disabled={element.locked}
-                onClick={() => void changeLayerAdjustments(element, (current) => current.filter((candidate) => candidate.id !== adjustment.id), `删除${ADJUSTMENT_LABELS[adjustment.settings.kind]}`)}><Trash2 size={13} /></button>
+              <button type="button" className="icon-button quiet" aria-label={`删除${label}`} title="删除" disabled={element.locked}
+                onClick={() => void changeLayerAdjustments(element, (current) => current.filter((candidate) => candidate.id !== adjustment.id), `删除${label}`)}><Trash2 size={13} /></button>
             </li>
-          ))}
+            )
+          })}
         </ol>
       )}
       <label className="wide-field">
@@ -67,6 +71,16 @@ export function LayerAdjustmentsSection({ element }: { readonly element: ImageEl
         }}>
           <option value="">选择…</option>
           {ADJUSTMENT_KINDS.map((kind) => <option key={kind} value={kind}>{ADJUSTMENT_LABELS[kind]}{SHORTCUTS[kind] === undefined ? '' : `（${SHORTCUTS[kind]}）`}</option>)}
+        </select>
+      </label>
+      <label className="wide-field">
+        <span>添加滤镜</span>
+        <select aria-label="添加滤镜" value="" disabled={element.locked} onChange={(event) => {
+          const kind = event.currentTarget.value as FilterKind
+          if (kind.length > 0) filterSelectedLayer(kind)
+        }}>
+          <option value="">选择…</option>
+          {FILTER_KINDS.map((kind) => <option key={kind} value={kind}>{FILTER_LABELS[kind]}</option>)}
         </select>
       </label>
     </div>

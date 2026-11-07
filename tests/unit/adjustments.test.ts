@@ -230,9 +230,9 @@ describe('the settings and the adjustment layer', () => {
     expect(groupBoundsForChildTransforms(grouped, '0f0f0f0f-0000-4000-8000-0000000000b2', new Map([[title.id, moved]]))).toMatchObject({ x: moved.x, width: moved.width, y: moved.y, height: moved.height })
   })
 
-  it('takes no blend mode but normal', () => {
+  it('takes a blend mode, as an adjustment layer does in Photoshop', () => {
     const scene = createMerchantExampleScene('coffee-poster')
     const element = { id: '0f0f0f0f-0000-4000-8000-0000000000af', version: ELEMENT_SCHEMA_VERSION, type: 'adjustment', name: '反相', description: '', transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, zIndex: scene.elements.length, opacity: 1, blendMode: 'multiply', visible: true, locked: false, groupId: null, semanticRole: 'adjustment', referencePolicy: 'include', settings: { kind: 'invert' } }
-    expect(sceneSchema.safeParse({ ...scene, elements: [...scene.elements, element] }).success).toBe(false)
+    expect(sceneSchema.safeParse({ ...scene, elements: [...scene.elements, element] }).success).toBe(true)
   })
 })

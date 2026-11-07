@@ -43,6 +43,7 @@ import { PaintOptionsBar } from './components/PaintOptionsBar'
 import { SelectionOptionsBar } from './components/SelectionOptionsBar'
 import { EditDialogs } from './components/EditDialogs'
 import { AdjustmentDialog } from './components/AdjustmentDialog'
+import { LayerStyleDialog } from './components/LayerStyleDialog'
 import { SubjectModelDialog } from './components/SubjectModelDialog'
 import { elementAssetIds } from '../../shared/scene-assets'
 import { nudgeSelection } from './selection/selection-gestures'
@@ -327,6 +328,7 @@ function WorkspaceHeader({
     {exportOpen && <ExportSheet onClose={() => useExportSheet.getState().hide()} onSaveSizeAsProject={saveSizeAsProject} />}
     <EditDialogs />
     <AdjustmentDialog />
+    <LayerStyleDialog />
     <SubjectModelDialog />
     </>
   )

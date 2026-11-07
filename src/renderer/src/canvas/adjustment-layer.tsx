@@ -1,6 +1,6 @@
 import type Konva from 'konva'
 import { Shape } from 'react-konva'
-import type { AdjustmentSettings } from '../../../domain'
+import type { AdjustmentSettings, BlendMode } from '../../../domain'
 import { adjustPixels, sampleCoverage } from '../../../shared/adjustments'
 
 /*
@@ -20,11 +20,13 @@ export interface AdjustmentCoverage {
 }
 
 /** Draws nothing of its own; adjusts what is beneath it over a box of this size (the whole canvas). */
-export function AdjustmentBackdrop({ width, height, settings, opacity, mask }: {
+export function AdjustmentBackdrop({ width, height, settings, opacity, blend, mask }: {
   readonly width: number
   readonly height: number
   readonly settings: AdjustmentSettings
   readonly opacity: number
+  /** How the adjusted colours are laid over the originals, as an adjustment layer's blend mode does in Photoshop. */
+  readonly blend: BlendMode
   readonly mask: AdjustmentCoverage | null
 }): React.JSX.Element {
   return (
@@ -56,7 +58,7 @@ export function AdjustmentBackdrop({ width, height, settings, opacity, mask }: {
             scaleX, scaleY, offsetX: (left - matrix.e) * scaleX, offsetY: (top - matrix.f) * scaleY
           })
         }
-        adjustPixels(pixels.data, settings, { coverage, amount: opacity })
+        adjustPixels(pixels.data, settings, { coverage, amount: opacity, blend })
         native.putImageData(pixels, left, top)
       }}
     />

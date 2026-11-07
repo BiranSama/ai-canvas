@@ -1,4 +1,7 @@
-import type { AdjustmentKind, AdjustmentSettings, CurvePoints, LayerAdjustment, LevelsChannel } from '../domain'
+import { FILTER_KINDS, type AdjustmentKind, type AdjustmentSettings, type BlendMode, type CurvePoints, type FilterSettings, type LayerAdjustment, type LayerSettings, type LevelsChannel } from '../domain'
+import { blendInPlace } from './blend-mode'
+import { imageDrawRect } from './layer-space'
+import { applyFilter, describeFilter, FILTER_LABELS, isNeutralFilter, isSpatialFilter } from './filters'
 
 /*
  * The pixel math of Photoshop's adjustments, shared by the canvas, the
@@ -365,6 +368,8 @@ export interface AdjustOptions {
   readonly coverage?: Uint8Array | Uint8ClampedArray | null
   /** The layer's opacity: how much of the adjustment shows at full coverage. */
   readonly amount?: number
+  /** An adjustment layer's blend mode: the adjusted colours are laid over the originals in it. */
+  readonly blend?: BlendMode
 }
 
 /**
@@ -375,7 +380,16 @@ export interface AdjustOptions {
 export function adjustPixels(data: Pixels, settings: AdjustmentSettings, options: AdjustOptions = {}): void {
   const amount = options.amount ?? 1
   const coverage = options.coverage ?? null
-  if (amount <= 0 || isNeutralAdjustment(settings)) return
+  if (amount <= 0) return
+  // In another mode even an adjustment that changes nothing lays the picture over itself, as an empty curve in 滤色 brightens.
+  if (options.blend !== undefined && options.blend !== 'normal') {
+    // A copy, not a view: Buffer's slice shares its memory.
+    const adjusted = new Uint8ClampedArray(data)
+    adjustPixels(adjusted, settings)
+    blendInPlace(data, adjusted, options.blend, { coverage, amount })
+    return
+  }
+  if (isNeutralAdjustment(settings)) return
   const tables = channelTables(settings)
   // The adjusted picture is mixed with the original, so a value past the range is cut first, as the picture would have it.
   const mix = (pixel: number, value: number, original: number): number => {
@@ -420,9 +434,37 @@ export function adjustPixels(data: Pixels, settings: AdjustmentSettings, options
   }
 }
 
-/** The layer adjustments that change anything, in order. */
+// ---- A layer's own list: adjustments and filters ----
+
+const FILTER_KIND_SET: ReadonlySet<string> = new Set(FILTER_KINDS)
+
+/** Whether an entry of a layer's list is a filter rather than an adjustment. */
+export function isFilterSettings(settings: LayerSettings): settings is FilterSettings {
+  return FILTER_KIND_SET.has(settings.kind)
+}
+
+/** The name of an entry of a layer's list, as Photoshop's menus call it. */
+export function layerSettingsLabel(settings: LayerSettings): string {
+  return isFilterSettings(settings) ? FILTER_LABELS[settings.kind] : ADJUSTMENT_LABELS[settings.kind]
+}
+
+/** A short description of an entry of a layer's list. */
+export function describeLayerSettings(settings: LayerSettings): string {
+  return isFilterSettings(settings) ? describeFilter(settings) : describeAdjustment(settings)
+}
+
+function isNeutralLayerSettings(settings: LayerSettings): boolean {
+  return isFilterSettings(settings) ? isNeutralFilter(settings) : isNeutralAdjustment(settings)
+}
+
+/** The layer adjustments and filters that change anything, in order. */
 export function activeAdjustments(adjustments: readonly LayerAdjustment[] | undefined): readonly LayerAdjustment[] {
-  return (adjustments ?? []).filter((adjustment) => adjustment.enabled && !isNeutralAdjustment(adjustment.settings))
+  return (adjustments ?? []).filter((adjustment) => adjustment.enabled && !isNeutralLayerSettings(adjustment.settings))
+}
+
+/** Whether a filter on the layer looks at neighbouring pixels, so its mask goes on after them, as on a smart object. */
+export function hasSpatialFilters(adjustments: readonly LayerAdjustment[] | undefined): boolean {
+  return activeAdjustments(adjustments).some((adjustment) => isFilterSettings(adjustment.settings) && isSpatialFilter(adjustment.settings))
 }
 
 // ---- Histogram and automatic levels ----
@@ -553,17 +595,52 @@ export function adjustmentClipIds(adjustments: readonly LayerAdjustment[] | unde
   return [...new Set(activeAdjustments(adjustments).flatMap((adjustment) => adjustment.clip === undefined ? [] : [adjustment.clip]))]
 }
 
+/** The picture an adjustment list is applied to: its size, and how many of its pixels make one output pixel. */
+export interface LayerPixelsLayout {
+  readonly width: number
+  readonly height: number
+  readonly scale: number
+}
+
 /**
- * A layer's adjustments in order over its pixels as drawn. coverageOf gives
- * a clip's coverage at the same size; an adjustment whose clip it cannot
- * give is skipped, so callers wait for clips before drawing.
+ * A layer's adjustments and filters in order over its pixels as drawn.
+ * coverageOf gives a clip's coverage at the same size; an entry whose clip
+ * it cannot give is skipped, so callers wait for clips before drawing.
  */
-export function adjustLayerPixels(data: Pixels, adjustments: readonly LayerAdjustment[] | undefined, coverageOf: (clipId: string) => Uint8Array | Uint8ClampedArray | null = () => null): void {
+export function adjustLayerPixels(data: Pixels, adjustments: readonly LayerAdjustment[] | undefined, layout: LayerPixelsLayout, coverageOf: (clipId: string) => Uint8Array | Uint8ClampedArray | null = () => null): void {
   for (const adjustment of activeAdjustments(adjustments)) {
-    if (adjustment.clip === undefined) { adjustPixels(data, adjustment.settings); continue }
-    const coverage = coverageOf(adjustment.clip)
-    if (coverage !== null) adjustPixels(data, adjustment.settings, { coverage })
+    const coverage = adjustment.clip === undefined ? null : coverageOf(adjustment.clip)
+    if (adjustment.clip !== undefined && coverage === null) continue
+    const settings = adjustment.settings
+    if (isFilterSettings(settings)) applyFilter(data, layout.width, layout.height, settings, { scale: layout.scale, coverage })
+    else adjustPixels(data, settings, { coverage })
   }
+}
+
+/**
+ * A grayscale picture in an image layer's own pixels (a selection an
+ * adjustment was made in, or its mask) cropped and fitted into its box as
+ * the image is, sampled bilinearly at pixel centres, so the canvas, the
+ * export and Main read it alike. Past the picture, where a contained image
+ * leaves the box empty, there is nothing.
+ */
+export function coverageInBox(
+  gray: { readonly width: number; readonly height: number; readonly data: Uint8Array | Uint8ClampedArray },
+  element: { readonly crop: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }; readonly fit: 'cover' | 'contain' | 'fill' },
+  width: number,
+  height: number
+): Uint8Array<ArrayBuffer> {
+  const { crop, draw } = imageDrawRect(gray, element, width, height)
+  const scaleX = crop.width / Math.max(1e-9, draw.width)
+  const scaleY = crop.height / Math.max(1e-9, draw.height)
+  const coverage = sampleCoverage(gray, width, height, { scaleX, scaleY, offsetX: crop.x - draw.x * scaleX, offsetY: crop.y - draw.y * scaleY })
+  if (element.fit === 'contain') {
+    for (let y = 0; y < height; y += 1) {
+      const inside = y + 0.5 >= draw.y && y + 0.5 <= draw.y + draw.height
+      for (let x = 0; x < width; x += 1) if (!inside || x + 0.5 < draw.x || x + 0.5 > draw.x + draw.width) coverage[y * width + x] = 0
+    }
+  }
+  return coverage
 }
 
 /**

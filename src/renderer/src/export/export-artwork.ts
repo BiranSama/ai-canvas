@@ -1,8 +1,9 @@
 import Konva from 'konva'
-import { adaptedScene, hiddenByGroups, type Scene, type SceneElement } from '../../../domain'
+import { adaptedScene, clipBases, hiddenByGroups, LAYER_STYLE_KINDS, type Scene, type SceneElement } from '../../../domain'
 import { hasVisibleEffects } from '../../../shared/layer-effects'
 import { MAX_EXPORT_EDGE, type ExportImageFormat, type PsdAdjustment, type PsdLayer, type PsdNode, type PsdText } from '../../../shared/artwork-export'
-import { activeAdjustments, ADJUSTMENT_LABELS } from '../../../shared/adjustments'
+import { activeAdjustments, ADJUSTMENT_LABELS, isFilterSettings } from '../../../shared/adjustments'
+import { resolveBlendMode } from '../../../shared/blend-mode'
 import { MAX_WEBP_EDGE, pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { ArtworkSession, canvasPixels } from '../canvas/artwork-render'
 import { TEXT_SHADOW_OPACITY, textMetrics, textWrap } from '../canvas/layer-drawing'
@@ -294,13 +295,15 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
   const notes: string[] = plan.flattened.map((name) => `「${name}」里的图层和组外的图层上下交错，为了不改变画面，PSD 里按原来的顺序平铺，没有建组。`)
   progress({ label: '正在读取图层', done, total })
   const session = await ArtworkSession.prepare(scene, signal, { includeHidden: true })
+  // Photoshop's clipping masks are ours: a layer clipped to a base stays clipped to it.
+  const clipped = clipBases(scene.elements)
   try {
     const adjustmentOf = (element: Extract<SceneElement, { type: 'adjustment' }>, hidden: boolean): PsdAdjustment => {
       const mask = element.mask ?? null
       const coverage = mask === null ? null : session.adjustmentMaskAt(element.id, width, height)
       done += 1
       return {
-        kind: 'adjustment', name: element.name, hidden, opacity: element.opacity, clipping: false, settings: element.settings,
+        kind: 'adjustment', name: element.name, hidden, opacity: element.opacity, blendMode: resolveBlendMode(element), clipping: clipped.has(element.id), settings: element.settings,
         mask: mask === null || coverage === null ? null : { left: 0, top: 0, width, height, pixels: coverage, disabled: !mask.enabled }
       }
     }
@@ -308,15 +311,27 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       if (element.type === 'adjustment') return [adjustmentOf(element, hidden)]
       // An image's own adjustments become adjustment layers clipped to it, which Photoshop applies to that layer alone.
       // With a shadow drawn into its pixels, or one made in a selection, they are drawn into its pixels instead.
+      // Filters live only on smart objects in Photoshop, so a layer with one has it all drawn into its pixels.
       const own = element.type === 'image' ? element.adjustments ?? [] : []
-      const clipped = own.length > 0 && element.type === 'image' && !(element.effects?.shadow !== null && element.effects?.shadow !== undefined && element.effects.shadow.opacity > 0)
+      const filtered = own.some((adjustment) => isFilterSettings(adjustment.settings))
+      // A layer clipped to another cannot have adjustments clipped to it alone: in Photoshop they would change its whole clipping mask.
+      const inStack = clipped.has(element.id)
+      // A styled layer's own adjustments go on before its styles; clipped adjustment layers would go on after them.
+      const styled = element.type === 'image' && element.style !== undefined && LAYER_STYLE_KINDS.some((kind) => element.style![kind] !== undefined)
+      const asLayers = own.length > 0 && element.type === 'image' && !filtered && !inStack && !styled && !(element.effects?.shadow !== null && element.effects?.shadow !== undefined && element.effects.shadow.opacity > 0)
         && own.every((adjustment) => adjustment.clip === undefined)
-      if (own.length > 0 && !clipped && activeAdjustments(own).length > 0) notes.push(`「${element.name}」的调整${own.some((adjustment) => adjustment.clip !== undefined) ? '只作用在选区里' : '和投影在一起'}，并进了像素。`)
-      const layer = await layerOf(element, hidden, !clipped)
-      if (!clipped) return [layer]
-      return [layer, ...own.map((adjustment): PsdAdjustment => ({
-        kind: 'adjustment', name: ADJUSTMENT_LABELS[adjustment.settings.kind], hidden: !adjustment.enabled, opacity: 1, clipping: true, settings: adjustment.settings, mask: null
-      }))]
+      if (own.length > 0 && !asLayers && activeAdjustments(own).length > 0) {
+        notes.push(filtered
+          ? `「${element.name}」的滤镜${own.some((adjustment) => !isFilterSettings(adjustment.settings)) ? '和调整' : ''}并进了像素：Photoshop 只在智能对象上放滤镜。`
+          : inStack ? `「${element.name}」剪贴在下面的图层上，它自己的调整并进了像素。`
+            : styled ? `「${element.name}」带图层样式，它自己的调整并进了像素，样式仍是 PS 的图层效果。`
+              : `「${element.name}」的调整${own.some((adjustment) => adjustment.clip !== undefined) ? '只作用在选区里' : '和投影在一起'}，并进了像素。`)
+      }
+      const layer = await layerOf(element, hidden, !asLayers)
+      if (!asLayers) return [layer]
+      return [layer, ...own.flatMap((adjustment): PsdAdjustment[] => isFilterSettings(adjustment.settings) ? [] : [{
+        kind: 'adjustment', name: ADJUSTMENT_LABELS[adjustment.settings.kind], hidden: !adjustment.enabled, opacity: 1, blendMode: 'normal', clipping: true, settings: adjustment.settings, mask: null
+      }])]
     }
     const layerOf = async (element: SceneElement, hidden: boolean, adjusted: boolean): Promise<PsdLayer> => {
       checkAborted(signal)
@@ -328,7 +343,9 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       const bakeMask = mask !== null && mask.enabled && element.type === 'image' && hasVisibleEffects(element.effects)
       // Drawn over the layer's own area, past the canvas edge too, so nothing outside the canvas is lost.
       const area = layerArea(element, width, height)
-      const plainCanvas = session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: mask === null || bakeMask ? 'scene' : 'off', textEffects: text === null, adjustments: adjusted } })
+      // Its layer styles go to Photoshop as layer effects, so the pixels hold the layer alone.
+      const style = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.style : undefined
+      const plainCanvas = session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: mask === null || bakeMask ? 'scene' : 'off', textEffects: text === null, adjustments: adjusted, styles: false } })
       const plain = canvasPixels(plainCanvas)
       const bounds = opaqueBounds(plain)
       let psdMask: PsdLayer['mask'] = null
@@ -352,7 +369,10 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
         height: bounds?.height ?? 0,
         pixels: bounds === null ? new Uint8Array(0) : crop(plain, bounds),
         mask: psdMask,
-        text
+        text,
+        ...(clipped.has(element.id) ? { clipping: true } : {}),
+        // Switched-off styles go too, so they come back switched off with their settings.
+        ...(style !== undefined && LAYER_STYLE_KINDS.some((kind) => style[kind] !== undefined) ? { style } : {})
       }
     }
     const nodesOf = async (plans: readonly LayerPlan[]): Promise<PsdNode[]> => {

@@ -8,6 +8,7 @@ import {
   Box,
   ChevronRight,
   Contrast,
+  CornerLeftDown,
   Copy,
   Eye,
   EyeOff,
@@ -26,12 +27,12 @@ import {
   Trash2,
   Ungroup
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { pathInBox, type SceneElement } from '../../../domain'
-import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
+import { canBeClipped, clipStacks, pathInBox, type SceneElement } from '../../../domain'
+import { blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
-import { mergeDown, mergeVisible, rasterizeLayer } from '../canvas/layer-actions'
+import { mergeDown, mergeVisible, rasterizeLayer, toggleClippingMask } from '../canvas/layer-actions'
 import { ADJUSTMENT_LAYER_KINDS, createAdjustmentLayer } from '../adjustments/adjustment-actions'
 import { ADJUSTMENT_LABELS } from '../../../shared/adjustments'
 import { addLayerMask, applyLayerMask, deleteLayerMask, editMask, isMaskable, loadMaskAsSelection, loadTransparencyAsSelection, setMaskEnabled, toggleMaskAlone } from '../canvas/mask-actions'
@@ -40,6 +41,9 @@ import { layerMaskPixels, pixelLayerCanvas, pixelLayerVersion, subscribePixelLay
 import { hasSelection, useSelectionStore } from '../selection/selection-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeInput } from './ImeSafeTextField'
+import { BlendModeOptions } from './BlendModeOptions'
+import { activeLayerStyles, describeLayerStyle, hasLayerStyles, LAYER_STYLE_LABELS, LAYER_STYLE_ORDER } from '../../../shared/layer-styles'
+import { clearLayerStyle, copyLayerStyle, hasCopiedLayerStyle, isStylable, openLayerStyle, pasteLayerStyle } from '../layer-styles/style-actions'
 
 const KIND_LABELS: Record<SceneElement['type'], string> = {
   image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体', light: '光影', mask: 'AI 区域', group: '组合', adjustment: '调整'
@@ -235,6 +239,8 @@ export function LayerPanel(): React.JSX.Element {
   // Photoshop's 新建填充或调整图层 menu, opened from the panel's foot.
   const [adjustMenu, setAdjustMenu] = useState<{ readonly x: number; readonly y: number } | null>(null)
   const adjustMenuRef = useRef<HTMLDivElement>(null)
+  const [styleMenu, setStyleMenu] = useState<{ readonly x: number; readonly y: number } | null>(null)
+  const styleMenuRef = useRef<HTMLDivElement>(null)
   const [dragged, setDragged] = useState<string | null>(null)
   const [drop, setDrop] = useState<DropTarget | null>(null)
   const [anchor, setAnchor] = useState<string | null>(null)
@@ -242,6 +248,12 @@ export function LayerPanel(): React.JSX.Element {
   const [solo, setSolo] = useState<{ readonly id: string; readonly before: ReadonlyMap<string, boolean> } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  // The menu opens at the pointer and moves up as far as its own height needs, to stay on screen.
+  const [menuTop, setMenuTop] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const height = menuRef.current?.offsetHeight
+    setMenuTop(menu === null || height === undefined ? null : Math.max(8, Math.min(menu.y, window.innerHeight - height - 8)))
+  }, [menu])
   const maskEditing = useMaskState((state) => state.editing)
   // The add-mask button's tooltip says whether a selection will shape the mask.
   const selectionPresent = useSelectionStore((state) => state.mask !== null)
@@ -265,6 +277,11 @@ export function LayerPanel(): React.JSX.Element {
       .forEach((element) => walk(element, 0))
     return result
   }, [byId, collapsed, elements, filter])
+  // Clipping masks: a clipped layer shows an arrow down to its base, whose name is underlined, as in Photoshop.
+  const clipping = useMemo(() => {
+    const stacks = clipStacks(elements)
+    return { bases: new Set(stacks.keys()), clipped: new Map([...stacks.values()].flatMap((stack) => stack.memberIds.map((id) => [id, stack.baseId] as const))) }
+  }, [elements])
 
   const selected = selectedIds.map((id) => byId.get(id)).filter((element): element is SceneElement => element !== undefined)
   const blendable = selected.filter((element) => elementSupportsBlendMode(element.type))
@@ -279,18 +296,19 @@ export function LayerPanel(): React.JSX.Element {
   }, [selectedIds])
 
   useEffect(() => {
-    if (adjustMenu === null) return
+    if (adjustMenu === null && styleMenu === null) return
     const close = (event: PointerEvent): void => {
       if (!adjustMenuRef.current?.contains(event.target as Node)) setAdjustMenu(null)
+      if (!styleMenuRef.current?.contains(event.target as Node)) setStyleMenu(null)
     }
-    const escape = (event: globalThis.KeyboardEvent): void => { if (event.key === 'Escape') setAdjustMenu(null) }
+    const escape = (event: globalThis.KeyboardEvent): void => { if (event.key === 'Escape') { setAdjustMenu(null); setStyleMenu(null) } }
     window.addEventListener('pointerdown', close, true)
     window.addEventListener('keydown', escape, true)
     return () => {
       window.removeEventListener('pointerdown', close, true)
       window.removeEventListener('keydown', escape, true)
     }
-  }, [adjustMenu])
+  }, [adjustMenu, styleMenu])
 
   useEffect(() => {
     if (menu === null) return
@@ -338,7 +356,7 @@ export function LayerPanel(): React.JSX.Element {
     setRenaming(null)
   }
 
-  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup' | 'merge' | 'merge-visible' | 'rasterize' | 'mask-add' | 'mask-hide' | 'mask-apply' | 'mask-delete' | 'mask-toggle'): void => {
+  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup' | 'merge' | 'merge-visible' | 'rasterize' | 'mask-add' | 'mask-hide' | 'mask-apply' | 'mask-delete' | 'mask-toggle' | 'clip'): void => {
     setMenu(null)
     const element = byId.get(id)
     if (element === undefined) return
@@ -356,6 +374,7 @@ export function LayerPanel(): React.JSX.Element {
     else if (action === 'merge') void mergeDown()
     else if (action === 'merge-visible') void mergeVisible()
     else if (action === 'rasterize') void rasterizeLayer(id)
+    else if (action === 'clip') void toggleClippingMask(selectedIds.includes(id) ? selectedIds : [id])
     else if (action === 'mask-add' || action === 'mask-hide') void addLayerMask(id, action === 'mask-hide')
     else if (action === 'mask-apply') void applyLayerMask(id)
     else if (action === 'mask-delete') void deleteLayerMask(id)
@@ -435,7 +454,7 @@ export function LayerPanel(): React.JSX.Element {
         <select aria-label="混合模式" value={sharedBlend ?? ''} disabled={blendable.length === 0}
           onChange={(event) => updateSelected({ blendMode: event.currentTarget.value }, '调整混合模式', blendable)}>
           {sharedBlend === null && <option value="" disabled>{blendable.length === 0 ? '混合模式' : '多种'}</option>}
-          {BLEND_MODES.map((mode) => <option key={mode} value={mode}>{blendModeLabel(mode)}</option>)}
+          <BlendModeOptions />
         </select>
         <label className="layer-opacity">
           <span>不透明度</span>
@@ -462,6 +481,7 @@ export function LayerPanel(): React.JSX.Element {
             ...(element.referencePolicy === 'reference-only' ? ['仅参考'] : [])
           ]
           const dropping = drop?.id === element.id
+          const clipBase = clipping.clipped.get(element.id)
           return (
             <div
               key={element.id}
@@ -469,7 +489,7 @@ export function LayerPanel(): React.JSX.Element {
               aria-selected={isSelected}
               data-layer-id={element.id}
               draggable={renaming !== element.id}
-              className={`layer-row${isSelected ? ' is-selected' : ''}${element.visible ? '' : ' is-hidden'}${editingGroupId === element.id ? ' is-editing-group' : ''}${dragged === element.id ? ' is-dragging' : ''}${dropping ? drop!.after ? ' drop-after' : ' drop-before' : ''}`}
+              className={`layer-row${isSelected ? ' is-selected' : ''}${element.visible ? '' : ' is-hidden'}${editingGroupId === element.id ? ' is-editing-group' : ''}${dragged === element.id ? ' is-dragging' : ''}${dropping ? drop!.after ? ' drop-after' : ' drop-before' : ''}${clipBase === undefined ? '' : ' is-clipped'}`}
               style={{ '--layer-depth': depth } as React.CSSProperties}
               onClick={(event) => {
                 choose(event, element.id)
@@ -500,7 +520,9 @@ export function LayerPanel(): React.JSX.Element {
               <span className="layer-indent" aria-hidden="true" />
               {isGroup
                 ? <button type="button" className={`layer-disclosure${open ? ' is-open' : ''}`} aria-label={open ? `折叠${element.name}` : `展开${element.name}`} onClick={(event) => { event.stopPropagation(); toggleCollapsed(element.id) }}><ChevronRight size={13} /></button>
-                : <span className="layer-disclosure-spacer" aria-hidden="true" />}
+                : clipBase !== undefined
+                  ? <span className="layer-clip-arrow" role="img" aria-label={`剪贴到「${byId.get(clipBase)?.name ?? ''}」`} title={`剪贴到「${byId.get(clipBase)?.name ?? ''}」`}><CornerLeftDown size={12} aria-hidden="true" /></span>
+                  : <span className="layer-disclosure-spacer" aria-hidden="true" />}
               <span className="layer-thumbs">
                 {/* A click on the layer's thumbnail paints on its pixels again; Ctrl+click loads its transparency as the selection. */}
                 <span className={`layer-thumb-hit${isMaskable(element) && element.mask !== null && element.mask !== undefined && maskEditing !== element.id ? ' is-target' : ''}`} onClick={(event) => {
@@ -514,9 +536,13 @@ export function LayerPanel(): React.JSX.Element {
               <span className="layer-copy" title={`${element.name} · ${KIND_LABELS[element.type]}`}>
                 {renaming === element.id
                   ? <ImeSafeInput aria-label={`重命名${element.name}`} autoFocus value={element.name} commitDelayMs={null} commitOnEnter onCommit={(value) => finishRename(element, value)} onEscape={() => setRenaming(null)} onClick={(event) => event.stopPropagation()} />
-                  : <strong>{element.name}</strong>}
+                  : <strong className={clipping.bases.has(element.id) ? 'is-clip-base' : undefined}>{element.name}</strong>}
                 {meta.length > 0 && <small>{meta.join(' · ')}</small>}
               </span>
+              {isStylable(element) && hasLayerStyles(element.style) && (
+                <button type="button" className="layer-fx" aria-label={`编辑${element.name}的图层样式`} title={describeLayerStyle(element.style)}
+                  onClick={(event) => { event.stopPropagation(); openLayerStyle(element.id, activeLayerStyles(element.style)[0]) }}>fx</button>
+              )}
               {element.locked
                 ? <button type="button" className="layer-lock is-on" aria-label={`解锁${element.name}`} title="解锁" onClick={(event) => { event.stopPropagation(); act(element.id, 'lock') }}><Lock size={12} /></button>
                 : <button type="button" className="layer-lock" aria-label={`锁定${element.name}`} title="锁定" onClick={(event) => { event.stopPropagation(); act(element.id, 'lock') }}><Lock size={12} /></button>}
@@ -546,6 +572,12 @@ export function LayerPanel(): React.JSX.Element {
           <button type="button" title={selectionPresent ? '添加蒙版：只显示选区（Alt：隐藏选区）' : '添加蒙版（Alt：全部隐藏）'} aria-label="添加蒙版"
             disabled={selected.length !== 1 || !isMaskable(selected[0]) || (selected[0].mask !== null && selected[0].mask !== undefined)}
             onClick={(event) => { const element = selected[0]; if (element !== undefined) void addLayerMask(element.id, event.altKey) }}><RectangleCircle size={14} /></button>
+          <button type="button" className="layer-fx-button" title="添加图层样式" aria-label="添加图层样式" aria-haspopup="menu" aria-expanded={styleMenu !== null}
+            disabled={selected.length !== 1 || !isStylable(selected[0]) || selected[0].locked}
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect()
+              setStyleMenu((current) => current === null ? { x: box.left, y: box.top } : null)
+            }}><i>fx</i></button>
           <button type="button" title={selectionPresent ? '新建调整图层：只调整选区' : '新建调整图层'} aria-label="新建调整图层" aria-haspopup="menu" aria-expanded={adjustMenu !== null}
             onClick={(event) => {
               const box = event.currentTarget.getBoundingClientRect()
@@ -560,6 +592,14 @@ export function LayerPanel(): React.JSX.Element {
         <button type="button" className="text-action" onClick={() => void distribute('vertical')}>垂直等距分布</button>
       </div>}
 
+      {styleMenu !== null && selected.length === 1 && createPortal(
+        <div className="layer-menu" role="menu" aria-label="添加图层样式" ref={styleMenuRef} style={{ left: Math.min(styleMenu.x, window.innerWidth - 196), top: Math.max(8, styleMenu.y - 8 - LAYER_STYLE_ORDER.length * 30) }}>
+          {LAYER_STYLE_ORDER.map((kind) => (
+            <button key={kind} type="button" role="menuitem" onClick={() => { setStyleMenu(null); openLayerStyle(selected[0]!.id, kind) }}>{LAYER_STYLE_LABELS[kind]}…</button>
+          ))}
+        </div>,
+        document.body
+      )}
       {adjustMenu !== null && createPortal(
         <div className="layer-menu" role="menu" aria-label="新建调整图层" ref={adjustMenuRef} style={{ left: Math.min(adjustMenu.x, window.innerWidth - 196), top: Math.max(8, adjustMenu.y - 8 - ADJUSTMENT_LAYER_KINDS.length * 30) }}>
           {ADJUSTMENT_LAYER_KINDS.map((kind) => (
@@ -570,7 +610,7 @@ export function LayerPanel(): React.JSX.Element {
       )}
       {/* The island's backdrop filter would make it the containing block of a fixed menu, so the menu lives on the body. */}
       {menu !== null && menuElement !== undefined && createPortal(
-        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: Math.max(8, Math.min(menu.y, window.innerHeight - 540)) }}>
+        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: menuTop ?? Math.max(8, menu.y) }}>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'rename')}>重命名<kbd>F2</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'duplicate')}>复制</button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'visibility')} disabled={menuElement.locked}>{menuElement.visible ? '隐藏' : '显示'}</button>
@@ -593,6 +633,14 @@ export function LayerPanel(): React.JSX.Element {
             {menuElement.type !== 'adjustment' && <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-apply')} disabled={menuElement.locked}>应用蒙版</button>}
             <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-delete')} disabled={menuElement.locked}>删除蒙版</button>
           </>}
+          {isStylable(menuElement) && <>
+            <hr />
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); openLayerStyle(menuElement.id, activeLayerStyles(menuElement.style)[0]) }} disabled={menuElement.locked}>图层样式…</button>
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); copyLayerStyle(menuElement) }} disabled={!hasLayerStyles(menuElement.style)}>拷贝图层样式</button>
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); void pasteLayerStyle(selectedIds.includes(menuElement.id) ? selectedIds : [menuElement.id]) }} disabled={!hasCopiedLayerStyle()}>粘贴图层样式</button>
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); void clearLayerStyle(selectedIds.includes(menuElement.id) ? selectedIds : [menuElement.id]) }} disabled={menuElement.locked || !hasLayerStyles(menuElement.style)}>清除图层样式</button>
+          </>}
+          {canBeClipped(menuElement) && <button type="button" role="menuitem" onClick={() => act(menu.id, 'clip')} disabled={menuElement.locked}>{menuElement.clipped === true ? '释放剪贴蒙版' : '创建剪贴蒙版'}<kbd>Ctrl+Alt+G</kbd></button>}
           {(menuElement.type === 'text' || menuElement.type === 'shape') && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge')}>{menuElement.type === 'group' ? '合并组' : selected.length > 1 && selectedIds.includes(menu.id) ? '合并图层' : '向下合并'}<kbd>Ctrl+E</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge-visible')}>合并可见图层<kbd>Ctrl+Shift+E</kbd></button>

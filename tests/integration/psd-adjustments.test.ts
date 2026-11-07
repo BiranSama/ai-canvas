@@ -63,8 +63,8 @@ describe('adjustments in a PSD', () => {
       width, height, composite: new Uint8Array(width * height * 4),
       children: [
         { kind: 'layer', name: '照片', hidden: false, opacity: 1, blendMode: 'normal', left: 0, top: 0, width, height, pixels, mask: null, text: null },
-        { kind: 'adjustment', name: '曲线', hidden: false, opacity: 1, clipping: true, settings: SAMPLES[2]!, mask: null },
-        { kind: 'adjustment', name: '黑白 1', hidden: true, opacity: 0.6, clipping: false, settings: defaultAdjustment('black-white'), mask: { left: 0, top: 0, width, height, pixels: mask, disabled: false } }
+        { kind: 'adjustment', name: '曲线', hidden: false, opacity: 1, blendMode: 'normal', clipping: true, settings: SAMPLES[2]!, mask: null },
+        { kind: 'adjustment', name: '黑白 1', hidden: true, opacity: 0.6, blendMode: 'luminosity', clipping: false, settings: defaultAdjustment('black-white'), mask: { left: 0, top: 0, width, height, pixels: mask, disabled: false } }
       ]
     }
     // What the page sends passes Main's check.
@@ -73,7 +73,7 @@ describe('adjustments in a PSD', () => {
     const [photo, curves, blackWhite] = psd.children as Layer[]
     expect(photo?.adjustment).toBeUndefined()
     expect(curves).toMatchObject({ name: '曲线', clipping: true, adjustment: { type: 'curves' } })
-    expect(blackWhite).toMatchObject({ name: '黑白 1', hidden: true, clipping: false, adjustment: { type: 'black & white' } })
+    expect(blackWhite).toMatchObject({ name: '黑白 1', hidden: true, clipping: false, blendMode: 'luminosity', adjustment: { type: 'black & white' } })
     expect(blackWhite!.opacity).toBeCloseTo(0.6, 2)
     expect(blackWhite!.mask?.imageData?.data[0]).toBe(255)
     expect(blackWhite!.mask?.imageData?.data[(width - 1) * 4]).toBe(0)
@@ -90,7 +90,7 @@ describe('adjustments in a PSD', () => {
         { name: '照片', left: 0, top: 0, right: width, bottom: height, imageData },
         { name: '照片的曲线', clipping: true, adjustment: toPsdAdjustment(SAMPLES[2]!) },
         { name: '半透明的剪贴', clipping: true, opacity: 0.5, adjustment: toPsdAdjustment({ kind: 'invert' }) },
-        { name: '整体色阶', adjustment: toPsdAdjustment(SAMPLES[1]!), mask: { left: 0, top: 0, right: width, bottom: height, defaultColor: 255, imageData: maskData } },
+        { name: '整体色阶', blendMode: 'color', adjustment: toPsdAdjustment(SAMPLES[1]!), mask: { left: 0, top: 0, right: width, bottom: height, defaultColor: 255, imageData: maskData } },
         { name: '照片滤镜', adjustment: { type: 'photo filter', density: 0.25 } }
       ]
     }, { noBackground: true })
@@ -101,9 +101,13 @@ describe('adjustments in a PSD', () => {
     const levels = document.layers[2]!
     expect(levels.kind === 'adjustment' && levels.settings).toEqual(SAMPLES[1])
     expect(levels.kind === 'adjustment' && levels.mask).toMatchObject({ enabled: true })
+    expect(levels.kind === 'adjustment' && levels.blendMode).toBe('color')
     expect(document.layers[1]!.opacity).toBeCloseTo(0.5, 2)
+    // Not plain enough to be the photo's own, it stays clipped to the photo as an adjustment layer.
+    expect(document.layers[1]).toMatchObject({ kind: 'adjustment', clipped: true })
+    expect(document.layers[2]).toMatchObject({ kind: 'adjustment', clipped: false })
     expect(document.approximations.join('；')).toContain('1 个调整图层或填充图层没有带过来')
-    expect(document.approximations.join('；')).toContain('1 个剪贴蒙版按普通图层导入')
+    expect(document.approximations.join('；')).not.toContain('剪贴蒙版')
   })
 
   it('brings clipped adjustments past what a layer holds as adjustment layers, so the PSD still opens', async () => {
@@ -139,6 +143,8 @@ describe('adjustments in a PSD', () => {
     const [photo, , , second] = document.layers
     expect(photo!.kind === 'pixels' && photo!.adjustments).toEqual([{ settings: SAMPLES[2], enabled: true }])
     expect(second!.kind === 'pixels' && second!.adjustments).toEqual([])
+    // All of them stay clipped, so each changes its own clipping mask alone.
+    expect(document.layers.map((layer) => layer.clipped)).toEqual([false, true, true, false, true, true])
   })
 
   it('clips to the nearest unclipped layer below, even one it cannot bring', async () => {
@@ -155,5 +161,8 @@ describe('adjustments in a PSD', () => {
     const photo = document.layers[0]!
     expect(photo.kind === 'pixels' && photo.adjustments).toEqual([])
     expect(document.layers.map((layer) => layer.name)).toEqual(['照片', '剪贴在滤镜上'])
+    // Its base did not come over, so it comes as a plain layer, and says so.
+    expect(document.layers[1]).toMatchObject({ clipped: false })
+    expect(document.approximations.join('；')).toContain('1 个剪贴蒙版的底层没有带过来')
   })
 })

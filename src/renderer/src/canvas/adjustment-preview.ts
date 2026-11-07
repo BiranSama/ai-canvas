@@ -17,6 +17,8 @@ export type AdjustmentPreview =
       readonly shown: boolean
       /** The selection a new adjustment is limited to, in the layer's pixels, until its asset is known. */
       readonly clip: { readonly id: string; readonly pixels: Uint8Array } | null
+      /** A slider is being dragged: a filter that moves pixels is drawn at half the detail until it is let go. */
+      readonly draft?: boolean
     }
   /** An adjustment layer's settings. */
   | { readonly kind: 'adjustment-layer'; readonly elementId: string; readonly settings: AdjustmentSettings }

@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AdjustmentSettings } from '../../../domain'
-import { ADJUSTMENT_LABELS } from '../../../shared/adjustments'
+import type { LayerSettings } from '../../../domain'
+import { isFilterSettings, layerSettingsLabel } from '../../../shared/adjustments'
 import { commitLayerAdjustment, layerHistogram, useAdjustmentDialog, type AdjustmentDialogState } from '../adjustments/adjustment-actions'
 import { useAdjustmentPreview } from '../canvas/adjustment-preview'
 import { useModalScope } from '../interaction/use-modal-scope'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { AdjustmentControls } from './AdjustmentControls'
+import { FilterControls } from './FilterControls'
 
 /*
- * Photoshop's adjustment dialog for an image layer (Ctrl+L, Ctrl+M, …): the
+ * Photoshop's adjustment and filter dialogs for an image layer (Ctrl+L, Ctrl+M, 高斯模糊…): the
  * canvas shows the result as the controls move, 预览 compares with how the
  * layer was, 确定 records one step and 取消 leaves the layer as it was. The
  * dialog sits beside the canvas so the picture stays in view.
@@ -17,13 +18,15 @@ import { AdjustmentControls } from './AdjustmentControls'
 function DialogBody({ open }: { readonly open: AdjustmentDialogState }): React.JSX.Element {
   const close = useAdjustmentDialog((state) => state.close)
   const element = useWorkspaceStore((state) => state.scene.elements.find((candidate) => candidate.id === open.elementId))
-  const [settings, setSettings] = useState<AdjustmentSettings>(open.adjustment.settings)
+  const [settings, setSettings] = useState<LayerSettings>(open.adjustment.settings)
   const [preview, setPreview] = useState(true)
+  // While a slider is dragged; let go, the canvas draws the filter at full detail again.
+  const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const ref = useRef<HTMLFormElement>(null)
   const confirm = useRef<HTMLButtonElement>(null)
   // What the adjustment works on, measured once as the dialog opens.
-  const histogram = useMemo(() => element?.type === 'image' ? layerHistogram(element, open.adjustment.id) : null,
+  const histogram = useMemo(() => element?.type === 'image' && !isFilterSettings(open.adjustment.settings) ? layerHistogram(element, open.adjustment.id) : null,
     // eslint-disable-next-line react-hooks/exhaustive-deps -- measured on opening; the layer does not change while the dialog is open
     [])
 
@@ -35,9 +38,10 @@ function DialogBody({ open }: { readonly open: AdjustmentDialogState }): React.J
       elementId: open.elementId,
       adjustment: { ...open.adjustment, settings, ...(open.clip === null ? {} : { clip: open.clip.id }) },
       shown: true,
-      clip: open.clip === null ? null : { id: open.clip.id, pixels: open.clip.pixels }
+      clip: open.clip === null ? null : { id: open.clip.id, pixels: open.clip.pixels },
+      draft: dragging
     })
-  }, [open, settings, preview])
+  }, [open, settings, preview, dragging])
   useEffect(() => () => useAdjustmentPreview.getState().clear(open.elementId), [open.elementId])
 
   const cancel = (): void => {
@@ -53,7 +57,7 @@ function DialogBody({ open }: { readonly open: AdjustmentDialogState }): React.J
         className="edit-dialog adjustment-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={ADJUSTMENT_LABELS[settings.kind]}
+        aria-label={layerSettingsLabel(settings)}
         onSubmit={(event) => {
           event.preventDefault()
           if (busy) return
@@ -64,9 +68,11 @@ function DialogBody({ open }: { readonly open: AdjustmentDialogState }): React.J
           })
         }}
       >
-        <h2>{ADJUSTMENT_LABELS[settings.kind]}</h2>
-        {element !== undefined && <p className="field-note">{open.clip === null ? `调整「${element.name}」` : `调整「${element.name}」的选区部分`}</p>}
-        <AdjustmentControls settings={settings} histogram={histogram} onChange={(next) => setSettings(next)} />
+        <h2>{layerSettingsLabel(settings)}</h2>
+        {element !== undefined && <p className="field-note">{`${isFilterSettings(settings) ? '作用于' : '调整'}「${element.name}」${open.clip === null ? '' : '的选区部分'}`}</p>}
+        {isFilterSettings(settings)
+          ? <FilterControls settings={settings} onChange={(next, final) => { setSettings(next); setDragging(final === false) }} />
+          : <AdjustmentControls settings={settings} histogram={histogram} onChange={(next) => setSettings(next)} />}
         <footer>
           <label className="checkbox-field adjustment-preview-toggle"><input type="checkbox" checked={preview} onChange={(event) => setPreview(event.currentTarget.checked)} /><span>预览</span></label>
           <button type="button" onClick={cancel}>取消</button>

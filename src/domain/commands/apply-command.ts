@@ -221,10 +221,10 @@ export function applySceneCommand(scene: Draft<Scene>, command: SceneCommand): v
         throw new CommandDomainError('INVALID_COMMAND', 'Only an image, text or shape layer can be rasterized.')
       }
       if (current.locked) throw new CommandDomainError('ELEMENT_LOCKED', `Element ${current.id} is locked.`)
-      // The layer keeps its identity, name, grouping, stacking, opacity and blend; its look is now in the asset.
-      const { id, version, name, description, zIndex, opacity, blendMode, visible, groupId, semanticRole, referencePolicy, controlIntent, provenance } = current
+      // The layer keeps its identity, name, grouping, stacking, opacity, blend and clipping; its look is now in the asset.
+      const { id, version, name, description, zIndex, opacity, blendMode, clipped, visible, groupId, semanticRole, referencePolicy, controlIntent, provenance } = current
       scene.elements[index] = imageElementSchema.parse({
-        id, version, name, description, zIndex, opacity, blendMode, visible, locked: false, groupId, semanticRole, referencePolicy, controlIntent, provenance,
+        id, version, name, description, zIndex, opacity, blendMode, clipped, visible, locked: false, groupId, semanticRole, referencePolicy, controlIntent, provenance,
         type: 'image',
         assetId: command.assetId,
         transform: command.transform,

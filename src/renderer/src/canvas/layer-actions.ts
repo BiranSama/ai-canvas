@@ -1,4 +1,4 @@
-import type { NormalizedTransform, PaintOp, SceneCommand, SceneElement } from '../../../domain'
+import { canBeClipBase, canBeClipped, clipBases, clipStacks, type NormalizedTransform, type PaintOp, type SceneCommand, type SceneElement } from '../../../domain'
 import { imageLayerSpace } from '../../../shared/layer-space'
 import type { GrayMask } from '../../../shared/mask-raster'
 import { showAppNotice } from '../components/app-notice'
@@ -103,10 +103,14 @@ function refuse(message: string): false {
 async function mergeInto(target: PixelLayer, layers: readonly MergeLayer[], summary: string, options: LayerRenderOptions, keepLook: boolean): Promise<boolean> {
   const drawn = await drawnAsset(layers.map((layer) => layer.id), summary, options)
   if (drawn === null) return false
+  // Drawn with its base, a clipped layer's clipping is in the result; drawn without it (the lowest was clipped), the result clips as it did.
+  const lowest = layers.reduce((low, layer) => layer.zIndex < low.zIndex ? layer : low, layers[0]!)
+  const clipped = lowest.clipped === true
   const commands: SceneCommand[] = [
     { kind: 'element.rasterize', elementId: target.id, assetId: drawn.assetId, transform: drawn.transform },
     // Each layer was drawn with its own opacity and blend, so the result shows them at full strength.
     ...(keepLook ? [] : [{ kind: 'element.update' as const, elementId: target.id, changes: { opacity: 1, blendMode: 'normal' } }]),
+    ...((target.clipped === true) === clipped ? [] : [{ kind: 'element.update' as const, elementId: target.id, changes: { clipped } }]),
     ...layers.filter((layer) => layer.id !== target.id).map((layer) => ({ kind: 'element.remove' as const, elementId: layer.id }))
   ]
   const store = useWorkspaceStore.getState()
@@ -171,6 +175,15 @@ export async function mergeDown(): Promise<boolean> {
 
   const upper = selected[0]!
   if (!isMergeable(upper)) return refuse(`「${upper.name}」是 AI 标注，不能合并。`)
+  // Photoshop's 合并剪贴蒙版: on the base of a clipping mask, Ctrl+E merges the layers clipped to it into it.
+  const stack = clipStacks(scene.elements).get(upper.id)
+  if (stack !== undefined && isPictureLayer(upper)) {
+    const members = stack.memberIds.flatMap((id) => scene.elements.find((element) => element.id === id) ?? []).filter((element) => element.visible && isMergeable(element))
+    const locked = lockedAmong([upper, ...members])
+    if (locked !== undefined) return refuse(`「${locked.name}」已锁定，解锁后才能合并剪贴蒙版。`)
+    if (!upper.visible) return refuse(`「${upper.name}」是隐藏的，显示它后再合并剪贴蒙版。`)
+    if (members.length > 0) return mergeInto(upper, [upper, ...members.filter(isMergeable)], '合并剪贴蒙版', { base: upper.id }, true)
+  }
   const index = scene.elements.findIndex((element) => element.id === upper.id)
   const lower = scene.elements.slice(0, index).reverse().find((element) => element.groupId === upper.groupId)
   if (lower === undefined) return refuse(`「${upper.name}」下面没有可以合并进去的图层。`)
@@ -185,7 +198,14 @@ export async function mergeDown(): Promise<boolean> {
 
 /** Every visible layer a merge draws, adjustment layers included. */
 function visibleMergeLayers(): MergeLayer[] {
-  return useWorkspaceStore.getState().scene.elements.filter((element): element is MergeLayer => isMergeable(element) && element.visible)
+  const { elements } = useWorkspaceStore.getState().scene
+  // A layer clipped to a hidden base is hidden with it.
+  const bases = clipBases(elements)
+  const shown = (element: SceneElement): boolean => {
+    const baseId = bases.get(element.id)
+    return element.visible && (baseId === undefined || elements.find((candidate) => candidate.id === baseId)?.visible === true)
+  }
+  return elements.filter((element): element is MergeLayer => isMergeable(element) && shown(element))
 }
 
 /** Photoshop's Ctrl+Shift+E: every visible layer into the lowest of them; hidden layers and AI notes stay. */
@@ -207,6 +227,42 @@ export async function stampVisible(): Promise<boolean> {
   if (!layers.some(isPictureLayer)) return refuse('没有可见图层可以盖印。')
   const drawn = await drawnAsset(layers.map((layer) => layer.id), '盖印可见图层')
   return drawn !== null && await addImageLayer(drawn.assetId, drawn.transform, '盖印可见图层') !== null
+}
+
+/**
+ * Photoshop's Ctrl+Alt+G, 创建剪贴蒙版 and 释放剪贴蒙版: the selected layers
+ * are clipped to the nearest unclipped layer below them (with several
+ * selected, to the lowest of them), or, when they all are clipped already,
+ * released, together with the layers clipped above them, as Photoshop does.
+ */
+export async function toggleClippingMask(ids?: readonly string[]): Promise<boolean> {
+  const { scene, selectedIds } = useWorkspaceStore.getState()
+  const chosen = new Set(ids ?? selectedIds)
+  const targets = scene.elements.filter((element) => chosen.has(element.id) && canBeClipped(element)).sort((left, right) => left.zIndex - right.zIndex)
+  if (targets.length === 0) return refuse('选一个图片、文字、形状或调整图层，再创建剪贴蒙版。')
+  const locked = targets.find((element) => element.locked)
+  if (locked !== undefined) return refuse(`「${locked.name}」已锁定，解锁后才能创建或释放剪贴蒙版。`)
+
+  if (targets.every((element) => element.clipped === true)) {
+    const stacks = [...clipStacks(scene.elements).values()]
+    const released = new Set(targets.map((element) => element.id))
+    for (const target of targets) {
+      const stack = stacks.find((candidate) => candidate.memberIds.includes(target.id))
+      for (const id of stack?.memberIds.slice(stack.memberIds.indexOf(target.id)) ?? []) released.add(id)
+    }
+    return useWorkspaceStore.getState().execute('释放剪贴蒙版', [...released].map((id) => ({ kind: 'element.update' as const, elementId: id, changes: { clipped: false } })))
+  }
+
+  // With several selected, the lowest is what the rest clip to, if it can be.
+  const lowest = targets[0]!
+  const clipping = targets.length > 1 && canBeClipBase(lowest) && lowest.clipped !== true ? targets.slice(1) : targets
+  const after = scene.elements.map((element) => clipping.some((target) => target.id === element.id) ? { ...element, clipped: true } as SceneElement : element)
+  const bases = clipBases(after)
+  const orphan = clipping.find((element) => !bases.has(element.id))
+  if (orphan !== undefined) return refuse(`「${orphan.name}」下面没有可以剪贴到的图层：要紧挨在同一组里的图片、文字或成品形状上面。`)
+  const commands = clipping.filter((element) => element.clipped !== true).map((element) => ({ kind: 'element.update' as const, elementId: element.id, changes: { clipped: true } }))
+  if (commands.length === 0) return false
+  return useWorkspaceStore.getState().execute('创建剪贴蒙版', commands)
 }
 
 /** Photoshop's 栅格化图层: a text or shape layer becomes pixels as it looks, keeping its opacity and blend. */

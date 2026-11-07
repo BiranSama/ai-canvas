@@ -39,7 +39,7 @@ export function samplePsd(): Uint8Array {
         opacity: 0.8,
         mask: { left: 100, top: 50, right: 140, bottom: 70, defaultColor: 0, imageData: { width: 40, height: 20, data: maskData } }
       }),
-      solid('减淡', 150, 0, 50, 50, [255, 255, 255, 128], { blendMode: 'color dodge' })
+      solid('减淡', 150, 0, 50, 50, [255, 255, 255, 128], { blendMode: 'linear dodge' })
     ]
   }
   return writePsdUint8Array(psd)

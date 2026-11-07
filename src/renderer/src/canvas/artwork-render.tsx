@@ -1,15 +1,15 @@
 import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
-import { hiddenByGroups, type Scene, type SceneElement } from '../../../domain'
+import { clipStacks, hiddenByGroups, type ClipStack, type Scene, type SceneElement } from '../../../domain'
 import { blendModeToCanvasOperation, resolveBlendMode } from '../../../shared/blend-mode'
 import { applyMaskAlpha, applyPaintOps, maskCoverage, paintClipIds } from '../../../shared/paint-ops'
 import { getRuntimeAssetUrl, isRuntimeAssetMissing, subscribeRuntimeAssets } from '../assets/runtime-assets'
 import { clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
-import { ArtworkStage, type LayerDraw } from './artwork-stage'
+import { ArtworkStage, type ArtworkItem, type LayerDraw } from './artwork-stage'
 import { isFinalContent } from './layer-drawing'
-import type { AdjustmentClips } from './image-effects'
+import type { AdjustmentClips, LaterMask } from './image-effects'
 import type { AdjustmentCoverage } from './adjustment-layer'
-import { adjustmentClipIds, sampleCoverage } from '../../../shared/adjustments'
+import { adjustmentClipIds, hasSpatialFilters, sampleCoverage } from '../../../shared/adjustments'
 
 /*
  * Draws a scene away from the screen, at any pixel size, with the canvas's
@@ -39,6 +39,8 @@ export interface LayerRequest {
   readonly textEffects: boolean
   /** False draws an image without its own adjustments, which a PSD adds back as clipped adjustment layers. */
   readonly adjustments?: boolean
+  /** False draws the layer without its layer styles, which a PSD keeps as Photoshop's layer effects. */
+  readonly styles?: boolean
 }
 
 export interface ArtworkRequest {
@@ -161,6 +163,7 @@ export class ArtworkSession {
   readonly #images = new Map<string, HTMLImageElement>()
   readonly #sources = new Map<string, HTMLImageElement | HTMLCanvasElement>()
   readonly #maskAlpha = new Map<string, HTMLCanvasElement>()
+  readonly #laterMasks = new Map<string, LaterMask>()
   #container: HTMLDivElement | null = null
   #root: Root | null = null
 
@@ -244,12 +247,13 @@ export class ArtworkSession {
   }
 
   /** The image layer's pixels with its paint replayed and, when it applies, its mask: its own copy, not the canvas's. */
-  #imageSource(element: ImageElement, use: MaskUse): HTMLImageElement | HTMLCanvasElement {
+  #imageSource(element: ImageElement, use: MaskUse, maskLater: boolean): HTMLImageElement | HTMLCanvasElement {
     const image = this.#images.get(element.assetId)
     if (image === undefined) throw new ArtworkRenderError(`图层「${element.name}」的图片还没读出来。`)
     if (use === 'only') return this.#imageMaskSource(element, image)
     const ops = element.paint ?? []
-    const masked = maskApplies(element, use)
+    // A mask that goes on after the layer's filters is not drawn into its source.
+    const masked = maskApplies(element, use) && !maskLater
     if (ops.length === 0 && !masked) return image
     const key = `${element.id}|${masked ? 'masked' : 'plain'}`
     const known = this.#sources.get(key)
@@ -270,6 +274,21 @@ export class ArtworkSession {
     context.putImageData(pixels, 0, 0)
     this.#sources.set(key, canvas)
     return canvas
+  }
+
+  /** The mask an image layer takes after its filters, as on a smart object, in its own pixels; null when it goes into the source. */
+  #laterMask(element: ImageElement, use: MaskUse): LaterMask | null {
+    if (use !== 'scene' || element.mask === null || element.mask === undefined || !element.mask.enabled || !hasSpatialFilters(element.adjustments)) return null
+    const key = `${element.id}|later`
+    const known = this.#laterMasks.get(key)
+    if (known !== undefined) return known
+    const { width, height } = this.#imageSize(element)
+    const mask = element.mask
+    const gray = grayAssetPixels(mask.assetId, { width, height })
+    if (gray === null) throw new ArtworkRenderError(`图层「${element.name}」的蒙版还没读出来。`)
+    const later = { width, height, coverage: maskCoverage(gray.data, width, height, mask.paint, readClips(element, mask.paint, { width, height })) }
+    this.#laterMasks.set(key, later)
+    return later
   }
 
   /** An image layer's mask alone, at the image's size: white, as opaque as the mask shows the layer. */
@@ -350,6 +369,23 @@ export class ArtworkSession {
       ? { x: 0, y: 0, width, height }
       : { x: Math.round(request.area.x), y: Math.round(request.area.y), width: Math.max(1, Math.round(request.area.width)), height: Math.max(1, Math.round(request.area.height)) }
     const draws = elements.map((element) => this.#layerDraw(element, layer, width, height, some?.base))
+    // Clipping stacks are drawn together; a layer drawn alone is drawn as it is, its clipping left to the PSD.
+    const stacks = layer !== undefined ? new Map<string, ClipStack>() : clipStacks(this.scene.elements)
+    const bases = new Map([...stacks.values()].flatMap((stack) => stack.memberIds.map((id) => [id, stack.baseId] as const)))
+    const byId = new Map(draws.map((draw) => [draw.element.id, draw]))
+    const items: ArtworkItem[] = []
+    for (const draw of draws) {
+      const baseId = bases.get(draw.element.id)
+      if (baseId !== undefined) {
+        // Drawn in its stack; with its base hidden it is hidden too; in a merge without its base it is drawn as it is.
+        if (byId.has(baseId) || chosen === null) continue
+        items.push({ kind: 'layer', draw })
+        continue
+      }
+      const stack = stacks.get(draw.element.id)
+      const members = stack === undefined ? [] : stack.memberIds.flatMap((id) => byId.get(id) ?? [])
+      items.push(members.length === 0 ? { kind: 'layer', draw } : { kind: 'stack', base: draw, members })
+    }
 
     if (this.#container === null) {
       const container = document.createElement('div')
@@ -368,7 +404,7 @@ export class ArtworkSession {
           height={height}
           background={background}
           outputScale={outputScale}
-          draws={draws}
+          items={items}
           clip={request.area === undefined}
           onDrawn={(layerNode) => {
             try {
@@ -399,13 +435,15 @@ export class ArtworkSession {
       // Over the whole picture; its opacity is how much of the adjustment shows, not a layer's transparency.
       return {
         element, maskOnly, x: 0, y: 0, width, height, opacity: 1, operation: 'source-over', textEffects: true,
-        image: null, adjustmentClips: null, maskAlpha: null, adjustmentMask: this.#adjustmentMask(element, use)
+        image: null, adjustmentClips: null, laterMask: null, maskAlpha: null, adjustmentMask: this.#adjustmentMask(element, use)
       }
     }
     const plain = element.type === 'image' && (maskOnly || layer?.adjustments === false)
+    const laterMask = element.type === 'image' && !plain ? this.#laterMask(element, use) : null
+    const unstyled = layer?.styles === false && (element.type === 'image' || element.type === 'text' || element.type === 'shape') ? { ...element, style: undefined } as SceneElement : element
     return {
       // The mask alone ignores the image's effects: they follow its outline, not the mask.
-      element: element.type === 'image' && plain ? { ...element, ...(maskOnly ? { effects: undefined } : {}), adjustments: undefined } : element,
+      element: unstyled.type === 'image' && plain ? { ...unstyled, ...(maskOnly ? { effects: undefined } : {}), adjustments: undefined } : unstyled,
       maskOnly,
       x: element.transform.x * width,
       y: element.transform.y * height,
@@ -414,8 +452,9 @@ export class ArtworkSession {
       opacity: isolated ? 1 : element.opacity,
       operation: isolated ? 'source-over' : blendModeToCanvasOperation(resolveBlendMode(element)),
       textEffects: layer?.textEffects ?? true,
-      image: element.type === 'image' ? this.#imageSource(element, use) : null,
+      image: element.type === 'image' ? this.#imageSource(element, use, laterMask !== null) : null,
       adjustmentClips: element.type === 'image' && !plain ? this.#adjustmentClips(element) : null,
+      laterMask,
       maskAlpha: (element.type === 'text' || element.type === 'shape') && maskApplies(element, use) ? this.#boxMaskAlpha(element) : null,
       adjustmentMask: null
     }

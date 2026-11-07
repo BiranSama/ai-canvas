@@ -70,8 +70,8 @@ class Harness {
 describe('small agent tools', () => {
   it('keeps the whole catalogue small, uniquely named and valid for every protocol', () => {
     const definitions = llmToolDefinitions(AGENT_TOOLS as never)
-    expect(definitions).toHaveLength(27)
-    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(27)
+    expect(definitions).toHaveLength(28)
+    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(28)
     for (const definition of definitions) expect(definition.name).toMatch(/^[a-z_]{1,64}$/)
     expect(JSON.stringify(definitions).length).toBeLessThan(20_000)
   })
@@ -472,6 +472,52 @@ describe('fill and merge_layers', () => {
     // The group marker sits at its lowest child; the layer goes over both titles and under the later text.
     expect(order.indexOf('adjustment')).toBe(Math.max(order.indexOf('晨雾'), order.indexOf('山行')) + 1)
     expect(order.indexOf('adjustment')).toBeLessThan(order.indexOf('落款'))
+  })
+
+  it('adds, changes, switches off and removes layer styles, and says what each layer carries', async () => {
+    const harness = new Harness()
+    withImage(harness)
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    const shadow = await harness.call('style', { targets: ['E1', 'E2'], kind: 'drop_shadow', values: { distance: 12, size: 8, color: '#102030' } })
+    expect(shadow.result).toMatchObject({ ok: true, summary: '已给 E1 的投影（距离 12、大小 8）；已给 E2 的投影（距离 12、大小 8）' })
+    const text = (): Extract<Scene['elements'][number], { type: 'text' }> => harness.scene.elements.find((element) => element.type === 'text') as Extract<Scene['elements'][number], { type: 'text' }>
+    expect(text().style?.dropShadow).toMatchObject({ enabled: true, distance: 12, size: 8, color: '#102030', angle: 120, blendMode: 'multiply' })
+    // The same kind again changes only what is given.
+    await harness.call('style', { targets: ['E2'], kind: 'drop_shadow', values: { angle: 90, blend: 'normal' } })
+    expect(text().style?.dropShadow).toMatchObject({ distance: 12, angle: 90, blendMode: 'normal' })
+    await harness.call('style', { targets: ['E2'], kind: 'stroke', values: { color: '#ffffff', size: 4 } })
+    await harness.call('style', { targets: ['E2'], kind: 'gradient_overlay', values: { colors: ['#FF0000', '#00FF00', '#0000FF'], style: 'radial' } })
+    expect(text().style?.gradientOverlay?.stops).toEqual([{ offset: 0, color: '#FF0000' }, { offset: 0.5, color: '#00FF00' }, { offset: 1, color: '#0000FF' }])
+    expect((await harness.call('inspect', { targets: ['E2'] })).result.details?.join('\n')).toContain('图层样式：描边 4 像素（外部）、渐变叠加、投影（距离 12、大小 8）')
+    expect((await harness.call('style', { targets: ['E2'], kind: 'stroke', off: true })).result.summary).toBe('已关掉 E2 的描边（设置保留）')
+    expect(text().style?.stroke?.enabled).toBe(false)
+    expect((await harness.call('style', { targets: ['E2'], kind: 'stroke', remove: true })).result.ok).toBe(true)
+    expect(text().style?.stroke).toBeUndefined()
+    // Mistakes come back to the model.
+    expect((await harness.call('style', { targets: ['E2'], kind: 'stroke', values: { choke: 3 } })).result).toMatchObject({ ok: false })
+    expect((await harness.call('style', { targets: ['E2'], kind: 'outer_glow', values: { size: 999 } })).result).toMatchObject({ ok: false })
+    await harness.call('adjust', { kind: 'invert' })
+    expect((await harness.call('style', { targets: ['E3'], kind: 'stroke' })).result).toMatchObject({ ok: false, summary: 'E3 是调整图层，不能加图层样式。' })
+  })
+
+  it('sets any of the sixteen blend modes and clips a layer to the one below it, releasing those above it with it', async () => {
+    const harness = new Harness()
+    withImage(harness)
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    await harness.call('add_shape', { shape: 'rectangle', box: [10, 10, 20, 20], color: '#FF0000' })
+    expect((await harness.call('update', { targets: ['E2'], set: { blend: 'color-dodge' } })).result.ok).toBe(true)
+    expect(harness.scene.elements.find((element) => element.type === 'text')?.blendMode).toBe('color-dodge')
+    expect((await harness.call('update', { targets: ['E2', 'E3'], set: { clip: true } })).result.ok).toBe(true)
+    const facts = (await harness.call('inspect', { targets: ['E1', 'E2', 'E3'] })).result.details?.join('\n') ?? ''
+    expect(facts).toContain('剪贴蒙版的底层：E2、E3 剪贴在它上面')
+    expect(facts).toContain('剪贴到 E1，只在它有内容的地方显示')
+    // Releasing the lower one releases the one clipped above it too.
+    const release = await harness.call('update', { targets: ['E2'], set: { clip: false } })
+    expect(release.result.summary).toContain('剪贴在它上面的 E3 一并释放')
+    expect(harness.scene.elements.filter((element) => element.clipped === true)).toHaveLength(0)
+    // Nothing below to clip to: said so.
+    harness.scene = { ...harness.scene, elements: harness.scene.elements.map((element) => element.type === 'image' ? { ...element, zIndex: 2 } : element.type === 'shape' ? { ...element, zIndex: 0 } : element).sort((left, right) => left.zIndex - right.zIndex) }
+    expect((await harness.call('update', { targets: ['E3'], set: { clip: true } })).result).toMatchObject({ ok: false })
   })
 
   it('fills a new canvas-sized layer when no target is given', async () => {

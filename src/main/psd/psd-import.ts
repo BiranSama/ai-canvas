@@ -1,8 +1,10 @@
 import { getCompositeImageData, getLayerImageData, getLayerMaskImageData, initializeCanvas, readPsd, type Layer, type PixelData } from 'ag-psd'
 import sharp from 'sharp'
 import type { PsdAdjustmentImport, PsdDocumentImport, PsdGroupImport, PsdLayerImport } from '../../shared/psd-import'
-import { MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings, type BlendMode } from '../../domain'
+import { LAYER_STYLE_KINDS, MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings } from '../../domain'
 import { fromPsdAdjustment } from './psd-adjustments'
+import { fromPsdBlendMode } from './psd-blend'
+import { fromPsdEffects } from './psd-styles'
 import { ADJUSTMENT_LABELS } from '../../shared/adjustments'
 
 /*
@@ -37,15 +39,6 @@ initializeCanvas(
   ((width: number, height: number) => ({ width, height, data: new Uint8ClampedArray(width * height * 4), colorSpace: 'srgb' })) as unknown as CreateImageData
 )
 const SUPPORTED_COLOR_MODES = new Set([1, 3, 4]) // grayscale, RGB, CMYK
-
-const BLEND_MODES: Readonly<Partial<Record<NonNullable<Layer['blendMode']>, BlendMode>>> = {
-  normal: 'normal',
-  'pass through': 'normal',
-  multiply: 'multiply',
-  screen: 'screen',
-  overlay: 'overlay',
-  'soft light': 'soft-light'
-}
 
 export class PsdImportError extends Error {}
 
@@ -139,10 +132,22 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
   if (psd.width <= 0 || psd.height <= 0 || psd.width > limits.maxEdge || psd.height > limits.maxEdge) throw new PsdImportError(`画布 ${psd.width}×${psd.height} 超出支持的范围（每边最多 ${limits.maxEdge} 像素）。`)
   if (psd.colorMode !== undefined && !SUPPORTED_COLOR_MODES.has(psd.colorMode)) throw new PsdImportError('只支持 RGB、灰度和 CMYK 模式的 PSD，请先在 Photoshop 里转成 RGB。')
 
-  const notes = { styles: 0, adjustments: 0, clipped: 0, nested: 0, blends: 0, deepColor: (psd.bitsPerChannel ?? 8) > 8, text: 0, simplified: new Set<string>(), approximate: new Set<string>() }
+  const notes = { styles: new Set<string>(), styleApprox: new Set<string>(), adjustments: 0, clipped: 0, nested: 0, blends: 0, deepColor: (psd.bitsPerChannel ?? 8) > 8, text: 0, simplified: new Set<string>(), approximate: new Set<string>() }
   const layers: (PsdLayerImport | PsdAdjustmentImport)[] = []
-  // The pixel layer clipped layers above it belong to, with the adjustments it takes on.
-  let clipBase: { readonly adjustments: { settings: AdjustmentSettings; enabled: boolean }[] } | null = null
+  /*
+   * The clipping mask being read: whether its base came in as a picture, so
+   * the layers clipped to it can stay clipped, and, while nothing else has
+   * come in above the base, the base's own adjustments, which take the
+   * adjustment layers clipped right above it.
+   */
+  let chain: { readonly base: boolean; collapse: { settings: AdjustmentSettings; enabled: boolean }[] | null } | null = null
+  /** A clipped layer stays clipped when its base came in; otherwise it comes as a plain layer. */
+  const clippedHere = (layer: Layer): boolean => {
+    if (layer.clipping !== true) return false
+    if (chain?.base === true) return true
+    notes.clipped += 1
+    return false
+  }
   const groups: PsdGroupImport[] = []
   let layerCount = 0
   let decodedBytes = 0
@@ -165,14 +170,13 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       } else {
         notes.nested += 1
       }
-      clipBase = null
+      chain = null
       for (const child of layer.children) await visit(child, { index, visible, opacity })
-      clipBase = null
+      chain = null
       return
     }
-    // A layer that is not clipped is the base of whatever is clipped above it, whatever it is.
-    const base = clipBase
-    if (layer.clipping !== true) clipBase = null
+    // A layer that is not clipped is the base of whatever is clipped above it; only a picture can be one here.
+    if (layer.clipping !== true) chain = { base: false, collapse: null }
     if (layer.adjustment !== undefined) {
       const imported = fromPsdAdjustment(layer.adjustment)
       if (imported === null) { notes.adjustments += 1; return }
@@ -182,20 +186,25 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       const blend = layer.blendMode ?? 'normal'
       // Clipped to a pixel layer, plain: that layer's own adjustment does the same.
       // A layer holds only so many adjustments of its own; past that they come as adjustment layers.
-      if (layer.clipping === true && base !== null && base.adjustments.length < MAX_LAYER_ADJUSTMENTS && (blend === 'normal' || blend === 'pass through') && (layer.opacity ?? 1) >= 1 && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))) {
-        base.adjustments.push({ settings: imported.settings, enabled: layer.hidden !== true })
+      const collapse = chain?.collapse ?? null
+      if (layer.clipping === true && collapse !== null && collapse.length < MAX_LAYER_ADJUSTMENTS && (blend === 'normal' || blend === 'pass through') && (layer.opacity ?? 1) >= 1 && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))) {
+        collapse.push({ settings: imported.settings, enabled: layer.hidden !== true })
         return
       }
-      // Kept as a layer of its own, it ends the chain: what is clipped above it cannot move under it into the base.
-      if (layer.clipping === true) { notes.clipped += 1; clipBase = null }
-      if (blend !== 'normal' && blend !== 'pass through') notes.blends += 1
+      // Kept as a layer of its own, clipped adjustments above it cannot move under it into the base.
+      const clipped = clippedHere(layer)
+      if (chain !== null) chain.collapse = null
+      const blendMode = fromPsdBlendMode(blend)
+      if (blendMode === undefined) notes.blends += 1
       layers.push({
         kind: 'adjustment',
         name: layer.name?.trim() || ADJUSTMENT_LABELS[imported.settings.kind],
+        blendMode: blendMode ?? 'normal',
         opacity: Math.max(0, Math.min(1, opacity)),
         visible,
         groupIndex: group?.index ?? null,
         settings: imported.settings,
+        clipped,
         mask: mask === null ? null : { png: await grayPng(mask.gray, mask.width, mask.height), enabled: mask.enabled }
       })
       return
@@ -211,10 +220,11 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     const pixels = getLayerImageData(layer)
     if (pixels === undefined) { notes.adjustments += 1; return }
     const rgba = new Uint8Array(toBytes(pixels))
-    if (layer.effects !== undefined && layer.effects.disabled !== true && Object.keys(layer.effects).some((key) => key !== 'disabled' && key !== 'scale')) notes.styles += 1
-    if (layer.clipping === true) notes.clipped += 1
+    const effects = fromPsdEffects(layer.effects)
+    for (const name of effects.dropped) notes.styles.add(name)
+    for (const name of effects.approximated) notes.styleApprox.add(name)
     if (layer.text !== undefined) notes.text += 1
-    const blendMode = BLEND_MODES[layer.blendMode ?? 'normal']
+    const blendMode = fromPsdBlendMode(layer.blendMode)
     if (blendMode === undefined) notes.blends += 1
     const mask = layerMask(layer, width, height)
     // A mask that is on hides what it covers, so the bottom layer is opaque only if its mask hides nothing.
@@ -223,11 +233,16 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
         && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))
     }
     const adjustments: { settings: AdjustmentSettings; enabled: boolean }[] = []
-    // A clipped picture comes as a plain layer, which also ends the chain below what is clipped above it.
-    clipBase = layer.clipping === true ? null : { adjustments }
+    const clipped = clippedHere(layer)
+    // A picture not clipped is the base of what is clipped above it; a clipped one comes between its base and what follows.
+    // A styled base keeps its clipped adjustments as layers: its own adjustments go on before its styles, clipped ones after.
+    const styled = effects.style !== undefined && LAYER_STYLE_KINDS.some((kind) => effects.style![kind] !== undefined)
+    if (layer.clipping === true) { if (chain !== null) chain.collapse = null } else chain = { base: true, collapse: styled ? null : adjustments }
     layers.push({
       kind: 'pixels',
       adjustments,
+      clipped,
+      style: effects.style,
       name: layer.name?.trim() || `图层 ${layers.length + 1}`,
       left, top, width, height,
       opacity: Math.max(0, Math.min(1, opacity)),
@@ -241,9 +256,10 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
   for (const layer of psd.children ?? []) await visit(layer, null)
 
   const approximations = [
-    notes.styles > 0 ? `${notes.styles} 个图层的图层样式（投影、描边等）没有带过来` : null,
+    notes.styles.size > 0 ? `图层样式里的${[...notes.styles].join('、')}没有带过来` : null,
+    notes.styleApprox.size > 0 ? `图层样式里的${[...notes.styleApprox].join('、')}有些设置画布没有，按最接近的样子带过来` : null,
     notes.adjustments > 0 ? `${notes.adjustments} 个调整图层或填充图层没有带过来` : null,
-    notes.clipped > 0 ? `${notes.clipped} 个剪贴蒙版按普通图层导入` : null,
+    notes.clipped > 0 ? `${notes.clipped} 个剪贴蒙版的底层没有带过来，这些图层按普通图层导入` : null,
     notes.nested > 0 ? `${notes.nested} 个嵌套的组合并到了外层组` : null,
     notes.blends > 0 ? `${notes.blends} 个图层的混合模式暂不支持，按正常处理` : null,
     ...notes.simplified,

@@ -3,6 +3,7 @@ import type { AgentToolRisk } from '../../../shared/agent-tools'
 import { STATIC_AGENT_TOOL_REGISTRY } from '../agent-tool-registry'
 import type { LlmToolCall, LlmToolDefinition } from '../llm/transcript'
 import { adjustTool } from './adjust'
+import { styleTool } from './style'
 import { addLightTool } from './add-light'
 import { addMaskTool } from './add-mask'
 import { addShapeTool } from './add-shape'
@@ -34,7 +35,7 @@ import { viewResultTool } from './view-result'
 /** Every small tool, in the order the model sees them. */
 export const AGENT_TOOLS: readonly AgentToolSpec<never>[] = [
   lookTool, inspectTool, viewResultTool,
-  setCanvasTool, addTextTool, addShapeTool, updateTool, arrangeTool, reorderTool, groupTool, mergeLayersTool, fillTool, adjustTool, maskLayerTool, removeTool,
+  setCanvasTool, addTextTool, addShapeTool, updateTool, arrangeTool, reorderTool, groupTool, mergeLayersTool, fillTool, adjustTool, styleTool, maskLayerTool, removeTool,
   addSubjectTool, addLightTool, addMaskTool, undoTool,
   generateTool, editImageTool, placeResultTool, blendTool, cancelGenerationTool,
   askUserTool, rememberTool, loadManualTool

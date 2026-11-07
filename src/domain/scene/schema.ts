@@ -35,7 +35,11 @@ export const canvasSchema = z.object({
 })
 
 const referencePolicySchema = z.enum(['include', 'reference-only', 'exclude'])
-export const blendModeSchema = z.enum(['normal', 'multiply', 'screen', 'overlay', 'soft-light'])
+/** Photoshop's blend modes the canvas draws natively; the order is Photoshop's. */
+export const blendModeSchema = z.enum([
+  'normal', 'darken', 'multiply', 'color-burn', 'lighten', 'screen', 'color-dodge',
+  'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'
+])
 
 const elementBaseShape = {
   id: idSchema,
@@ -46,6 +50,8 @@ const elementBaseShape = {
   zIndex: z.number().int().nonnegative(),
   opacity: finiteNumber.min(0).max(1).default(1),
   blendMode: blendModeSchema.optional(),
+  /** Clipped to the nearest unclipped layer below it in its group, as Photoshop's 剪贴蒙版: shown only where that layer is. */
+  clipped: z.boolean().optional(),
   visible: z.boolean().default(true),
   locked: z.boolean().default(false),
   groupId: idSchema.nullable().default(null),
@@ -224,20 +230,80 @@ export const adjustmentSettingsSchema = z.discriminatedUnion('kind', [
 
 export const ADJUSTMENT_KINDS = ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'invert', 'desaturate'] as const
 
+/** Photoshop's filters a layer can carry, with its ranges; sizes are output pixels. */
+export const filterSettingsSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('gaussian-blur'), radius: finiteNumber.min(0.1).max(250) }),
+  z.object({ kind: z.literal('unsharp-mask'), amount: finiteNumber.min(1).max(500), radius: finiteNumber.min(0.1).max(250), threshold: z.number().int().min(0).max(255) }),
+  z.object({
+    kind: z.literal('add-noise'),
+    /** Percent, as Photoshop's 数量. */
+    amount: finiteNumber.min(0.1).max(400),
+    distribution: z.enum(['uniform', 'gaussian']),
+    monochromatic: z.boolean(),
+    /** Fixes the grain, so it is the same each time the layer is drawn. */
+    seed: z.number().int().min(0).max(2_147_483_647)
+  }),
+  z.object({ kind: z.literal('motion-blur'), angle: finiteNumber.min(-360).max(360), distance: finiteNumber.min(1).max(1000) })
+])
+
+export const FILTER_KINDS = ['gaussian-blur', 'unsharp-mask', 'add-noise', 'motion-blur'] as const
+
+/** What a layer's own list holds: Photoshop's adjustments and filters, applied in order. */
+export const layerSettingsSchema = z.discriminatedUnion('kind', [...adjustmentSettingsSchema.options, ...filterSettingsSchema.options])
+
 /**
- * An adjustment on an image layer itself, as Photoshop's 图像 > 调整 changes
- * the layer, except that the asset is kept and the adjustment can be changed
- * or turned off. With a clip it was made inside a selection, in the layer's
- * own pixels like a paint clip.
+ * An adjustment or filter on an image layer itself, as Photoshop's 图像 >
+ * 调整 and 滤镜 change the layer, except that the asset is kept and each can
+ * be changed or turned off, like smart filters. With a clip it was made
+ * inside a selection, in the layer's own pixels like a paint clip.
  */
 export const layerAdjustmentSchema = z.object({
   id: idSchema,
   enabled: z.boolean().default(true),
   clip: idSchema.optional(),
-  settings: adjustmentSettingsSchema
+  settings: layerSettingsSchema
 })
 
 export const MAX_LAYER_ADJUSTMENTS = 24
+
+const styleHex = z.string().regex(/^#[0-9A-Fa-f]{6}$/)
+const styleOpacity = finiteNumber.min(0).max(1)
+/** Pixels at the output size, as Photoshop's layer style dialog takes them. */
+const stylePixels = finiteNumber.min(0).max(250)
+const styleAngle = finiteNumber.min(-180).max(180)
+const stylePercent = finiteNumber.min(0).max(100)
+
+/**
+ * Photoshop's layer styles a layer can carry, each one at most once, with
+ * its own switch. Angles are degrees counter-clockwise from the right, in
+ * the picture's own directions (Photoshop's global light), so a turned layer
+ * still casts its shadow the same way.
+ */
+export const layerStyleSchema = z.object({
+  dropShadow: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity,
+    angle: styleAngle, distance: finiteNumber.min(0).max(3000), spread: stylePercent, size: stylePixels
+  }).optional(),
+  innerShadow: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity,
+    angle: styleAngle, distance: finiteNumber.min(0).max(3000), choke: stylePercent, size: stylePixels
+  }).optional(),
+  outerGlow: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity, spread: stylePercent, size: stylePixels
+  }).optional(),
+  stroke: z.object({
+    enabled: z.boolean(), size: finiteNumber.min(1).max(250), position: z.enum(['outside', 'inside', 'center']), color: styleHex, opacity: styleOpacity
+  }).optional(),
+  colorOverlay: z.object({ enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity }).optional(),
+  gradientOverlay: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, opacity: styleOpacity,
+    style: z.enum(['linear', 'radial']), angle: styleAngle, scale: finiteNumber.min(10).max(150), reverse: z.boolean(),
+    /** Colour stops along the gradient, 0 at its start and 1 at its end. */
+    stops: z.array(z.object({ offset: finiteNumber.min(0).max(1), color: styleHex })).min(2).max(8)
+  }).optional()
+}).strict()
+
+export const LAYER_STYLE_KINDS = ['dropShadow', 'innerShadow', 'outerGlow', 'stroke', 'colorOverlay', 'gradientOverlay'] as const
 
 export const imageElementSchema = z.object({
   ...elementBaseShape,
@@ -259,7 +325,8 @@ export const imageElementSchema = z.object({
   transparencyLocked: z.boolean().optional(),
   mask: layerMaskSchema.nullable().optional(),
   /** Adjustments of the layer's own colours, applied in order after its paint and colour match. */
-  adjustments: z.array(layerAdjustmentSchema).max(MAX_LAYER_ADJUSTMENTS).optional()
+  adjustments: z.array(layerAdjustmentSchema).max(MAX_LAYER_ADJUSTMENTS).optional(),
+  style: layerStyleSchema.optional()
 })
 
 export const textElementSchema = z.object({
@@ -284,7 +351,8 @@ export const textElementSchema = z.object({
   styleDescription: z.string().max(4000),
   renderStrategy: z.enum(['standard', 'ai-material', 'ai-complete', 'editable-overlay']),
   resultAssetId: idSchema.nullable(),
-  mask: layerMaskSchema.nullable().optional()
+  mask: layerMaskSchema.nullable().optional(),
+  style: layerStyleSchema.optional()
 })
 
 export const sketchStrokeSchema = z.object({
@@ -314,7 +382,8 @@ export const shapeElementSchema = z.object({
   strokeWidth: finiteNumber.min(0).max(1),
   cornerRadius: finiteNumber.min(0).max(0.5).default(0),
   role: z.enum(['final', 'placeholder']),
-  mask: layerMaskSchema.nullable().optional()
+  mask: layerMaskSchema.nullable().optional(),
+  style: layerStyleSchema.optional()
 })
 
 export const placeholderElementSchema = z.object({
@@ -489,10 +558,14 @@ export const sceneSchema = sceneBaseSchema.superRefine((scene, context) => {
       }
     }
 
+    if (element.clipped === true && element.type !== 'image' && element.type !== 'text' && element.type !== 'shape' && element.type !== 'adjustment') {
+      context.addIssue({ code: 'custom', path: ['elements', index, 'clipped'], message: `A ${element.type} element cannot be clipped.` })
+    }
+
     if (
       element.blendMode !== undefined &&
       element.blendMode !== 'normal' &&
-      (element.type === 'placeholder' || element.type === 'mask' || element.type === 'group' || element.type === 'adjustment')
+      (element.type === 'placeholder' || element.type === 'mask' || element.type === 'group')
     ) {
       context.addIssue({
         code: 'custom',
@@ -528,6 +601,11 @@ export type NormalizedTransform = z.infer<typeof normalizedTransformSchema>
 export type Canvas = z.infer<typeof canvasSchema>
 export type AdjustmentSettings = z.infer<typeof adjustmentSettingsSchema>
 export type AdjustmentKind = AdjustmentSettings['kind']
+export type FilterSettings = z.infer<typeof filterSettingsSchema>
+export type FilterKind = FilterSettings['kind']
+export type LayerSettings = z.infer<typeof layerSettingsSchema>
+export type LayerStyle = z.infer<typeof layerStyleSchema>
+export type LayerStyleKind = (typeof LAYER_STYLE_KINDS)[number]
 export type LayerAdjustment = z.infer<typeof layerAdjustmentSchema>
 export type LevelsChannel = z.infer<typeof levelsChannelSchema>
 export type CurvePoints = z.infer<typeof curvePointsSchema>

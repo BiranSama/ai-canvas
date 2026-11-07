@@ -183,6 +183,7 @@ export function ExportSheet({ onClose, onSaveSizeAsProject }: {
                 </label>
                 <ul className="export-notes">
                   <li>图层的顺序、名字、位置、不透明度、显示隐藏、混合模式、组和蒙版都带过去，在 PS 里能接着改。</li>
+                  <li>图层样式、剪贴蒙版和调整图层按 PS 的格式写，在 PS 里能接着改；滤镜并进像素（PS 只在智能对象上放滤镜）。</li>
                   <li>{options.editableText ? '文字在 PS 里能改字；打开时先是画布上的样子，改字后由 PS 重新排版，换行可能略有不同。描边和阴影变成 PS 的图层样式。' : '文字按画布上的样子导出成像素，在 PS 里不能改字。'}</li>
                   <li>形状、图片效果和画过的笔触按画布上的样子导出成像素图层。</li>
                   {!scene.canvas.transparent && <li>画布底色是最底下的「背景色」图层。</li>}

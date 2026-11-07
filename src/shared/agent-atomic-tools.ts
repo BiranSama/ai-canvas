@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { agentResultReferenceSchema } from './agent-result-reference'
 import {
+  blendModeSchema,
   canvasSchema,
   elementControlIntentSchema,
   elementProvenanceSchema,
@@ -45,7 +46,8 @@ export const sceneElementChangesSchema = z.object({
   description: z.string().max(4_000).optional(),
   transform: normalizedTransformSchema.optional(),
   opacity: z.number().finite().min(0).max(1).optional(),
-  blendMode: z.enum(['normal', 'multiply', 'screen', 'overlay', 'soft-light']).optional(),
+  blendMode: blendModeSchema.optional(),
+  clipped: z.boolean().optional(),
   visible: z.boolean().optional(),
   locked: z.boolean().optional(),
   semanticRole: z.string().trim().min(1).max(120).optional(),

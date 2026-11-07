@@ -46,7 +46,7 @@ import { warmMagicTouch } from '../selection/magic-touch'
 import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
-import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers, paintedSourceKey } from './pixel-layers'
+import { layerMaskPixels, maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers, paintedSourceKey } from './pixel-layers'
 import { assetPixelsVersion, clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
 import { useMaskState } from './mask-state'
 import { paintClipIds } from '../../../shared/paint-ops'
@@ -69,11 +69,18 @@ import {
   type SnapGuide
 } from './direct-canvas-geometry'
 import { drawRect, renderImageEffects } from './image-effects'
-import { adjustmentClipIds } from '../../../shared/adjustments'
+import { adjustmentClipIds, hasSpatialFilters } from '../../../shared/adjustments'
+import { clipStacks } from '../../../domain'
 import { adjustmentLayerSettings, useAdjustmentPreview, withLayerPreview } from './adjustment-preview'
 import { AdjustmentBackdrop } from './adjustment-layer'
 import { ElementVisual } from './element-visual'
 import { isFinalContent } from './layer-drawing'
+import { StyledLayer } from './styled-layer'
+import { IsolatedGroup } from './clip-stack'
+import { opaqueWhereCovered } from './opaque-filter'
+import { useIsolationRefresh } from './isolation-refresh'
+import { useStylePreview, withStylePreview } from '../layer-styles/style-actions'
+import { hasLayerStyles } from '../../../shared/layer-styles'
 
 interface Size {
   width: number
@@ -142,6 +149,11 @@ const DRAWN_PIXELS = 16_000_000
  * only now and then, and never more than the output itself. Exports draw at
  * output size on their own.
  */
+/** Whether the layer carries layer styles that are on, and so is drawn through StyledLayer. */
+function styledLayer(element: SceneElement): boolean {
+  return (element.type === 'image' || element.type === 'text' || element.type === 'shape') && hasLayerStyles(element.style)
+}
+
 function drawnDetail(width: number, height: number, zoom: number): number {
   const screen = Math.max(1 / 64, zoom * (window.devicePixelRatio || 1))
   const stepped = Math.pow(2, Math.ceil(Math.log2(screen)))
@@ -149,13 +161,25 @@ function drawnDetail(width: number, height: number, zoom: number): number {
   return Math.min(1, stepped, budget)
 }
 
-function ImageVisual({ element, width, height }: { element: Extract<SceneElement, { type: 'image' }>; width: number; height: number }): React.JSX.Element {
+function ImageVisual({ element, width, height, plain = false }: {
+  element: Extract<SceneElement, { type: 'image' }>
+  width: number
+  height: number
+  /** Without its layer styles, as the base of a clipping stack is drawn to cut what is clipped to it. */
+  plain?: boolean
+}): React.JSX.Element {
+  useIsolationRefresh()
   useSyncExternalStore(subscribeRuntimeAssets, getRuntimeAssetVersion, getRuntimeAssetVersion)
   const assetUrl = getRuntimeAssetUrl(element.assetId)
   const image = useHtmlImage(assetUrl)
   const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
   const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
   const maskView = useMaskState((state) => state.view?.elementId === element.id ? state.view.mode : 'normal')
+  // An adjustment being set up in its dialog is shown before it is recorded, and so are layer styles.
+  const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
+  // A filter that looks at neighbouring pixels works on the unmasked picture, and the mask goes on after it, as on a smart object;
+  // judged by the list as shown, so a filter being set up in its dialog previews as it will be recorded.
+  const maskLater = maskView === 'normal' && element.mask?.enabled === true && hasSpatialFilters(withLayerPreview(element, preview).adjustments)
   // With paint on it or a mask, the layer is drawn from its asset with the operations replayed, through its mask.
   const source = useMemo(() => {
     if (image === null) return null
@@ -166,11 +190,11 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
     const maskClips = mask === null ? new Map<string, Uint8Array>() : clipLookup(paintClipIds(mask.paint), size)
     // A clip or mask still being read keeps the layer pending, so nothing is drawn beyond its selection.
     if (clips === null || (mask !== null && (gray === null || maskClips === null))) return null
-    return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask, gray: gray.data, clips: maskClips, view: maskView })
+    return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask, deferred: maskLater, gray: gray.data, clips: maskClips, view: maskView })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas; pixelsVersion a clip or mask read
-  }, [image, element.id, element.paint, element.mask, maskView, paintVersion, pixelsVersion])
-  // An adjustment being set up in its dialog is shown before it is recorded.
-  const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
+  }, [image, element.id, element.paint, element.mask, maskView, maskLater, paintVersion, pixelsVersion])
+  const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
+  const styledElement = withStylePreview(element, stylePreview)
   // A mask looked at alone or in red shows its coverage, which the layer's own adjustments must not recolour;
   // alone, the effects that follow the picture's outline are left out too, as the export's mask-only drawing does.
   const shownElement = useMemo(() => {
@@ -190,13 +214,18 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   }, [image, shownElement.adjustments, preview, pixelsVersion])
   // Effects and adjustments are worked out in pixels: at the screen's resolution, in steps as the view zooms.
   const zoom = useCanvasViewportStore((state) => state.artboard?.zoom ?? 1)
-  const detail = drawnDetail(width, height, zoom)
+  // While a filter's slider is dragged, a blur's preview is worked out at half the detail, so it keeps up.
+  const draft = preview?.kind === 'layer' && preview.elementId === element.id && preview.draft === true && hasSpatialFilters([preview.adjustment])
+  const detail = drawnDetail(width, height, zoom) * (draft ? 0.5 : 1)
   const shownWidth = Math.round(width * detail)
   const shownHeight = Math.round(height * detail)
   const effected = useMemo(
-    () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(source, shownElement, shownWidth, shownHeight, adjustmentClips, source instanceof HTMLCanvasElement ? `${paintVersion}|${paintedSourceKey(element.id)}` : 0),
+    () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(
+      source, shownElement, shownWidth, shownHeight, adjustmentClips, source instanceof HTMLCanvasElement ? `${paintVersion}|${paintedSourceKey(element.id)}` : 0,
+      detail, maskLater ? layerMaskPixels(element.id) : null
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
-    [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight]
+    [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight, maskLater]
   )
   if (image === null || source === null || adjustmentClips === 'pending') {
     const missing = isRuntimeAssetMissing(element.assetId)
@@ -216,11 +245,17 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
       </Group>
     )
   }
+  const styled = (picture: React.JSX.Element): React.JSX.Element => plain || !styledLayer(styledElement) ? picture : (
+    <StyledLayer element={styledElement} width={width} height={height} unit={1} ratio={detail}
+      rotation={element.transform.rotation} blend={resolveBlendMode(element)} contentKey={effected?.drawn ?? source}>
+      {picture}
+    </StyledLayer>
+  )
   if (effected !== null) {
     // Drawn at the shown size; scaled back to the box while a resize is between whole pixels.
     const scaleX = width / effected.drawn.width
     const scaleY = height / effected.drawn.height
-    return (
+    return styled(
       <Group>
         {effected.shadow !== null && <KonvaImage image={effected.shadow.canvas} x={effected.shadow.x * scaleX} y={effected.shadow.y * scaleY} scaleX={scaleX} scaleY={scaleY} listening={false} />}
         <KonvaImage image={effected.drawn} width={width} height={height} />
@@ -228,7 +263,7 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
     )
   }
   const { crop, draw } = drawRect(source, element, width, height)
-  return (
+  return styled(
     <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
       <KonvaImage
         name={`pixels-${element.id}`}
@@ -255,6 +290,7 @@ const MASK_CACHE_PIXELS = 16_000_000
  * renders with an SVG mask. Alt+click shows the mask alone, \ in red.
  */
 function MaskedBox({ element, width, height, zoom, children }: { element: Extract<SceneElement, { type: 'text' | 'shape' }>; width: number; height: number; zoom: number; children: React.ReactNode }): React.JSX.Element {
+  useIsolationRefresh()
   const groupRef = useRef<Konva.Group>(null)
   const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
   const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
@@ -310,6 +346,7 @@ function MaskedBox({ element, width, height, zoom, children }: { element: Extrac
  * \ shows it in red, as for any layer.
  */
 function AdjustmentNode({ element, artboard, hidden }: { element: Extract<SceneElement, { type: 'adjustment' }>; artboard: { width: number; height: number }; hidden: boolean }): React.JSX.Element {
+  useIsolationRefresh()
   const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
   const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
   const maskView = useMaskState((state) => state.view?.elementId === element.id ? state.view.mode : 'normal')
@@ -349,6 +386,7 @@ function AdjustmentNode({ element, artboard, hidden }: { element: Extract<SceneE
                   height={artboard.height}
                   settings={settings}
                   opacity={element.opacity}
+                  blend={resolveBlendMode(element)}
                   mask={shown !== null && mask?.enabled === true ? shown.pixels : null}
                 />
                 {shown !== null && shown.overlay !== null && <KonvaImage image={shown.overlay} width={artboard.width} height={artboard.height} listening={false} />}
@@ -356,6 +394,75 @@ function AdjustmentNode({ element, artboard, hidden }: { element: Extract<SceneE
             )}
     </Group>
   )
+}
+
+/**
+ * The base of a clipping stack drawn again, unclickable: without its styles,
+ * to cut what is clipped to it to the base's content, or with them, for the
+ * coverage the whole stack is cut back to. It follows the base while the
+ * base is dragged (see the stack's beforeRedraw).
+ */
+function ClipBaseShape({ element, artboard, zoom, styled = false }: { element: SceneElement; artboard: { width: number; height: number }; zoom: number; styled?: boolean }): React.JSX.Element {
+  const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
+  const width = element.transform.width * artboard.width
+  const height = element.transform.height * artboard.height
+  const plain = { ...element, opacity: 1, blendMode: 'normal' } as SceneElement
+  const shown = styled ? withStylePreview(plain, stylePreview) : { ...plain, style: undefined } as SceneElement
+  const visual = (
+    <ElementVisual
+      element={shown}
+      width={width}
+      height={height}
+      outputScale={1}
+      renderImage={(image, imageWidth, imageHeight) => <ImageVisual element={image} width={imageWidth} height={imageHeight} plain={!styled} />}
+    />
+  )
+  const masked = (shown.type === 'text' || shown.type === 'shape') && shown.mask !== null && shown.mask !== undefined
+    ? <MaskedBox element={shown} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
+    : visual
+  // An image styles itself; a text or shape is styled here, as its own node is.
+  const content = styled && (shown.type === 'text' || shown.type === 'shape') && styledLayer(shown) ? (
+    <StyledLayer element={shown} width={width} height={height} unit={1} ratio={drawnDetail(width, height, zoom)} rotation={shown.transform.rotation} blend="normal" contentKey={shown}>
+      {masked}
+    </StyledLayer>
+  ) : masked
+  return (
+    <Group name={`clip-base-${element.id}`} x={element.transform.x * artboard.width} y={element.transform.y * artboard.height} rotation={element.transform.rotation} listening={false}>
+      {content}
+    </Group>
+  )
+}
+
+/**
+ * A clipped layer can be clicked only about its base's box, since it shows
+ * nowhere else: the box, grown by half its size for a stroke or shadow that
+ * reaches past it, as the base's copy inside the clipped layer's group
+ * lies, so it follows the base while it is dragged.
+ */
+function clipToBase(baseId: string, width: number, height: number): (context: Konva.Context, group: Konva.Group) => void {
+  const pad = Math.max(width, height) / 2
+  return (context, group) => {
+    const copy = group.findOne(`.clip-base-${baseId}`)
+    if (copy === undefined) return
+    const transform = copy.getTransform()
+    const corners = [{ x: -pad, y: -pad }, { x: width + pad, y: -pad }, { x: width + pad, y: height + pad }, { x: -pad, y: height + pad }].map((point) => transform.point(point))
+    context.moveTo(corners[0]!.x, corners[0]!.y)
+    for (const corner of corners.slice(1)) context.lineTo(corner.x, corner.y)
+    context.closePath()
+  }
+}
+
+/** Brings the copies of a clipping base along while the base is dragged or transformed. */
+function followBase(baseId: string): (group: Konva.Group) => void {
+  return (group) => {
+    const base = group.findOne(`#element-${baseId}`)
+    if (base === undefined) return
+    for (const copy of group.find(`.clip-base-${baseId}`)) {
+      copy.position(base.position())
+      copy.rotation(base.rotation())
+      copy.scale(base.scale())
+    }
+  }
 }
 
 function renderLiveImage(element: Extract<SceneElement, { type: 'image' }>, width: number, height: number): React.JSX.Element {
@@ -386,6 +493,9 @@ interface ElementNodeProps {
 }
 
 function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag, onFinishDrag, isDragCommitOwner, isDragCancelled, onRequestEdit, isInlineEditing, viewportPanReady, cropOverride, shapeCornerRadiusOverride, shapeTransformOverride, blendModeSupported, soloHidden, groupHidden }: ElementNodeProps): React.JSX.Element | null {
+  // Layer styles being set up in their dialog are shown before they are recorded.
+  const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
+  const styledElement = withStylePreview(element, stylePreview)
   const updateElement = useWorkspaceStore((state) => state.updateElement)
   const execute = useWorkspaceStore((state) => state.execute)
   const scene = useWorkspaceStore((state) => state.scene)
@@ -580,7 +690,8 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
       height={height}
       rotation={displayTransform.rotation}
       opacity={element.opacity}
-      globalCompositeOperation={blendModeToCanvasOperation(resolveBlendMode(element))}
+      // A styled layer blends its content itself, so its shadow and glow keep their own modes.
+      globalCompositeOperation={styledLayer(styledElement) ? 'source-over' : blendModeToCanvasOperation(resolveBlendMode(element))}
       visible={element.visible && !groupHidden && !isInlineEditing && blendModeSupported && !soloHidden}
       draggable={!viewportPanReady && !element.locked && (element.groupId === null || element.groupId === editingGroupId) && activeTool === 'select'}
       onMouseDown={() => { dragOccurredRef.current = false }}
@@ -731,9 +842,17 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
             renderImage={renderLiveImage}
           />
         )
-        return (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
+        const masked = (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
           ? <MaskedBox element={element} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
           : visual
+        // An image styles itself, from the pixels it draws; text and shapes are styled here.
+        if ((styledElement.type !== 'text' && styledElement.type !== 'shape') || !styledLayer(styledElement)) return masked
+        return (
+          <StyledLayer element={styledElement} width={width} height={height} unit={1} ratio={drawnDetail(width, height, zoom)}
+            rotation={displayTransform.rotation} blend={resolveBlendMode(element)} contentKey={element}>
+            {masked}
+          </StyledLayer>
+        )
       })()}
     </Group>
   )
@@ -1603,6 +1722,40 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const sortedElements = [...scene.elements]
     .sort((left, right) => left.zIndex - right.zIndex)
     .filter((element) => element.type !== 'mask' || activeTool === 'mask' || selectedIds.includes(element.id))
+  const clipStackOf = clipStacks(scene.elements)
+  const clippedIds = new Set([...clipStackOf.values()].flatMap((stack) => stack.memberIds))
+  const sortedById = new Map(sortedElements.map((element) => [element.id, element]))
+  /** One layer's node; shown is what it draws, which inside a clipping stack leaves opacity and blend to the stack. */
+  const renderLayer = (element: SceneElement, shown: SceneElement): React.JSX.Element => element.type === 'adjustment' ? (
+    <AdjustmentNode
+      key={element.id}
+      element={shown as Extract<SceneElement, { type: 'adjustment' }>}
+      artboard={baseArtboard}
+      hidden={hiddenInGroups.has(element.id) || (maskAlone !== null && maskAlone !== element.id)}
+    />
+  ) : (
+    <ElementNode
+      key={element.id}
+      element={shown}
+      artboard={baseArtboard}
+      zoom={zoom}
+      onGuides={setGuides}
+      onSelect={(event) => handleElementSelect(element, event)}
+      onBeginDrag={beginElementDrag}
+      onFinishDrag={finishElementDrag}
+      isDragCommitOwner={isDragCommitOwner}
+      isDragCancelled={() => dragCancelledRef.current}
+      onRequestEdit={requestElementEdit}
+      isInlineEditing={inlineTextId === element.id}
+      viewportPanReady={spacePressed || activeTool === 'hand'}
+      cropOverride={cropSession?.elementId === element.id ? cropSession.draft : undefined}
+      shapeCornerRadiusOverride={shapeRadiusDraft?.elementId === element.id ? shapeRadiusDraft.value : undefined}
+      shapeTransformOverride={shapeLineDraft?.elementId === element.id ? shapeLineDraft.transform : undefined}
+      blendModeSupported={blendSupportByElement.get(element.id) !== false}
+      soloHidden={maskAlone !== null && maskAlone !== element.id && maskAlone !== element.groupId}
+      groupHidden={hiddenInGroups.has(element.id)}
+    />
+  )
 
   const beginMask = (): boolean => {
     if (activeTool !== 'mask') return false
@@ -2274,36 +2427,36 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
                 exitGroupEditing()
               }}
             />
-            {sortedElements.map((element) => element.type === 'adjustment' ? (
-              <AdjustmentNode
-                key={element.id}
-                element={element}
-                artboard={baseArtboard}
-                hidden={hiddenInGroups.has(element.id) || (maskAlone !== null && maskAlone !== element.id)}
-              />
-            ) : (
-              <ElementNode
-                key={element.id}
-                element={element}
-                artboard={baseArtboard}
-                zoom={zoom}
-                onGuides={setGuides}
-                onSelect={(event) => handleElementSelect(element, event)}
-                onBeginDrag={beginElementDrag}
-                onFinishDrag={finishElementDrag}
-                isDragCommitOwner={isDragCommitOwner}
-                isDragCancelled={() => dragCancelledRef.current}
-                onRequestEdit={requestElementEdit}
-                isInlineEditing={inlineTextId === element.id}
-                viewportPanReady={spacePressed || activeTool === 'hand'}
-                cropOverride={cropSession?.elementId === element.id ? cropSession.draft : undefined}
-                shapeCornerRadiusOverride={shapeRadiusDraft?.elementId === element.id ? shapeRadiusDraft.value : undefined}
-                shapeTransformOverride={shapeLineDraft?.elementId === element.id ? shapeLineDraft.transform : undefined}
-                blendModeSupported={blendSupportByElement.get(element.id) !== false}
-                soloHidden={maskAlone !== null && maskAlone !== element.id && maskAlone !== element.groupId}
-                groupHidden={hiddenInGroups.has(element.id)}
-              />
-            ))}
+            {sortedElements.map((element) => {
+              // A clipped layer is drawn with its base, the stack as one picture.
+              if (clippedIds.has(element.id)) return null
+              const stack = clipStackOf.get(element.id)
+              if (stack === undefined) return renderLayer(element, element)
+              const ratio = Math.max(0.25, zoom * (window.devicePixelRatio || 1))
+              return (
+                <Group key={`clip-stack-${element.id}`} visible={element.visible && !hiddenInGroups.has(element.id)}>
+                  {/* Worked out over the base made opaque where it is, then cut back to its coverage, so the clipped layers keep the base's transparency. */}
+                  <IsolatedGroup operation={blendModeToCanvasOperation(resolveBlendMode(element))} opacity={element.opacity} pixelRatio={ratio} beforeRedraw={followBase(element.id)}>
+                    <IsolatedGroup operation="source-over" filters={[opaqueWhereCovered]} pixelRatio={ratio}>
+                      {renderLayer(element, { ...element, opacity: 1, blendMode: 'normal' } as SceneElement)}
+                    </IsolatedGroup>
+                    {stack.memberIds.flatMap((id) => sortedById.get(id) ?? []).map((member) => member.type === 'adjustment' ? renderLayer(member, member) : (
+                      <IsolatedGroup key={member.id} operation={blendModeToCanvasOperation(resolveBlendMode(member))} pixelRatio={ratio}
+                        clipFunc={clipToBase(element.id, element.transform.width * baseArtboard.width, element.transform.height * baseArtboard.height)}>
+                        {renderLayer(member, { ...member, blendMode: 'normal' } as SceneElement)}
+                        {/* Shown wherever the base's own content is at all, not on its shadow or stroke; how much is the final cut's. */}
+                        <IsolatedGroup operation="destination-in" coverParent filters={[opaqueWhereCovered]} pixelRatio={ratio}>
+                          <ClipBaseShape element={element} artboard={baseArtboard} zoom={zoom} />
+                        </IsolatedGroup>
+                      </IsolatedGroup>
+                    ))}
+                    <IsolatedGroup operation="destination-in" coverParent pixelRatio={ratio}>
+                      <ClipBaseShape element={element} artboard={baseArtboard} zoom={zoom} styled />
+                    </IsolatedGroup>
+                  </IsolatedGroup>
+                </Group>
+              )
+            })}
           </Group>
         </Layer>
         <Layer ref={auxiliaryLayerRef} name="editor-auxiliary" listening={!preview}>

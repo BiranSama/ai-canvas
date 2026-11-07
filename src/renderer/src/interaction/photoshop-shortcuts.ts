@@ -1,8 +1,8 @@
 import type { SceneCommand, SceneElement } from '../../../domain'
 import { BLEND_MODES, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
-import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible } from '../canvas/layer-actions'
+import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible, toggleClippingMask } from '../canvas/layer-actions'
 import { invertLayerMask, toggleMaskOverlay } from '../canvas/mask-actions'
-import { adjustSelectedLayer, autoTone } from '../adjustments/adjustment-actions'
+import { adjustSelectedLayer, autoTone, repeatLastFilter } from '../adjustments/adjustment-actions'
 import { useMaskState } from '../canvas/mask-state'
 import { clearSelected, fillLayer } from '../canvas/paint-controller'
 import { showAppNotice } from '../components/app-notice'
@@ -92,6 +92,13 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
     ]
   },
   {
+    title: '滤镜',
+    entries: [
+      { keys: 'Ctrl+Alt+F', action: '再用一次上次的滤镜，设置不变' },
+      { keys: '属性面板「添加滤镜」', action: '高斯模糊、USM 锐化、添加杂色、动感模糊（有选区时只作用于选区）' }
+    ]
+  },
+  {
     title: '绘画',
     entries: [
       { keys: '[ / ]', action: '笔刷变小 / 变大' },
@@ -123,6 +130,7 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+Alt+Shift+E', action: '盖印：可见图层合成到一个新图层' },
       { keys: 'Alt+拖动', action: '拖出一个副本' },
       { keys: 'Ctrl+G / Ctrl+Shift+G', action: '组合 / 取消组合' },
+      { keys: 'Ctrl+Alt+G', action: '创建剪贴蒙版：只在下面的图层有内容的地方显示；再按一次释放' },
       { keys: 'Ctrl+] / Ctrl+[', action: '上移一层 / 下移一层' },
       { keys: 'Ctrl+Shift+] / Ctrl+Shift+[', action: '置于顶层 / 置于底层' },
       { keys: 'Ctrl+,', action: '隐藏或显示所选图层' },
@@ -130,7 +138,11 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+Alt+A', action: '选择所有图层' },
       { keys: '1 … 9, 0', action: '不透明度 10% … 90%, 100%；快速连按两位数字设精确值' },
       { keys: 'Shift+加号 / Shift+减号', action: '切换到下一个 / 上一个混合模式' },
-      { keys: 'Alt+Shift+N / M / S / O / F', action: '正常 / 正片叠底 / 滤色 / 叠加 / 柔光' },
+      { keys: 'Alt+Shift+N / K / M / B', action: '正常 / 变暗 / 正片叠底 / 颜色加深' },
+      { keys: 'Alt+Shift+G / S / D', action: '变亮 / 滤色 / 颜色减淡' },
+      { keys: 'Alt+Shift+O / F / H', action: '叠加 / 柔光 / 强光' },
+      { keys: 'Alt+Shift+E / X', action: '差值 / 排除' },
+      { keys: 'Alt+Shift+U / T / C / Y', action: '色相 / 饱和度 / 颜色 / 明度' },
       { keys: 'Alt+单击眼睛', action: '只显示这一层，再按一次恢复' },
       { keys: 'Delete', action: '删除所选图层（没有选区时）' },
       { keys: '方向键 / Shift+方向键', action: '移动 1 / 10 像素' }
@@ -160,12 +172,24 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
   }
 ]
 
+/** Photoshop's Alt+Shift letter for each blend mode. */
 const BLEND_LETTERS: Readonly<Record<string, (typeof BLEND_MODES)[number]>> = {
   KeyN: 'normal',
+  KeyK: 'darken',
   KeyM: 'multiply',
+  KeyB: 'color-burn',
+  KeyG: 'lighten',
   KeyS: 'screen',
+  KeyD: 'color-dodge',
   KeyO: 'overlay',
-  KeyF: 'soft-light'
+  KeyF: 'soft-light',
+  KeyH: 'hard-light',
+  KeyE: 'difference',
+  KeyX: 'exclusion',
+  KeyU: 'hue',
+  KeyT: 'saturation',
+  KeyC: 'color',
+  KeyY: 'luminosity'
 }
 
 /** Keys for the toolbar slots of several tools: the slot's memory and its tools, in the order Shift steps through them. */
@@ -311,6 +335,10 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     if (event.shiftKey && !event.altKey && key === 'l') return run(() => { void autoTone('tone') })
     if (event.shiftKey && event.altKey && event.code === 'KeyL') return run(() => { void autoTone('contrast') })
     if (event.shiftKey && event.altKey && event.code === 'KeyB') return run(() => { void adjustSelectedLayer('black-white') })
+    // Photoshop's 滤镜 > 上次的滤镜.
+    if (event.altKey && !event.shiftKey && event.code === 'KeyF') return run(() => { void repeatLastFilter() })
+    // Photoshop's 创建剪贴蒙版 / 释放剪贴蒙版.
+    if (event.altKey && !event.shiftKey && event.code === 'KeyG') return run(() => { void toggleClippingMask() })
     if (event.altKey || event.shiftKey) return false
     if (key === 'a') return run(selectAll)
     // Ctrl+D drops the pixel selection first; with none, the selected layers, as before.
