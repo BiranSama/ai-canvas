@@ -195,7 +195,10 @@ export async function mergeVisible(): Promise<boolean> {
   if (layers.length < 2 || pictures.length === 0) return refuse('至少要有两个可见图层才能合并。')
   const locked = lockedAmong(layers)
   if (locked !== undefined) return refuse(`「${locked.name}」已锁定，解锁或隐藏它后再合并可见图层。`)
-  return mergeInto(pictures[0]!, layers, '合并可见图层', {}, false)
+  // The adjustment layers go into the result; what they did to the canvas colour goes with them, as
+  // Photoshop's merge into the background layer keeps it.
+  const canvasBackground = layers.some((layer) => layer.type === 'adjustment') && !useWorkspaceStore.getState().scene.canvas.transparent
+  return mergeInto(pictures[0]!, layers, '合并可见图层', canvasBackground ? { canvasBackground } : {}, false)
 }
 
 /** Photoshop's Ctrl+Alt+Shift+E: every visible layer drawn into a new layer, the originals untouched. */

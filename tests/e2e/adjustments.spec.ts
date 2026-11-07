@@ -297,6 +297,13 @@ test('the shortcuts open a previewing dialog; adjustment layers come from the pa
     })()`) as { x: number; y: number; width: number; height: number }
     await glide(page, { x: board.x + board.width * 0.3, y: board.y + board.height * 0.5 }, { x: board.x + board.width * 0.7, y: board.y + board.height * 0.5 }, 12)
     await expect.poll(async () => { const current = await element(page, invert.id); return current?.type === 'adjustment' ? current.mask?.paint?.length ?? 0 : -1 }).toBe(1)
+
+    // Merging every visible layer keeps what the adjustment layer did to the canvas colour, as Photoshop's background layer keeps it.
+    const beforeVisible = await raw(await exportThroughPanel(page))
+    await page.keyboard.press('Control+Shift+E')
+    await expect.poll(async () => (await scene(page)).elements.some((candidate) => candidate.type === 'adjustment')).toBe(false)
+    const afterVisible = await raw(await exportThroughPanel(page))
+    expect(worstDifference(beforeVisible, afterVisible)).toBeLessThanOrEqual(2)
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true })

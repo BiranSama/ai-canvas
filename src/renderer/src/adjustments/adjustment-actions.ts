@@ -173,7 +173,8 @@ export async function belowHistogram(element: AdjustmentLayer): Promise<Histogra
   const index = scene.elements.findIndex((candidate) => candidate.id === element.id)
   const below = scene.elements.slice(0, Math.max(0, index)).filter((candidate) => candidate.visible && candidate.type !== 'group').map((candidate) => candidate.id)
   const background = scene.canvas.transparent ? null : scene.canvas.backgroundColor
-  const drawn = below.length === 0 ? null : await renderLayersAsDrawn(below)
+  // The canvas colour is drawn under the layers, so adjustment layers below this one change it, as on the canvas.
+  const drawn = below.length === 0 ? null : await renderLayersAsDrawn(below, { canvasBackground: true })
   if (drawn === null) {
     if (background === null) return null
     const blank = document.createElement('canvas')
@@ -182,7 +183,7 @@ export async function belowHistogram(element: AdjustmentLayer): Promise<Histogra
     const pixels = shrunk(blank, blank, background)
     return pixels === null ? null : histogram(pixels.data)
   }
-  const pixels = shrunk(drawn, drawn, background)
+  const pixels = shrunk(drawn, drawn, null)
   return pixels === null ? null : histogram(pixels.data)
 }
 
