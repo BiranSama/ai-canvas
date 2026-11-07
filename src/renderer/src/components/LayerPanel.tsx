@@ -32,7 +32,7 @@ import { createPortal } from 'react-dom'
 import { canBeClipped, clipStacks, pathInBox, type SceneElement } from '../../../domain'
 import { blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
-import { mergeDown, mergeVisible, rasterizeLayer, toggleClippingMask } from '../canvas/layer-actions'
+import { mergeDown, mergeVisible, needsRasterizeToPaint, rasterizeLayer, toggleClippingMask } from '../canvas/layer-actions'
 import { ADJUSTMENT_LAYER_KINDS, createAdjustmentLayer } from '../adjustments/adjustment-actions'
 import { ADJUSTMENT_LABELS } from '../../../shared/adjustments'
 import { addLayerMask, applyLayerMask, deleteLayerMask, editMask, isMaskable, loadMaskAsSelection, loadTransparencyAsSelection, setMaskEnabled, toggleMaskAlone } from '../canvas/mask-actions'
@@ -641,7 +641,7 @@ export function LayerPanel(): React.JSX.Element {
             <button type="button" role="menuitem" onClick={() => { setMenu(null); void clearLayerStyle(selectedIds.includes(menuElement.id) ? selectedIds : [menuElement.id]) }} disabled={menuElement.locked || !hasLayerStyles(menuElement.style)}>清除图层样式</button>
           </>}
           {canBeClipped(menuElement) && <button type="button" role="menuitem" onClick={() => act(menu.id, 'clip')} disabled={menuElement.locked}>{menuElement.clipped === true ? '释放剪贴蒙版' : '创建剪贴蒙版'}<kbd>Ctrl+Alt+G</kbd></button>}
-          {(menuElement.type === 'text' || menuElement.type === 'shape') && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}
+          {(menuElement.type === 'text' || menuElement.type === 'shape' || needsRasterizeToPaint(menuElement)) && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge')}>{menuElement.type === 'group' ? '合并组' : selected.length > 1 && selectedIds.includes(menu.id) ? '合并图层' : '向下合并'}<kbd>Ctrl+E</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge-visible')}>合并可见图层<kbd>Ctrl+Shift+E</kbd></button>
           <button type="button" role="menuitem" className="is-danger" onClick={() => act(menu.id, 'delete')}>删除</button>

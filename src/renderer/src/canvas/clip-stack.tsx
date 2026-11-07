@@ -43,7 +43,9 @@ function cacheOne(group: Konva.Group, pixelRatio: number, maxPixels: number): vo
   // A cut is drawn over all its parent holds: the browser composites a picture only where it lies, so
   // destination-in would leave what lies past the cut's own content.
   const parent = group.getParent()
-  const rect = (group.getAttr('coverParent') === true && parent !== null ? parent : group).getClientRect({ skipTransform: true })
+  // A warped layer names the area it is drawn into: its box and where its corners take it.
+  const fixed = group.getAttr('cacheRect') as { x: number; y: number; width: number; height: number } | undefined
+  const rect = fixed ?? (group.getAttr('coverParent') === true && parent !== null ? parent : group).getClientRect({ skipTransform: true })
   if (rect.width < 1 || rect.height < 1) return
   group.cache({ x: rect.x, y: rect.y, width: rect.width, height: rect.height, pixelRatio: Math.min(pixelRatio, Math.sqrt(maxPixels / (rect.width * rect.height))) })
 }
@@ -54,11 +56,17 @@ function cacheIsolated(group: Konva.Group, pixelRatio: number, maxPixels: number
   cacheOne(group, pixelRatio, maxPixels)
 }
 
-export function IsolatedGroup({ operation, opacity = 1, pixelRatio, maxPixels = ISOLATED_PIXELS, coverParent = false, clipFunc, filters, beforeRedraw, children }: {
+export function IsolatedGroup({ operation, opacity = 1, pixelRatio, maxPixels = ISOLATED_PIXELS, coverParent = false, cacheRect, listening, attrs, clipFunc, filters, beforeRedraw, children }: {
   /** How the group's picture is laid over what is below. */
   readonly operation: GlobalCompositeOperation
   /** Drawn over the whole of what its parent holds, transparent past its content: for a cut laid on with destination-in. */
   readonly coverParent?: boolean
+  /** The area drawn into, in the group's units, when it is not what the group holds. */
+  readonly cacheRect?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  /** Off when something else takes the group's clicks. */
+  readonly listening?: boolean
+  /** More attributes for its filters to read. */
+  readonly attrs?: Record<string, unknown>
   /** Cuts what is drawn, and where it can be clicked, to a path. */
   readonly clipFunc?: (context: Konva.Context, group: Konva.Group) => void
   /** Konva filters on its cached picture. */
@@ -103,7 +111,7 @@ export function IsolatedGroup({ operation, opacity = 1, pixelRatio, maxPixels = 
   })
   return (
     <IsolationContext.Provider value={refresh}>
-    <Group ref={ref} name="isolated-group" coverParent={coverParent} {...(filters === undefined ? {} : { filters })} {...(clipFunc === undefined ? {} : { clipFunc: (context: Konva.Context) => { if (ref.current !== null) clipFunc(context, ref.current) } })} opacity={opacity} {...(operation === 'source-over' ? {} : { globalCompositeOperation: operation })}
+    <Group ref={ref} name="isolated-group" coverParent={coverParent} {...(cacheRect === undefined ? {} : { cacheRect })} {...(listening === undefined ? {} : { listening })} {...attrs} {...(filters === undefined ? {} : { filters })} {...(clipFunc === undefined ? {} : { clipFunc: (context: Konva.Context) => { if (ref.current !== null) clipFunc(context, ref.current) } })} opacity={opacity} {...(operation === 'source-over' ? {} : { globalCompositeOperation: operation })}
       // The outermost group draws everything inside it again; one inside it would only repeat part of that.
       {...(outer === null ? { onDragMove: redraw, onTransform: redraw } : {})}>
       {children}

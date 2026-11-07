@@ -1,4 +1,4 @@
-import type { Scene, SceneElement } from '../../../domain'
+import { layerCornerPoints, type Scene, type SceneElement } from '../../../domain'
 import { MAX_EXPORT_EDGE } from '../../../shared/artwork-export'
 import { hasVisibleEffects, shadowGeometry } from '../../../shared/layer-effects'
 import { isFinalContent } from '../canvas/layer-drawing'
@@ -72,11 +72,10 @@ export interface Area {
  */
 export function layerArea(element: SceneElement, width: number, height: number): Area {
   const box = { x: element.transform.x * width, y: element.transform.y * height, w: element.transform.width * width, h: element.transform.height * height }
-  const angle = element.transform.rotation * Math.PI / 180
-  const corners = [[0, 0], [box.w, 0], [0, box.h], [box.w, box.h]].map(([dx, dy]) => ({
-    x: box.x + dx! * Math.cos(angle) - dy! * Math.sin(angle),
-    y: box.y + dx! * Math.sin(angle) + dy! * Math.cos(angle)
-  }))
+  // The box and, after a free transform, where its corners went: what is drawn lies within them.
+  const warped = 'corners' in element ? element.corners : null
+  const corners = [...layerCornerPoints(element.transform, null, { width, height }), ...(warped === null || warped === undefined ? [] : layerCornerPoints(element.transform, warped, { width, height }))]
+    .map(([x, y]) => ({ x, y }))
   let margin = 2
   if (element.type === 'text') margin += element.strokeWidth + element.shadowBlur * 2
   if (element.type === 'shape' && element.stroke !== null) margin += element.strokeWidth * Math.min(box.w, box.h)

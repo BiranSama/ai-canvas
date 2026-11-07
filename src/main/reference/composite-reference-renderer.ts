@@ -1,5 +1,6 @@
 import sharp from 'sharp'
-import { clipStacks, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Scene, type SceneElement } from '../../domain'
+import { affineOf, boxWarpMatrix, clipStacks, cornersAreAffine, cornersAreIdentity, cornersExtent, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Corners, type Scene, type SceneElement } from '../../domain'
+import { warpLayout, warpPixels, warpSourceMatrix } from '../../shared/warp'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, coverageInBox, hasSpatialFilters, sampleCoverage } from '../../shared/adjustments'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
@@ -126,6 +127,49 @@ function transform(element: SceneElement, width: number, height: number): { x: n
   return { x, y, w, h, rotate: `rotate(${finite(element.transform.rotation)} ${finite(x)} ${finite(y)})` }
 }
 
+/** A layer's free-transform corners, if it has any that move it. */
+function layerCorners(element: SceneElement): Corners | null {
+  const corners = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null
+  return cornersAreIdentity(corners) ? null : corners!
+}
+
+/** A flip or skew as an SVG matrix about the box's top-left corner, inside the layer's turn; nothing for a plain box. */
+function affineWarp(element: SceneElement, box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }): string {
+  const corners = layerCorners(element)
+  if (corners === null || !cornersAreAffine(corners)) return ''
+  const [a, b, c, d, e, f] = affineOf(boxWarpMatrix(corners, box.w, box.h))
+  const precise = (value: number): string => Number(value.toFixed(6)).toString()
+  return ` matrix(${[a, b, c, d, box.x + e - a * box.x - c * box.y, box.y + f - b * box.x - d * box.y].map(precise).join(' ')})`
+}
+
+/** Where a layer's content lies after its corners, in its box's pixels. */
+function warpedExtent(element: SceneElement, w: number, h: number): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
+  const corners = layerCorners(element)
+  if (corners === null) return { x: 0, y: 0, width: w, height: h }
+  const extent = cornersExtent(corners)
+  return { x: extent.x * w, y: extent.y * h, width: extent.width * w, height: extent.height * h }
+}
+
+/**
+ * A distorted or perspective layer: drawn upright in its box, resampled
+ * through its corners with the shared warp the canvas uses, and laid back
+ * turned, in its opacity and blend mode.
+ */
+async function warpedElementSvg(element: SceneElement, corners: Corners, mode: RenderMode, width: number, height: number, resolveAsset: ReferenceAssetResolver, warnings: string[]): Promise<string> {
+  const box = transform(element, width, height)
+  const upright = { ...element, corners: null, opacity: 1, blendMode: 'normal', transform: { ...element.transform, rotation: 0 } } as SceneElement
+  const inner = await elementSvg(upright, mode, width, height, resolveAsset, warnings)
+  const rasterWidth = Math.max(1, Math.ceil(box.w))
+  const rasterHeight = Math.max(1, Math.ceil(box.h))
+  const svg = `<svg width="${rasterWidth}" height="${rasterHeight}" viewBox="${finite(box.x)} ${finite(box.y)} ${rasterWidth} ${rasterHeight}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
+  const pixels = await sharp(Buffer.from(svg)).ensureAlpha().raw().toBuffer()
+  const layout = warpLayout(corners, box.w, box.h, 1)
+  // The raster holds one pixel for each of the box's pixels.
+  const warped = warpPixels(pixels, rasterWidth, rasterHeight, layout.rasterWidth, layout.rasterHeight, warpSourceMatrix(corners, box.w, box.h, layout, box.w, box.h))
+  const png = await sharp(Buffer.from(warped.buffer), { raw: { width: layout.rasterWidth, height: layout.rasterHeight, channels: 4 } }).png().toBuffer()
+  return `<g opacity="${finite(element.opacity)}" transform="${box.rotate}"${blendModeToSvgStyle(resolveBlendMode(element))}><image x="${finite(box.x + layout.x)}" y="${finite(box.y + layout.y)}" width="${finite(layout.width)}" height="${finite(layout.height)}" href="data:image/png;base64,${png.toString('base64')}" preserveAspectRatio="none"/></g>`
+}
+
 /**
  * A text or shape layer's mask as an SVG luminance mask over its box, in the
  * layer's own (rotated) space. An image layer's mask goes into its pixels
@@ -156,16 +200,18 @@ type StyledElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
  */
 async function styledElementSvg(element: StyledElement, mode: RenderMode, width: number, height: number, resolveAsset: ReferenceAssetResolver, warnings: string[]): Promise<string> {
   const box = transform(element, width, height)
-  const reach = styledLayerReach(element, box.w, box.h)
+  // Styled after its free transform: over where its corners took it.
+  const extent = warpedExtent(element, box.w, box.h)
+  const reach = styledLayerReach(element, extent.width, extent.height)
   const upright = { ...element, opacity: 1, blendMode: 'normal' as const, style: undefined, transform: { ...element.transform, rotation: 0 } } as StyledElement
   const inner = await elementSvg(upright, mode, width, height, resolveAsset, warnings)
-  const left = box.x - reach
-  const top = box.y - reach
-  const rasterWidth = Math.max(1, Math.ceil(box.w + reach * 2))
-  const rasterHeight = Math.max(1, Math.ceil(box.h + reach * 2))
+  const left = box.x + extent.x - reach
+  const top = box.y + extent.y - reach
+  const rasterWidth = Math.max(1, Math.ceil(extent.width + reach * 2))
+  const rasterHeight = Math.max(1, Math.ceil(extent.height + reach * 2))
   const svg = `<svg width="${rasterWidth}" height="${rasterHeight}" viewBox="${finite(left)} ${finite(top)} ${rasterWidth} ${rasterHeight}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
   const pixels = await sharp(Buffer.from(svg)).ensureAlpha().raw().toBuffer()
-  const styled = applyLayerStyles(pixels, { x: reach, y: reach, width: box.w, height: box.h, rasterWidth, rasterHeight }, element.style!, 1, element.transform.rotation)
+  const styled = applyLayerStyles(pixels, { x: reach, y: reach, width: extent.width, height: extent.height, rasterWidth, rasterHeight }, element.style!, 1, element.transform.rotation)
   const image = async (data: Uint8Array | Uint8ClampedArray): Promise<string> => {
     const png = await sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { raw: { width: rasterWidth, height: rasterHeight, channels: 4 } }).png().toBuffer()
     return `<image x="${finite(left)}" y="${finite(top)}" width="${rasterWidth}" height="${rasterHeight}" href="data:image/png;base64,${png.toString('base64')}" preserveAspectRatio="none"/>`
@@ -189,10 +235,13 @@ async function elementSvg(
   if ((element.type === 'image' || element.type === 'shape' || (element.type === 'text' && presentation !== 'reference')) && hasLayerStyles(element.style)) {
     return styledElementSvg(element, mode, width, height, resolveAsset, warnings)
   }
+  const corners = layerCorners(element)
+  if (corners !== null && !cornersAreAffine(corners)) return warpedElementSvg(element, corners, mode, width, height, resolveAsset, warnings)
   const box = transform(element, width, height)
   const opacity = finite(element.opacity)
   const layerMask = await layerMaskSvg(element, box, resolveAsset)
-  const groupStart = `${layerMask.defs}<g opacity="${opacity}" transform="${box.rotate}"${blendModeToSvgStyle(resolveBlendMode(element))}${layerMask.attribute}>`
+  // A flip or skew goes on inside the turn, mask and all, as the canvas draws it.
+  const groupStart = `${layerMask.defs}<g opacity="${opacity}" transform="${box.rotate}${affineWarp(element, box)}"${blendModeToSvgStyle(resolveBlendMode(element))}${layerMask.attribute}>`
   const groupEnd = '</g>'
 
   if (element.type === 'image') {

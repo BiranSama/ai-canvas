@@ -1,4 +1,4 @@
-import type { SceneElement } from '../../../domain'
+import { cornersAreIdentity, layerCanvasBounds, layerCornerPoints, type SceneElement } from '../../../domain'
 
 export interface CanvasPoint {
   readonly x: number
@@ -128,7 +128,17 @@ export function rectContainsPoint(rect: CanvasRect, point: CanvasPoint): boolean
     && point.y <= rect.y + rect.height
 }
 
+/** Where a layer's corners are on the stage: its turned box, after its free-transform corners. */
+export function elementStageCorners(element: SceneElement, artboard: CanvasRect): readonly CanvasPoint[] {
+  const corners = 'corners' in element ? element.corners : null
+  return layerCornerPoints(element.transform, corners, artboard).map(([x, y]) => ({ x: artboard.x + x, y: artboard.y + y }))
+}
+
 export function rotatedElementBounds(element: SceneElement, artboard: CanvasRect): CanvasRect {
+  if ('corners' in element && !cornersAreIdentity(element.corners)) {
+    const bounds = layerCanvasBounds(element.transform, element.corners, artboard)
+    return { x: artboard.x + bounds.x, y: artboard.y + bounds.y, width: bounds.width, height: bounds.height }
+  }
   const x = artboard.x + element.transform.x * artboard.width
   const y = artboard.y + element.transform.y * artboard.height
   const width = element.transform.width * artboard.width

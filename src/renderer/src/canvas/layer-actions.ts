@@ -1,4 +1,4 @@
-import { canBeClipBase, canBeClipped, clipBases, clipStacks, type NormalizedTransform, type PaintOp, type SceneCommand, type SceneElement } from '../../../domain'
+import { canBeClipBase, canBeClipped, clipBases, clipStacks, cornersAreIdentity, cornersAreMirror, type NormalizedTransform, type PaintOp, type SceneCommand, type SceneElement } from '../../../domain'
 import { imageLayerSpace } from '../../../shared/layer-space'
 import type { GrayMask } from '../../../shared/mask-raster'
 import { showAppNotice } from '../components/app-notice'
@@ -22,6 +22,16 @@ const FULL_CANVAS: NormalizedTransform = { x: 0, y: 0, width: 1, height: 1, rota
  * an asset, and where they sit on the canvas. A picture with nothing in it
  * keeps the whole canvas, as a blank layer does.
  */
+/**
+ * Whether painting on the layer would bend with it: after a skew, distort
+ * or perspective (a flip maps pixel for pixel), as on Photoshop's smart
+ * objects, it has to be rasterized first.
+ */
+export function needsRasterizeToPaint(element: SceneElement): boolean {
+  const corners = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null
+  return !cornersAreIdentity(corners) && !cornersAreMirror(corners)
+}
+
 async function drawnAsset(ids: readonly string[], summary: string, options: LayerRenderOptions = {}, within: GrayMask | null = null): Promise<{ readonly assetId: string; readonly transform: NormalizedTransform } | null> {
   const { scene } = useWorkspaceStore.getState()
   const drawn = await renderLayersAsDrawn(ids, options)
@@ -268,7 +278,8 @@ export async function toggleClippingMask(ids?: readonly string[]): Promise<boole
 /** Photoshop's 栅格化图层: a text or shape layer becomes pixels as it looks, keeping its opacity and blend. */
 export async function rasterizeLayer(elementId: string): Promise<boolean> {
   const element = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === elementId)
-  if (element === undefined || (element.type !== 'text' && element.type !== 'shape')) return false
+  // An image is pixels already, unless a skew, distort or perspective still has to be worked into them.
+  if (element === undefined || (element.type !== 'text' && element.type !== 'shape' && !(element.type === 'image' && needsRasterizeToPaint(element)))) return false
   if (element.locked) return refuse(`「${element.name}」已锁定，解锁后才能栅格化。`)
   // A composition placeholder is not drawn into the picture, so it would come out empty.
   if (element.type === 'shape' && element.role !== 'final') return refuse(`「${element.name}」是构图占位，不在成品里，不能栅格化；先在属性里把用途改成成品。`)

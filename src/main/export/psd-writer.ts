@@ -56,11 +56,13 @@ async function textData(text: PsdText, fonts: PsdFontLookup): Promise<{ readonly
   const angle = text.rotation * Math.PI / 180
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
+  // Turned, after any flip or skew in the box: Photoshop's [xx, xy, yx, yy, tx, ty] maps the text's own space to the document.
+  const [a, b, c, d, e, f] = text.shear ?? [1, 0, 0, 1, 0, 0]
   const top = Math.max(0, (text.box.height - text.textHeight) / 2)
   const content = (text.orientation === 'vertical' ? [...text.content.replace(/\r?\n/g, '')].join('\r') : text.content.replace(/\r?\n/g, '\r'))
   const data: LayerTextData = {
     text: content,
-    transform: [cos, sin, -sin, cos, text.box.x, text.box.y],
+    transform: [cos * a - sin * b, sin * a + cos * b, cos * c - sin * d, sin * c + cos * d, text.box.x + cos * e - sin * f, text.box.y + sin * e + cos * f],
     antiAlias: 'smooth',
     orientation: 'horizontal',
     shapeType: 'box',

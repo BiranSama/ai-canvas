@@ -76,6 +76,8 @@ import { AdjustmentBackdrop } from './adjustment-layer'
 import { ElementVisual } from './element-visual'
 import { isFinalContent } from './layer-drawing'
 import { StyledLayer } from './styled-layer'
+import { CornersLayer } from './warped-layer'
+import { warpedExtent } from './warp-filter'
 import { IsolatedGroup } from './clip-stack'
 import { opaqueWhereCovered } from './opaque-filter'
 import { useIsolationRefresh } from './isolation-refresh'
@@ -227,6 +229,7 @@ function ImageVisual({ element, width, height, plain = false }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
     [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight, maskLater]
   )
+  const styleContentKey = useMemo(() => ({ drawn: effected?.drawn ?? source }), [effected?.drawn, source, element.corners]) // eslint-disable-line react-hooks/exhaustive-deps -- new corners change what the styles see
   if (image === null || source === null || adjustmentClips === 'pending') {
     const missing = isRuntimeAssetMissing(element.assetId)
     const loading = isRuntimeAssetLoading(element.assetId)
@@ -245,12 +248,16 @@ function ImageVisual({ element, width, height, plain = false }: {
       </Group>
     )
   }
-  const styled = (picture: React.JSX.Element): React.JSX.Element => plain || !styledLayer(styledElement) ? picture : (
-    <StyledLayer element={styledElement} width={width} height={height} unit={1} ratio={detail}
-      rotation={element.transform.rotation} blend={resolveBlendMode(element)} contentKey={effected?.drawn ?? source}>
-      {picture}
-    </StyledLayer>
-  )
+  // Through its free-transform corners first; its styles go on what that shows.
+  const styled = (picture: React.JSX.Element): React.JSX.Element => {
+    const warped = <CornersLayer corners={element.corners} width={width} height={height} ratio={detail}>{picture}</CornersLayer>
+    return plain || !styledLayer(styledElement) ? warped : (
+      <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(element.corners, width, height)} unit={1} ratio={detail}
+        rotation={element.transform.rotation} blend={resolveBlendMode(element)} contentKey={styleContentKey}>
+        {warped}
+      </StyledLayer>
+    )
+  }
   if (effected !== null) {
     // Drawn at the shown size; scaled back to the box while a resize is between whole pixels.
     const scaleX = width / effected.drawn.width
@@ -417,12 +424,14 @@ function ClipBaseShape({ element, artboard, zoom, styled = false }: { element: S
       renderImage={(image, imageWidth, imageHeight) => <ImageVisual element={image} width={imageWidth} height={imageHeight} plain={!styled} />}
     />
   )
-  const masked = (shown.type === 'text' || shown.type === 'shape') && shown.mask !== null && shown.mask !== undefined
+  const maskedBox = (shown.type === 'text' || shown.type === 'shape') && shown.mask !== null && shown.mask !== undefined
     ? <MaskedBox element={shown} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
     : visual
-  // An image styles itself; a text or shape is styled here, as its own node is.
+  // An image warps and styles itself; a text or shape is warped and styled here, as its own node is.
+  const corners = shown.type === 'text' || shown.type === 'shape' ? shown.corners : null
+  const masked = <CornersLayer corners={corners} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
   const content = styled && (shown.type === 'text' || shown.type === 'shape') && styledLayer(shown) ? (
-    <StyledLayer element={shown} width={width} height={height} unit={1} ratio={drawnDetail(width, height, zoom)} rotation={shown.transform.rotation} blend="normal" contentKey={shown}>
+    <StyledLayer element={shown} width={width} height={height} extent={warpedExtent(corners, width, height)} unit={1} ratio={drawnDetail(width, height, zoom)} rotation={shown.transform.rotation} blend="normal" contentKey={shown}>
       {masked}
     </StyledLayer>
   ) : masked
@@ -842,13 +851,16 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
             renderImage={renderLiveImage}
           />
         )
-        const masked = (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
+        const maskedBox = (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
           ? <MaskedBox element={element} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
           : visual
-        // An image styles itself, from the pixels it draws; text and shapes are styled here.
-        if ((styledElement.type !== 'text' && styledElement.type !== 'shape') || !styledLayer(styledElement)) return masked
+        // An image warps and styles itself, from the pixels it draws; text and shapes are warped and styled here.
+        if (styledElement.type !== 'text' && styledElement.type !== 'shape') return maskedBox
+        const corners = styledElement.corners
+        const masked = <CornersLayer corners={corners} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
+        if (!styledLayer(styledElement)) return masked
         return (
-          <StyledLayer element={styledElement} width={width} height={height} unit={1} ratio={drawnDetail(width, height, zoom)}
+          <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(corners, width, height)} unit={1} ratio={drawnDetail(width, height, zoom)}
             rotation={displayTransform.rotation} blend={resolveBlendMode(element)} contentKey={element}>
             {masked}
           </StyledLayer>
