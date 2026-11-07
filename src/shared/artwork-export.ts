@@ -122,6 +122,7 @@ const psdAdjustmentSchema = z.object({
   name: z.string().min(1).max(255),
   hidden: z.boolean(),
   opacity: finite.min(0).max(1),
+  blendMode: blendModeSchema,
   /** Clipped to the layer below it, so it changes that layer alone. */
   clipping: z.boolean(),
   settings: adjustmentSettingsSchema,

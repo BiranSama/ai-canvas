@@ -1,7 +1,7 @@
-import { writePsdUint8Array, type BlendMode as PsdBlendMode, type Color, type Justification, type Layer, type LayerEffectsInfo, type LayerTextData, type Psd } from 'ag-psd'
-import type { BlendMode } from '../../domain'
+import { writePsdUint8Array, type Color, type Justification, type Layer, type LayerEffectsInfo, type LayerTextData, type Psd } from 'ag-psd'
 import type { PsdAdjustment, PsdDocument, PsdLayer, PsdNode, PsdText } from '../../shared/artwork-export'
 import { toPsdAdjustment } from '../psd/psd-adjustments'
+import { PSD_BLEND_MODES } from '../psd/psd-blend'
 
 /*
  * Writes the layers the page drew into a PSD Photoshop opens as layers:
@@ -19,14 +19,6 @@ export interface PsdFont {
   readonly fauxBold: boolean
 }
 export type PsdFontLookup = (family: string, weight: number) => Promise<PsdFont>
-
-const BLEND_MODES: Readonly<Record<BlendMode, PsdBlendMode>> = {
-  normal: 'normal',
-  multiply: 'multiply',
-  screen: 'screen',
-  overlay: 'overlay',
-  'soft-light': 'soft light'
-}
 
 const JUSTIFICATION: Readonly<Record<PsdText['align'], Justification>> = { start: 'left', center: 'center', end: 'right', justify: 'justify-left' }
 
@@ -108,7 +100,7 @@ async function layerOf(layer: PsdLayer, fonts: PsdFontLookup): Promise<Layer> {
     name: layer.name,
     hidden: layer.hidden,
     opacity: layer.opacity,
-    blendMode: BLEND_MODES[layer.blendMode],
+    blendMode: PSD_BLEND_MODES[layer.blendMode],
     left: layer.left,
     top: layer.top,
     right: layer.left + layer.width,
@@ -137,7 +129,7 @@ async function layerOf(layer: PsdLayer, fonts: PsdFontLookup): Promise<Layer> {
 
 /** An adjustment layer: Photoshop's own kind, with its settings and mask, clipped when it adjusts one layer. */
 function adjustmentOf(node: PsdAdjustment): Layer {
-  const result: Layer = { name: node.name, hidden: node.hidden, opacity: node.opacity, blendMode: 'normal', clipping: node.clipping, adjustment: toPsdAdjustment(node.settings) }
+  const result: Layer = { name: node.name, hidden: node.hidden, opacity: node.opacity, blendMode: PSD_BLEND_MODES[node.blendMode], clipping: node.clipping, adjustment: toPsdAdjustment(node.settings) }
   if (node.mask !== null && node.mask.width > 0 && node.mask.height > 0) {
     result.mask = {
       left: node.mask.left,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SCENE_SCHEMA_VERSION,
+  blendModeSchema,
   createScene,
   deserializeSceneSnapshot,
   sceneSchema,
@@ -53,9 +54,9 @@ describe('Scene schema and snapshots', () => {
     expect(before).not.toContain('blendMode')
   })
 
-  it('accepts only the five approved blend modes without changing the Scene version', () => {
+  it('accepts Photoshop\'s sixteen native blend modes without changing the Scene version', () => {
     const source = makeAllElementTypesScene()
-    for (const blendMode of ['normal', 'multiply', 'screen', 'overlay', 'soft-light'] as const) {
+    for (const blendMode of blendModeSchema.options) {
       const parsed = sceneSchema.parse({
         ...source,
         elements: source.elements.map((element, index) => index === 0 ? { ...element, blendMode } : element)
@@ -65,7 +66,7 @@ describe('Scene schema and snapshots', () => {
     }
     expect(sceneSchema.safeParse({
       ...source,
-      elements: source.elements.map((element, index) => index === 0 ? { ...element, blendMode: 'color-dodge' } : element)
+      elements: source.elements.map((element, index) => index === 0 ? { ...element, blendMode: 'linear-dodge' } : element)
     }).success).toBe(false)
     const placeholderIndex = source.elements.findIndex((element) => element.type === 'placeholder')
     expect(sceneSchema.safeParse({

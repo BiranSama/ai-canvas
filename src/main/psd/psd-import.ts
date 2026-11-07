@@ -1,8 +1,9 @@
 import { getCompositeImageData, getLayerImageData, getLayerMaskImageData, initializeCanvas, readPsd, type Layer, type PixelData } from 'ag-psd'
 import sharp from 'sharp'
 import type { PsdAdjustmentImport, PsdDocumentImport, PsdGroupImport, PsdLayerImport } from '../../shared/psd-import'
-import { MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings, type BlendMode } from '../../domain'
+import { MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings } from '../../domain'
 import { fromPsdAdjustment } from './psd-adjustments'
+import { fromPsdBlendMode } from './psd-blend'
 import { ADJUSTMENT_LABELS } from '../../shared/adjustments'
 
 /*
@@ -37,15 +38,6 @@ initializeCanvas(
   ((width: number, height: number) => ({ width, height, data: new Uint8ClampedArray(width * height * 4), colorSpace: 'srgb' })) as unknown as CreateImageData
 )
 const SUPPORTED_COLOR_MODES = new Set([1, 3, 4]) // grayscale, RGB, CMYK
-
-const BLEND_MODES: Readonly<Partial<Record<NonNullable<Layer['blendMode']>, BlendMode>>> = {
-  normal: 'normal',
-  'pass through': 'normal',
-  multiply: 'multiply',
-  screen: 'screen',
-  overlay: 'overlay',
-  'soft light': 'soft-light'
-}
 
 export class PsdImportError extends Error {}
 
@@ -188,10 +180,12 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
       }
       // Kept as a layer of its own, it ends the chain: what is clipped above it cannot move under it into the base.
       if (layer.clipping === true) { notes.clipped += 1; clipBase = null }
-      if (blend !== 'normal' && blend !== 'pass through') notes.blends += 1
+      const blendMode = fromPsdBlendMode(blend)
+      if (blendMode === undefined) notes.blends += 1
       layers.push({
         kind: 'adjustment',
         name: layer.name?.trim() || ADJUSTMENT_LABELS[imported.settings.kind],
+        blendMode: blendMode ?? 'normal',
         opacity: Math.max(0, Math.min(1, opacity)),
         visible,
         groupIndex: group?.index ?? null,
@@ -214,7 +208,7 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     if (layer.effects !== undefined && layer.effects.disabled !== true && Object.keys(layer.effects).some((key) => key !== 'disabled' && key !== 'scale')) notes.styles += 1
     if (layer.clipping === true) notes.clipped += 1
     if (layer.text !== undefined) notes.text += 1
-    const blendMode = BLEND_MODES[layer.blendMode ?? 'normal']
+    const blendMode = fromPsdBlendMode(layer.blendMode)
     if (blendMode === undefined) notes.blends += 1
     const mask = layerMask(layer, width, height)
     // A mask that is on hides what it covers, so the bottom layer is opaque only if its mask hides nothing.

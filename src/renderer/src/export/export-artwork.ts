@@ -3,6 +3,7 @@ import { adaptedScene, hiddenByGroups, type Scene, type SceneElement } from '../
 import { hasVisibleEffects } from '../../../shared/layer-effects'
 import { MAX_EXPORT_EDGE, type ExportImageFormat, type PsdAdjustment, type PsdLayer, type PsdNode, type PsdText } from '../../../shared/artwork-export'
 import { activeAdjustments, ADJUSTMENT_LABELS } from '../../../shared/adjustments'
+import { resolveBlendMode } from '../../../shared/blend-mode'
 import { MAX_WEBP_EDGE, pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { ArtworkSession, canvasPixels } from '../canvas/artwork-render'
 import { TEXT_SHADOW_OPACITY, textMetrics, textWrap } from '../canvas/layer-drawing'
@@ -300,7 +301,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       const coverage = mask === null ? null : session.adjustmentMaskAt(element.id, width, height)
       done += 1
       return {
-        kind: 'adjustment', name: element.name, hidden, opacity: element.opacity, clipping: false, settings: element.settings,
+        kind: 'adjustment', name: element.name, hidden, opacity: element.opacity, blendMode: resolveBlendMode(element), clipping: false, settings: element.settings,
         mask: mask === null || coverage === null ? null : { left: 0, top: 0, width, height, pixels: coverage, disabled: !mask.enabled }
       }
     }
@@ -315,7 +316,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       const layer = await layerOf(element, hidden, !clipped)
       if (!clipped) return [layer]
       return [layer, ...own.map((adjustment): PsdAdjustment => ({
-        kind: 'adjustment', name: ADJUSTMENT_LABELS[adjustment.settings.kind], hidden: !adjustment.enabled, opacity: 1, clipping: true, settings: adjustment.settings, mask: null
+        kind: 'adjustment', name: ADJUSTMENT_LABELS[adjustment.settings.kind], hidden: !adjustment.enabled, opacity: 1, blendMode: 'normal', clipping: true, settings: adjustment.settings, mask: null
       }))]
     }
     const layerOf = async (element: SceneElement, hidden: boolean, adjusted: boolean): Promise<PsdLayer> => {

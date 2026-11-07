@@ -130,7 +130,11 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+Alt+A', action: '选择所有图层' },
       { keys: '1 … 9, 0', action: '不透明度 10% … 90%, 100%；快速连按两位数字设精确值' },
       { keys: 'Shift+加号 / Shift+减号', action: '切换到下一个 / 上一个混合模式' },
-      { keys: 'Alt+Shift+N / M / S / O / F', action: '正常 / 正片叠底 / 滤色 / 叠加 / 柔光' },
+      { keys: 'Alt+Shift+N / K / M / B', action: '正常 / 变暗 / 正片叠底 / 颜色加深' },
+      { keys: 'Alt+Shift+G / S / D', action: '变亮 / 滤色 / 颜色减淡' },
+      { keys: 'Alt+Shift+O / F / H', action: '叠加 / 柔光 / 强光' },
+      { keys: 'Alt+Shift+E / X', action: '差值 / 排除' },
+      { keys: 'Alt+Shift+U / T / C / Y', action: '色相 / 饱和度 / 颜色 / 明度' },
       { keys: 'Alt+单击眼睛', action: '只显示这一层，再按一次恢复' },
       { keys: 'Delete', action: '删除所选图层（没有选区时）' },
       { keys: '方向键 / Shift+方向键', action: '移动 1 / 10 像素' }
@@ -160,12 +164,24 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
   }
 ]
 
+/** Photoshop's Alt+Shift letter for each blend mode. */
 const BLEND_LETTERS: Readonly<Record<string, (typeof BLEND_MODES)[number]>> = {
   KeyN: 'normal',
+  KeyK: 'darken',
   KeyM: 'multiply',
+  KeyB: 'color-burn',
+  KeyG: 'lighten',
   KeyS: 'screen',
+  KeyD: 'color-dodge',
   KeyO: 'overlay',
-  KeyF: 'soft-light'
+  KeyF: 'soft-light',
+  KeyH: 'hard-light',
+  KeyE: 'difference',
+  KeyX: 'exclusion',
+  KeyU: 'hue',
+  KeyT: 'saturation',
+  KeyC: 'color',
+  KeyY: 'luminosity'
 }
 
 /** Keys for the toolbar slots of several tools: the slot's memory and its tools, in the order Shift steps through them. */

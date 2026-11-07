@@ -349,6 +349,7 @@ function AdjustmentNode({ element, artboard, hidden }: { element: Extract<SceneE
                   height={artboard.height}
                   settings={settings}
                   opacity={element.opacity}
+                  blend={resolveBlendMode(element)}
                   mask={shown !== null && mask?.enabled === true ? shown.pixels : null}
                 />
                 {shown !== null && shown.overlay !== null && <KonvaImage image={shown.overlay} width={artboard.width} height={artboard.height} listening={false} />}

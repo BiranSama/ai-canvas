@@ -152,7 +152,7 @@ describe('opening a PSD as a project', () => {
       groups: [],
       layers: [
         { kind: 'pixels', adjustments: [{ settings: { kind: 'invert' }, enabled: false }], name: '照片', left: 0, top: 0, width: 400, height: 200, opacity: 1, visible: true, blendMode: 'normal', groupIndex: null, png, mask: null },
-        { kind: 'adjustment', name: '色阶 1', opacity: 0.6, visible: true, groupIndex: null, settings: levels, mask: { png, enabled: true } }
+        { kind: 'adjustment', name: '色阶 1', blendMode: 'normal', opacity: 0.6, visible: true, groupIndex: null, settings: levels, mask: { png, enabled: true } }
       ]
     })
     await openFileAsProject(new File([new Uint8Array([56, 66, 80, 83])], '调色.psd', { type: '' }))

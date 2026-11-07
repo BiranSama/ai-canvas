@@ -138,7 +138,7 @@ export async function createProjectFromPsd(file: File): Promise<OpenedProject | 
       const mask = layer.mask === null ? null : await window.desktop.importAsset({ projectId, name: `${layer.name} 蒙版.png`, mimeType: 'image/png', bytes: layer.mask.png })
       const element: SceneElement = {
         id: globalThis.crypto.randomUUID(), version: ELEMENT_SCHEMA_VERSION, type: 'adjustment', name: layer.name, description: '',
-        transform: { ...WHOLE_CANVAS }, zIndex: 0, opacity: layer.opacity, blendMode: 'normal', visible: layer.visible, locked: false, groupId: null,
+        transform: { ...WHOLE_CANVAS }, zIndex: 0, opacity: layer.opacity, blendMode: layer.blendMode, visible: layer.visible, locked: false, groupId: null,
         semanticRole: 'adjustment', referencePolicy: 'include', settings: layer.settings,
         mask: mask === null || layer.mask === null ? null : { assetId: mask.id, enabled: layer.mask.enabled }
       }

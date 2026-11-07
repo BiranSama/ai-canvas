@@ -309,7 +309,7 @@ export class CompositeReferenceRenderer {
         // The mask's paint is replayed at its own size, then sampled over the canvas, as the canvas does it.
         const own = mask === null || mask === undefined || !mask.enabled ? null : await layerMaskCoverage(mask, this.#resolveAsset)
         const coverage = own === null ? null : sampleCoverage({ width: own.width, height: own.height, data: own.coverage }, width, height, { scaleX: own.width / width, scaleY: own.height / height, offsetX: 0, offsetY: 0 })
-        adjustPixels(below, element.settings, { coverage, amount: element.opacity })
+        adjustPixels(below, element.settings, { coverage, amount: element.opacity, blend: resolveBlendMode(element) })
         const adjusted = await sharp(below, { raw: { width, height, channels: 4 } }).png().toBuffer()
         base = `<image x="0" y="0" width="${width}" height="${height}" href="data:image/png;base64,${adjusted.toString('base64')}" preserveAspectRatio="none"/>`
         layers = []

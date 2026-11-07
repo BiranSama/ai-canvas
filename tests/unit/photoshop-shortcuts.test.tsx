@@ -148,14 +148,19 @@ describe('Photoshop shortcuts on the canvas', () => {
 
   it('steps blend modes with Shift+plus and minus and picks one with Alt+Shift+letter', async () => {
     await renderWorkspace([NIGHT_VEIL_IDS.title])
+    // Photoshop's order: 正常, then 变暗, 正片叠底 …
     press({ key: '+', code: 'Equal', shiftKey: true })
-    await waitFor(() => expect(element(NIGHT_VEIL_IDS.title).blendMode).toBe('multiply'))
+    await waitFor(() => expect(element(NIGHT_VEIL_IDS.title).blendMode).toBe('darken'))
     press({ key: '_', code: 'Minus', shiftKey: true })
     await waitFor(() => expect(element(NIGHT_VEIL_IDS.title).blendMode).toBe('normal'))
-    press({ key: 'S', code: 'KeyS', shiftKey: true, altKey: true })
-    await waitFor(() => expect(element(NIGHT_VEIL_IDS.title).blendMode).toBe('screen'))
-    press({ key: 'F', code: 'KeyF', shiftKey: true, altKey: true })
-    await waitFor(() => expect(element(NIGHT_VEIL_IDS.title).blendMode).toBe('soft-light'))
+    press({ key: '_', code: 'Minus', shiftKey: true })
+    await waitFor(() => expect(element(NIGHT_VEIL_IDS.title).blendMode).toBe('luminosity'))
+    const letters = { KeyN: 'normal', KeyK: 'darken', KeyM: 'multiply', KeyB: 'color-burn', KeyG: 'lighten', KeyS: 'screen', KeyD: 'color-dodge', KeyO: 'overlay', KeyF: 'soft-light', KeyH: 'hard-light', KeyE: 'difference', KeyX: 'exclusion', KeyU: 'hue', KeyT: 'saturation', KeyC: 'color', KeyY: 'luminosity' } as const
+    // Each letter is pressed when the layer is in another mode, so each one is seen to change it.
+    for (const [code, mode] of Object.entries(letters)) {
+      press({ key: code.slice(3), code, shiftKey: true, altKey: true })
+      await waitFor(() => expect(element(NIGHT_VEIL_IDS.title).blendMode, code).toBe(mode))
+    }
   })
 
   it('duplicates in place with Ctrl+J, directly above the source', async () => {

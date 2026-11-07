@@ -35,7 +35,11 @@ export const canvasSchema = z.object({
 })
 
 const referencePolicySchema = z.enum(['include', 'reference-only', 'exclude'])
-export const blendModeSchema = z.enum(['normal', 'multiply', 'screen', 'overlay', 'soft-light'])
+/** Photoshop's blend modes the canvas draws natively; the order is Photoshop's. */
+export const blendModeSchema = z.enum([
+  'normal', 'darken', 'multiply', 'color-burn', 'lighten', 'screen', 'color-dodge',
+  'overlay', 'soft-light', 'hard-light', 'difference', 'exclusion', 'hue', 'saturation', 'color', 'luminosity'
+])
 
 const elementBaseShape = {
   id: idSchema,
@@ -492,7 +496,7 @@ export const sceneSchema = sceneBaseSchema.superRefine((scene, context) => {
     if (
       element.blendMode !== undefined &&
       element.blendMode !== 'normal' &&
-      (element.type === 'placeholder' || element.type === 'mask' || element.type === 'group' || element.type === 'adjustment')
+      (element.type === 'placeholder' || element.type === 'mask' || element.type === 'group')
     ) {
       context.addIssue({
         code: 'custom',

@@ -2,6 +2,7 @@ import type Konva from 'konva'
 import { useLayoutEffect, useRef } from 'react'
 import { Group, Image as KonvaImage, Layer, Rect, Stage } from 'react-konva'
 import type { SceneElement } from '../../../domain'
+import { resolveBlendMode } from '../../../shared/blend-mode'
 import { ElementVisual } from './element-visual'
 import { AdjustmentBackdrop, type AdjustmentCoverage } from './adjustment-layer'
 import { drawRect, renderImageEffects, type AdjustmentClips } from './image-effects'
@@ -61,7 +62,7 @@ export function ArtworkStage({ width, height, background, outputScale, draws, cl
 
 function ArtworkLayer({ draw, outputScale }: { readonly draw: LayerDraw; readonly outputScale: number }): React.JSX.Element {
   if (draw.element.type === 'adjustment') {
-    return <AdjustmentBackdrop width={draw.width} height={draw.height} settings={draw.element.settings} opacity={draw.element.opacity} mask={draw.adjustmentMask} />
+    return <AdjustmentBackdrop width={draw.width} height={draw.height} settings={draw.element.settings} opacity={draw.element.opacity} blend={resolveBlendMode(draw.element)} mask={draw.adjustmentMask} />
   }
   // A text or shape mask covers the box: drawn alone, it is the box in white, through the mask.
   const visual = draw.maskOnly && draw.element.type !== 'image' ? <Rect width={draw.width} height={draw.height} fill="#FFFFFF" /> : (

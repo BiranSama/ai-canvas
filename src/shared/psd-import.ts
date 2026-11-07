@@ -26,6 +26,7 @@ export interface PsdLayerImport {
 export interface PsdAdjustmentImport {
   readonly kind: 'adjustment'
   readonly name: string
+  readonly blendMode: BlendMode
   readonly opacity: number
   readonly visible: boolean
   readonly groupIndex: number | null

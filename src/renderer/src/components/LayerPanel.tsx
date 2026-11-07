@@ -29,7 +29,7 @@ import {
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { pathInBox, type SceneElement } from '../../../domain'
-import { BLEND_MODES, blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
+import { blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
 import { mergeDown, mergeVisible, rasterizeLayer } from '../canvas/layer-actions'
 import { ADJUSTMENT_LAYER_KINDS, createAdjustmentLayer } from '../adjustments/adjustment-actions'
@@ -40,6 +40,7 @@ import { layerMaskPixels, pixelLayerCanvas, pixelLayerVersion, subscribePixelLay
 import { hasSelection, useSelectionStore } from '../selection/selection-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeInput } from './ImeSafeTextField'
+import { BlendModeOptions } from './BlendModeOptions'
 
 const KIND_LABELS: Record<SceneElement['type'], string> = {
   image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体', light: '光影', mask: 'AI 区域', group: '组合', adjustment: '调整'
@@ -435,7 +436,7 @@ export function LayerPanel(): React.JSX.Element {
         <select aria-label="混合模式" value={sharedBlend ?? ''} disabled={blendable.length === 0}
           onChange={(event) => updateSelected({ blendMode: event.currentTarget.value }, '调整混合模式', blendable)}>
           {sharedBlend === null && <option value="" disabled>{blendable.length === 0 ? '混合模式' : '多种'}</option>}
-          {BLEND_MODES.map((mode) => <option key={mode} value={mode}>{blendModeLabel(mode)}</option>)}
+          <BlendModeOptions />
         </select>
         <label className="layer-opacity">
           <span>不透明度</span>

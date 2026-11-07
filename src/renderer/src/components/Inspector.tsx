@@ -17,6 +17,7 @@ import { AdjustmentLayerSection, LayerAdjustmentsSection } from './AdjustmentSec
 import { LayerPanel } from './LayerPanel'
 import { UnifiedRenderSection } from './UnifiedRenderSection'
 import { ImeSafeInput, ImeSafeTextarea } from './ImeSafeTextField'
+import { BlendModeOptions } from './BlendModeOptions'
 import { simplePropertiesFor, type SimplePropertyDefinition } from '../inspector/property-schema'
 
 const elementLabels: Record<SceneElement['type'], string> = {
@@ -292,12 +293,12 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
           {ratioLocked ? <Link2 size={13} /> : <Unlink2 size={13} />}{ratioLocked ? '已锁定宽高比例' : '自由改变宽高'}
         </button>
       </div>}
-      {elementSupportsBlendMode(element.type) && showSection('混合 模式 正片叠底 滤色 叠加 柔光 blend mode multiply screen overlay soft-light') && <div className="inspector-section element-blend">
+      {elementSupportsBlendMode(element.type) && showSection('混合 模式 正片叠底 滤色 叠加 柔光 变暗 变亮 颜色加深 颜色减淡 强光 差值 排除 色相 饱和度 颜色 明度 blend mode') && <div className="inspector-section element-blend">
         <p className="section-kicker">图层混合</p>
         <label className="wide-field"><span>混合</span><select aria-label="混合" value={resolveBlendMode(element)} onChange={(event) => {
           const blendMode = event.currentTarget.value as Parameters<typeof blendModeLabel>[0]
           updateElement(element.id, { blendMode }, `将“${element.name}”混合改为${blendModeLabel(blendMode)}`)
-        }}>{BLEND_MODES.map((blendMode) => <option key={blendMode} value={blendMode}>{blendModeLabel(blendMode)}</option>)}</select></label>
+        }}><BlendModeOptions /></select></label>
         <p className="field-note">混合只作用于作品元素；工具玻璃与选择控件不参与合成。</p>
       </div>}
       {element.type === 'text' && (

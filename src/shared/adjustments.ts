@@ -1,4 +1,5 @@
-import type { AdjustmentKind, AdjustmentSettings, CurvePoints, LayerAdjustment, LevelsChannel } from '../domain'
+import type { AdjustmentKind, AdjustmentSettings, BlendMode, CurvePoints, LayerAdjustment, LevelsChannel } from '../domain'
+import { blendInPlace } from './blend-mode'
 
 /*
  * The pixel math of Photoshop's adjustments, shared by the canvas, the
@@ -365,6 +366,8 @@ export interface AdjustOptions {
   readonly coverage?: Uint8Array | Uint8ClampedArray | null
   /** The layer's opacity: how much of the adjustment shows at full coverage. */
   readonly amount?: number
+  /** An adjustment layer's blend mode: the adjusted colours are laid over the originals in it. */
+  readonly blend?: BlendMode
 }
 
 /**
@@ -376,6 +379,12 @@ export function adjustPixels(data: Pixels, settings: AdjustmentSettings, options
   const amount = options.amount ?? 1
   const coverage = options.coverage ?? null
   if (amount <= 0 || isNeutralAdjustment(settings)) return
+  if (options.blend !== undefined && options.blend !== 'normal') {
+    const adjusted = data.slice()
+    adjustPixels(adjusted, settings)
+    blendInPlace(data, adjusted, options.blend, { coverage, amount })
+    return
+  }
   const tables = channelTables(settings)
   // The adjusted picture is mixed with the original, so a value past the range is cut first, as the picture would have it.
   const mix = (pixel: number, value: number, original: number): number => {
