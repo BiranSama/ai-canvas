@@ -214,6 +214,8 @@ export async function rasterizeLayer(elementId: string): Promise<boolean> {
   const element = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === elementId)
   if (element === undefined || (element.type !== 'text' && element.type !== 'shape')) return false
   if (element.locked) return refuse(`「${element.name}」已锁定，解锁后才能栅格化。`)
+  // A composition placeholder is not drawn into the picture, so it would come out empty.
+  if (element.type === 'shape' && element.role !== 'final') return refuse(`「${element.name}」是构图占位，不在成品里，不能栅格化；先在属性里把用途改成成品。`)
   const drawn = await drawnAsset([element.id], '栅格化图层', { base: element.id, showHidden: true })
   if (drawn === null) return false
   return useWorkspaceStore.getState().execute('栅格化图层', [{ kind: 'element.rasterize', elementId: element.id, assetId: drawn.assetId, transform: drawn.transform }])

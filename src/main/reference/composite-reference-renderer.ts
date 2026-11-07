@@ -1,7 +1,7 @@
 import sharp from 'sharp'
 import { hiddenByGroups, pathInBox, sceneSchema, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
-import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels } from '../../shared/adjustments'
+import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, sampleCoverage } from '../../shared/adjustments'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
@@ -306,8 +306,10 @@ export class CompositeReferenceRenderer {
         // An adjustment layer changes everything drawn so far: draw it, adjust it, and go on over the result.
         const below = await sharp(Buffer.from(svg())).ensureAlpha().raw().toBuffer()
         const mask = element.mask
-        const coverage = mask === null || mask === undefined || !mask.enabled ? null : await layerMaskCoverage(mask, this.#resolveAsset, { width, height })
-        adjustPixels(below, element.settings, { coverage: coverage?.coverage ?? null, amount: element.opacity })
+        // The mask's paint is replayed at its own size, then sampled over the canvas, as the canvas does it.
+        const own = mask === null || mask === undefined || !mask.enabled ? null : await layerMaskCoverage(mask, this.#resolveAsset)
+        const coverage = own === null ? null : sampleCoverage({ width: own.width, height: own.height, data: own.coverage }, width, height, { scaleX: own.width / width, scaleY: own.height / height, offsetX: 0, offsetY: 0 })
+        adjustPixels(below, element.settings, { coverage, amount: element.opacity })
         const adjusted = await sharp(below, { raw: { width, height, channels: 4 } }).png().toBuffer()
         base = `<image x="0" y="0" width="${width}" height="${height}" href="data:image/png;base64,${adjusted.toString('base64')}" preserveAspectRatio="none"/>`
         layers = []

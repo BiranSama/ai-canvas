@@ -93,6 +93,11 @@ test('adjustments draw the same in the export and in Main', async () => {
       const top = new Uint8Array(width * height)
       for (let y = 0; y < height; y += 1) top.fill(y < height / 2 ? 255 : 96, y * width, (y + 1) * width)
       const mask = await api.importPixels({ projectId: current.projectId, name: '调整蒙版', width, height, gray: top })
+      // A mask at another size than the canvas, as one from a PSD or capped on a large canvas is: it is sampled over the canvas.
+      const small = { width: width / 2, height: height / 2 }
+      const ring = new Uint8Array(small.width * small.height)
+      for (let y = 0; y < small.height; y += 1) for (let x = 0; x < small.width; x += 1) ring[y * small.width + x] = Math.hypot(x - small.width / 2, y - small.height / 2) < small.width / 3 ? 255 : 40
+      const smallMask = await api.importPixels({ projectId: current.projectId, name: '小蒙版', width: small.width, height: small.height, gray: ring })
       const base = { version, description: '', zIndex: 0, visible: true, locked: false, groupId: null, referencePolicy: 'include' as const }
       const imageId = crypto.randomUUID()
       const invertId = crypto.randomUUID()
@@ -124,7 +129,7 @@ test('adjustments draw the same in the export and in Main', async () => {
             ]
           } },
           { kind: 'element.add', element: { ...base, id: invertId, type: 'adjustment', name: '反相 1', opacity: 0.5, semanticRole: 'adjustment', transform: whole, settings: { kind: 'invert' } } },
-          { kind: 'element.add', element: { ...base, id: crypto.randomUUID(), type: 'adjustment', name: '去色 1', opacity: 0.3, semanticRole: 'adjustment', transform: whole, settings: { kind: 'desaturate' }, mask: { assetId: mask.id, enabled: true } } },
+          { kind: 'element.add', element: { ...base, id: crypto.randomUUID(), type: 'adjustment', name: '去色 1', opacity: 0.3, semanticRole: 'adjustment', transform: whole, settings: { kind: 'desaturate' }, mask: { assetId: smallMask.id, enabled: true } } },
           { kind: 'element.add', element: {
             ...base, id: blackWhiteId, type: 'adjustment', name: '黑白 1', opacity: 0.7, semanticRole: 'adjustment', transform: whole,
             settings: { kind: 'black-white', reds: 40, yellows: 60, greens: 40, cyans: 60, blues: 20, magentas: 80, tint: null },

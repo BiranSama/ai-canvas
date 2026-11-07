@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { ELEMENT_SCHEMA_VERSION, WHOLE_CANVAS, type AdjustmentKind, type AdjustmentSettings, type LayerAdjustment, type LayerMask, type SceneCommand, type SceneElement } from '../../../domain'
 import { ADJUSTMENT_LABELS, adjustLayerPixels, autoLevels, defaultAdjustment, histogram, type Histogram } from '../../../shared/adjustments'
 import { boxLayerSpace, boxMaskSize, imageLayerSpace, maskInLayerSpace } from '../../../shared/layer-space'
+import { applyImageEffects, hasVisibleEffects } from '../../../shared/layer-effects'
 import { showAppNotice } from '../components/app-notice'
 import { rememberGrayAsset } from '../canvas/asset-pixels'
 import { useAdjustmentPreview } from '../canvas/adjustment-preview'
@@ -162,6 +163,8 @@ export function layerHistogram(element: ImageElement, adjustmentId: string): His
   if (pixels === null) return null
   const list = element.adjustments ?? []
   const index = list.findIndex((adjustment) => adjustment.id === adjustmentId)
+  // The colour match and feather come first, as the layer is drawn.
+  if (hasVisibleEffects(element.effects)) applyImageEffects(pixels.data, pixels.width, pixels.height, element.effects)
   // Earlier adjustments made in a selection are left out here: the histogram is a guide, not the picture.
   adjustLayerPixels(pixels.data, (index < 0 ? list : list.slice(0, index)).filter((adjustment) => adjustment.clip === undefined))
   return histogram(pixels.data)
@@ -242,7 +245,9 @@ export async function createAdjustmentLayer(kind: AdjustmentKind, settings: Adju
   if (mask === 'failed') { showAppNotice('选区没有存好，调整图层没有加上。', 'problem'); return null }
   const layer: AdjustmentLayer = { ...base, mask }
   const current = useWorkspaceStore.getState()
-  const above = Math.max(-1, ...current.scene.elements.filter((element) => current.selectedIds.includes(element.id)).map((element) => element.zIndex))
+  // A selected group's marker lies below its layers: the adjustment goes above the group's layers, not just above the marker.
+  const selected = new Set(current.scene.elements.filter((element) => current.selectedIds.includes(element.id)).flatMap((element) => element.type === 'group' ? [element.id, ...element.childIds] : [element.id]))
+  const above = Math.max(-1, ...current.scene.elements.filter((element) => selected.has(element.id)).map((element) => element.zIndex))
   const commands: SceneCommand[] = [{ kind: 'element.add', element: layer }]
   if (above >= 0 && above + 1 < current.scene.elements.length) commands.push({ kind: 'element.reorder', elementId: layer.id, toIndex: above + 1 })
   if (!await current.execute(`新建调整图层「${layer.name}」`, commands)) return null
