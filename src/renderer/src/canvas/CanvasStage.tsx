@@ -190,7 +190,7 @@ function ImageVisual({ element, width, height, plain = false }: {
     const maskClips = mask === null ? new Map<string, Uint8Array>() : clipLookup(paintClipIds(mask.paint), size)
     // A clip or mask still being read keeps the layer pending, so nothing is drawn beyond its selection.
     if (clips === null || (mask !== null && (gray === null || maskClips === null))) return null
-    return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask: maskLater ? { ...mask, enabled: false } : mask, gray: gray.data, clips: maskClips, view: maskView })
+    return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask, deferred: maskLater, gray: gray.data, clips: maskClips, view: maskView })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas; pixelsVersion a clip or mask read
   }, [image, element.id, element.paint, element.mask, maskView, maskLater, paintVersion, pixelsVersion])
   const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)

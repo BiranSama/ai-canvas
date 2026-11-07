@@ -319,12 +319,19 @@ export function applyFilter(data: Pixels, width: number, height: number, setting
   }
   const coverage = options.coverage ?? null
   if (coverage === null) { data.set(result); return }
+  // Mixed by the selection in premultiplied colour: where a blur moves transparency, the colour of
+  // transparent pixels must not darken what the selection lets through.
   for (let pixel = 0, index = 0; pixel < coverage.length; pixel += 1, index += 4) {
     const weight = coverage[pixel]! / 255
     if (weight <= 0) continue
-    for (let channel = 0; channel < 4; channel += 1) {
-      const original = data[index + channel]!
-      data[index + channel] = Math.round(original + (result[index + channel]! - original) * weight)
+    const before = data[index + 3]!
+    const after = result[index + 3]!
+    const alpha = before + (after - before) * weight
+    if (alpha <= 0) { data[index] = 0; data[index + 1] = 0; data[index + 2] = 0; data[index + 3] = 0; continue }
+    for (let channel = 0; channel < 3; channel += 1) {
+      const original = data[index + channel]! * before
+      data[index + channel] = Math.round(Math.min(255, (original + (result[index + channel]! * after - original) * weight) / alpha))
     }
+    data[index + 3] = Math.round(alpha)
   }
 }

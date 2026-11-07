@@ -112,6 +112,17 @@ describe('filters', () => {
     expect(at(data, 8, 6, 0)[0]).toBe(0)
   })
 
+  it('mixes what a soft selection lets through in premultiplied colour, so a blur into transparency keeps its colour', () => {
+    const row = (): Uint8ClampedArray => new Uint8ClampedArray([255, 0, 0, 255, 0, 0, 0, 0, 0, 0, 0, 0])
+    const full = row()
+    applyFilter(full, 3, 1, { kind: 'gaussian-blur', radius: 1 })
+    const half = row()
+    applyFilter(half, 3, 1, { kind: 'gaussian-blur', radius: 1 }, { coverage: new Uint8Array([255, 128, 255]) })
+    // Half of the blurred-in red: still red, at about half its alpha.
+    expect(at(half, 3, 1, 0).slice(0, 3)).toEqual([255, 0, 0])
+    expect(Math.abs(at(half, 3, 1, 0)[3]! - at(full, 3, 1, 0)[3]! * 128 / 255)).toBeLessThanOrEqual(1)
+  })
+
   it('sits in a layer\'s list with the adjustments, its mask going on after the ones that move pixels', () => {
     for (const kind of ['gaussian-blur', 'unsharp-mask', 'add-noise', 'motion-blur'] as const) {
       const settings = defaultFilter(kind)

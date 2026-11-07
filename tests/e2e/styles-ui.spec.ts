@@ -117,6 +117,16 @@ test('the layer style dialog previews and records one step, styles copy between 
     await page.keyboard.press('Control+Alt+f')
     await expect.poll(filters).toEqual([8, 8])
 
+    // A mask on the blurred picture goes on after the blur, and can still be applied.
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.getByRole('toolbar', { name: '图层操作' }).getByRole('button', { name: '添加蒙版' }).click()
+    await expect.poll(async () => ((await element(page, '渐变')) as { mask?: unknown }).mask ?? null).not.toBeNull()
+    await row(page, imageId).click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '应用蒙版' }).click()
+    // Applied, the mask is gone into the pixels (all white here, so the picture is the same one).
+    await expect.poll(async () => ((await element(page, '渐变')) as { mask?: unknown }).mask ?? null).toBeNull()
+    await expect(page.getByText('还没画好', { exact: false })).toHaveCount(0)
+
     // Alt+Shift letters set blend modes, as in Photoshop.
     await page.getByRole('tab', { name: '图层' }).click()
     await row(page, imageId).locator('.layer-copy').click()

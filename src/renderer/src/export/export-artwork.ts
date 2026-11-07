@@ -316,13 +316,16 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       const filtered = own.some((adjustment) => isFilterSettings(adjustment.settings))
       // A layer clipped to another cannot have adjustments clipped to it alone: in Photoshop they would change its whole clipping mask.
       const inStack = clipped.has(element.id)
-      const asLayers = own.length > 0 && element.type === 'image' && !filtered && !inStack && !(element.effects?.shadow !== null && element.effects?.shadow !== undefined && element.effects.shadow.opacity > 0)
+      // A styled layer's own adjustments go on before its styles; clipped adjustment layers would go on after them.
+      const styled = element.type === 'image' && element.style !== undefined && LAYER_STYLE_KINDS.some((kind) => element.style![kind] !== undefined)
+      const asLayers = own.length > 0 && element.type === 'image' && !filtered && !inStack && !styled && !(element.effects?.shadow !== null && element.effects?.shadow !== undefined && element.effects.shadow.opacity > 0)
         && own.every((adjustment) => adjustment.clip === undefined)
       if (own.length > 0 && !asLayers && activeAdjustments(own).length > 0) {
         notes.push(filtered
           ? `「${element.name}」的滤镜${own.some((adjustment) => !isFilterSettings(adjustment.settings)) ? '和调整' : ''}并进了像素：Photoshop 只在智能对象上放滤镜。`
           : inStack ? `「${element.name}」剪贴在下面的图层上，它自己的调整并进了像素。`
-            : `「${element.name}」的调整${own.some((adjustment) => adjustment.clip !== undefined) ? '只作用在选区里' : '和投影在一起'}，并进了像素。`)
+            : styled ? `「${element.name}」带图层样式，它自己的调整并进了像素，样式仍是 PS 的图层效果。`
+              : `「${element.name}」的调整${own.some((adjustment) => adjustment.clip !== undefined) ? '只作用在选区里' : '和投影在一起'}，并进了像素。`)
       }
       const layer = await layerOf(element, hidden, !asLayers)
       if (!asLayers) return [layer]

@@ -82,7 +82,7 @@ test('a clipping stack draws the same in the export and in Main, shown only wher
     const before = await rawPixels(await exportThroughPanel(page))
     await addLayers(page, [
       // A half-transparent base in multiply, with styles that are not part of what clips.
-      image('底', assets.disc!, box(100, 100, 288, 288), { opacity: 0.8, blendMode: 'multiply', style: {
+      image('底', assets.disc!, box(100, 100, 288, 288), { opacity: 0.8, blendMode: 'multiply', adjustments: [{ id: randomUUID(), enabled: true, settings: { kind: 'desaturate' } }], style: {
         dropShadow: { enabled: true, blendMode: 'multiply', color: '#102030', opacity: 0.6, angle: 120, distance: 12, spread: 0, size: 10 },
         stroke: { enabled: true, size: 6, position: 'outside', color: '#FFFFFF', opacity: 1 }
       } }),
@@ -133,6 +133,8 @@ test('a clipping stack draws the same in the export and in Main, shown only wher
     expect(byName.get('底')?.effects?.dropShadow?.[0]).toMatchObject({ blendMode: 'multiply', distance: { value: 12 } })
     expect(byName.get('底')?.effects?.stroke?.[0]).toMatchObject({ position: 'outside', size: { value: 6 } })
     expect(byName.get('底二')?.effects?.stroke?.[0]).toMatchObject({ enabled: false, size: { value: 4 } })
+    // A styled picture's own adjustments are in its pixels: as clipped layers they would go on after its styles.
+    expect(byName.has('去色')).toBe(false)
     const composite = Buffer.from(psd.imageData!.data.buffer, psd.imageData!.data.byteOffset, psd.imageData!.data.byteLength)
     expect(worstDifference(composite, exported).value).toBeLessThanOrEqual(2)
     const opened = await readPsdForImport(bytes)

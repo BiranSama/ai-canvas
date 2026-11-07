@@ -215,6 +215,11 @@ export interface MaskSource {
   readonly gray: ClipPixels
   readonly clips: ClipLookup
   readonly view: MaskView
+  /**
+   * The mask is on but goes on later, after the layer's filters: the layer
+   * keeps its pixels (applying the mask reads them) and is drawn unmasked.
+   */
+  readonly deferred?: boolean
 }
 
 /** What the layer should be drawn from: the asset itself when nothing is painted on it and no mask applies. */
@@ -232,7 +237,7 @@ export function paintedSource(elementId: string, image: HTMLImageElement, ops: r
   if (layer === null) return image
   const mask = maskSource === null ? null : ensureMask(elementId, maskSource.mask, maskSource.gray, layer.canvas.width, layer.canvas.height, maskSource.clips)
   if (maskSource === null) masks.delete(elementId)
-  layer.display = { mask, enabled: maskSource?.mask.enabled ?? false, view: maskSource?.view ?? 'normal' }
+  layer.display = { mask, enabled: maskSource?.mask.enabled === true && maskSource.deferred !== true, view: maskSource?.view ?? 'normal' }
   const key = `${layer.revision}|${mask === null ? '' : `${mask.assetId}:${mask.revision}`}|${layer.display.enabled}|${layer.display.view}`
   if (key !== layer.composed) {
     compose(layer, null)
