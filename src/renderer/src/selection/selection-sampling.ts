@@ -43,20 +43,12 @@ export async function samplePixels(allLayers: boolean): Promise<SampledPixels | 
     : [layer.id]
   const key = `${scene.projectId}:${scene.revision}:${layer?.id ?? '*'}`
   if (cached?.key === key) return cached.pixels
-  const drawn = await renderLayersAsDrawn(ids, layer === null ? {} : { base: layer.id, showHidden: true })
+  // The whole picture includes its background, as Photoshop's background layer is part of it, drawn first so adjustment layers change it too.
+  const drawn = await renderLayersAsDrawn(ids, layer === null ? { canvasBackground: true } : { base: layer.id, showHidden: true })
   if (drawn === null) return null
-  const output = document.createElement('canvas')
-  output.width = drawn.width
-  output.height = drawn.height
-  const context = output.getContext('2d', { willReadFrequently: true })
+  const context = drawn.getContext('2d', { willReadFrequently: true })
   if (context === null) return null
-  // The whole picture includes its background, as Photoshop's background layer is part of it.
-  if (layer === null && !scene.canvas.transparent) {
-    context.fillStyle = scene.canvas.backgroundColor
-    context.fillRect(0, 0, output.width, output.height)
-  }
-  context.drawImage(drawn, 0, 0)
-  const pixels = { width: output.width, height: output.height, rgba: context.getImageData(0, 0, output.width, output.height).data }
+  const pixels = { width: drawn.width, height: drawn.height, rgba: context.getImageData(0, 0, drawn.width, drawn.height).data }
   cached = { key, pixels }
   return pixels
 }

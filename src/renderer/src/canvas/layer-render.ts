@@ -2,8 +2,8 @@ import { useWorkspaceStore } from '../store/workspace-store'
 import { ArtworkSession } from './artwork-render'
 
 /*
- * Layers drawn as they look, at the canvas's output size and without the
- * canvas colour behind them, for merging, rasterizing and sampling: what the
+ * Layers drawn as they look, at the canvas's output size and, unless asked,
+ * without the canvas colour behind them, for merging, rasterizing and sampling: what the
  * layers look like is what the new pixels hold. They are drawn by the
  * export renderer, so images with effects or adjustments come out at full
  * size, not at the size the screen happens to show them.
@@ -14,6 +14,8 @@ export interface LayerRenderOptions {
   readonly base?: string
   /** Draw these layers even when they are hidden. */
   readonly showHidden?: boolean
+  /** Draw the canvas colour first, as part of the picture, so adjustment layers change it as they do on the canvas. */
+  readonly canvasBackground?: boolean
 }
 
 /**
@@ -28,7 +30,7 @@ export async function renderLayersAsDrawn(ids: readonly string[], options: Layer
     return session.render({
       width: scene.canvas.outputWidth,
       height: scene.canvas.outputHeight,
-      background: 'none',
+      background: options.canvasBackground === true ? 'canvas' : 'none',
       layers: { ids, ...(options.base === undefined ? {} : { base: options.base }), ...(options.showHidden === undefined ? {} : { showHidden: options.showHidden }) }
     })
   } catch {
