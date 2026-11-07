@@ -8,6 +8,7 @@ import { useMaskState } from '../../src/renderer/src/canvas/mask-state'
 import { useEditDialog } from '../../src/renderer/src/components/edit-dialog-store'
 import { rectMask } from '../../src/shared/mask-raster'
 import { selectionCanvasStamp, setSelectionMask, useSelectionStore } from '../../src/renderer/src/selection/selection-store'
+import type * as AdjustmentActions from '../../src/renderer/src/adjustments/adjustment-actions'
 
 vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
   const React = await import('react')
@@ -17,6 +18,13 @@ vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
     })
   }
 })
+
+const adjusting = vi.hoisted(() => ({ layer: [] as string[], auto: [] as string[] }))
+vi.mock('../../src/renderer/src/adjustments/adjustment-actions', async (importOriginal) => ({
+  ...await importOriginal<typeof AdjustmentActions>(),
+  adjustSelectedLayer: vi.fn(async (kind: string) => { adjusting.layer.push(kind); return true }),
+  autoTone: vi.fn(async (mode: string) => { adjusting.auto.push(mode); return true })
+}))
 
 const desktop = {
   getRuntimeInfo: vi.fn(),
@@ -331,6 +339,27 @@ describe('Photoshop shortcuts on the canvas', () => {
     expect(tool()).toBe('object-select')
     press({ key: 'W', code: 'KeyW', shiftKey: true })
     expect(tool()).toBe('magic-wand')
+  })
+
+  it('opens the adjustments with Photoshop keys, Ctrl+I inverting a mask being edited instead', async () => {
+    adjusting.layer.length = 0
+    adjusting.auto.length = 0
+    await renderWorkspace([NIGHT_VEIL_IDS.bottle])
+    press({ key: 'l', code: 'KeyL', ctrlKey: true })
+    press({ key: 'm', code: 'KeyM', ctrlKey: true })
+    press({ key: 'u', code: 'KeyU', ctrlKey: true })
+    press({ key: 'b', code: 'KeyB', ctrlKey: true })
+    press({ key: 'i', code: 'KeyI', ctrlKey: true })
+    press({ key: 'U', code: 'KeyU', ctrlKey: true, shiftKey: true })
+    press({ key: 'B', code: 'KeyB', ctrlKey: true, altKey: true, shiftKey: true })
+    press({ key: 'L', code: 'KeyL', ctrlKey: true, shiftKey: true })
+    press({ key: 'L', code: 'KeyL', ctrlKey: true, altKey: true, shiftKey: true })
+    expect(adjusting.layer).toEqual(['levels', 'curves', 'hue-saturation', 'color-balance', 'invert', 'desaturate', 'black-white'])
+    expect(adjusting.auto).toEqual(['tone', 'contrast'])
+
+    useMaskState.setState({ editing: NIGHT_VEIL_IDS.bottle })
+    press({ key: 'i', code: 'KeyI', ctrlKey: true })
+    expect(adjusting.layer).toHaveLength(7)
   })
 
   it('opens Feather with Shift+F6 and Fill with Shift+F5', async () => {

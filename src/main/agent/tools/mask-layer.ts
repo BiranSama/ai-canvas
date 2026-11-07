@@ -5,7 +5,7 @@ import { percentBoxSchema } from './geometry'
 import { batchPlan, sceneWrite } from './scene-write'
 import { defineTool, rejected, type AgentToolContext } from './types'
 
-type PictureLayer = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
+type PictureLayer = Extract<SceneElement, { type: 'image' | 'text' | 'shape' | 'adjustment' }>
 
 const SOURCES = { subject: '主体', box: '方框', ellipse: '椭圆', selection: '用户的选区', current: '现有蒙版' } as const
 const COMBINE = { replace: '', add: '加进', subtract: '从中减去', intersect: '只留与之重叠的' } as const
@@ -24,7 +24,7 @@ function markedOutlines(context: AgentToolContext): Extract<LayerMaskShape, { ki
 export const maskLayerTool = defineTool({
   name: 'mask_layer',
   title: '图层蒙版',
-  description: '像 Photoshop 的图层蒙版：遮住图层的一部分而不删像素，随时能改回；用于图片、文字和形状图层，不花钱、可撤销。source 定蒙版显示哪里：subject 图片里的主体（本机模型，常用来去背景）、box 或 ellipse 一个框（region 给位置）、selection 用户本轮的选区、current 现有蒙版（配合 invert 反相或 feather 羽化）。invert 为 true 时反过来，遮住这块、露出其余。combine 和已有蒙版合起来：add 多露出、subtract 多遮住、intersect 只留重叠处，默认 replace 整个换掉。action：delete 删掉蒙版，apply 把蒙版应用进像素（遮住的像素真的删掉，文字和形状会栅格化），disable、enable 停用和启用。给生图用的修改区、保护区是 add_mask，不是这个。',
+  description: '像 Photoshop 的图层蒙版：遮住图层的一部分而不删像素，随时能改回；用于图片、文字、形状和调整图层，不花钱、可撤销。给调整图层加蒙版就只调整那一部分：主体用 source=subject 加 subject_of 指出哪张图。source 定蒙版显示哪里：subject 图片里的主体（本机模型，常用来去背景）、box 或 ellipse 一个框（region 给位置）、selection 用户本轮的选区、current 现有蒙版（配合 invert 反相或 feather 羽化）。invert 为 true 时反过来，遮住这块、露出其余。combine 和已有蒙版合起来：add 多露出、subtract 多遮住、intersect 只留重叠处，默认 replace 整个换掉。action：delete 删掉蒙版，apply 把蒙版应用进像素（遮住的像素真的删掉，文字和形状会栅格化），disable、enable 停用和启用。给生图用的修改区、保护区是 add_mask，不是这个。',
   parameters: z.object({
     target: z.string().min(1).max(120).describe('图层编号'),
     action: z.enum(['set', 'delete', 'apply', 'disable', 'enable']).optional().describe('默认 set：加上或改蒙版'),
@@ -32,11 +32,12 @@ export const maskLayerTool = defineTool({
     region: percentBoxSchema.optional().describe('box、ellipse 的 [x, y, 宽, 高]，画布百分比'),
     invert: z.boolean().optional().describe('反过来：遮住这块，露出其余'),
     feather: z.number().min(0).max(250).optional().describe('边缘羽化，画布像素'),
-    combine: z.enum(['replace', 'add', 'subtract', 'intersect']).optional().describe('和已有蒙版怎么合，默认 replace')
+    combine: z.enum(['replace', 'add', 'subtract', 'intersect']).optional().describe('和已有蒙版怎么合，默认 replace'),
+    subject_of: z.string().min(1).max(120).optional().describe('source=subject 时从这个图片图层里找主体；给调整图层加主体蒙版时必填，只调整主体')
   }).strict(),
   registryName: 'scene.update_elements',
   available: (context) => context.layerMask !== null && context.layerMask !== undefined
-    && context.scene.elements.some((element) => element.type === 'image' || element.type === 'text' || element.type === 'shape'),
+    && context.scene.elements.some((element) => element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment'),
   describe: (args) => {
     const action = args.action ?? 'set'
     if (action === 'delete') return `删掉 ${args.target} 的蒙版`
@@ -47,8 +48,8 @@ export const maskLayerTool = defineTool({
   async prepare(args, context) {
     const resolved = context.refs.resolve(args.target, context.scene)
     if (typeof resolved === 'string') return rejected(resolved)
-    if (resolved.type !== 'image' && resolved.type !== 'text' && resolved.type !== 'shape') {
-      return rejected(`${args.target} 不是图片、文字或形状图层，没有图层蒙版。`)
+    if (resolved.type !== 'image' && resolved.type !== 'text' && resolved.type !== 'shape' && resolved.type !== 'adjustment') {
+      return rejected(`${args.target} 不是图片、文字、形状或调整图层，没有图层蒙版。`)
     }
     if (resolved.locked) return rejected(`${args.target} 已锁定。`)
     const target: PictureLayer = resolved
@@ -71,6 +72,7 @@ export const maskLayerTool = defineTool({
           context, `已${enabled ? '启用' : '停用'} ${ref} 的蒙版`, [target.id])
       }
       if (!mask.enabled) return rejected(`${ref} 的蒙版停用着。`, '先 enable 再 apply，或者直接 delete。')
+      if (target.type === 'adjustment') return rejected(`${ref} 是调整图层，没有像素，蒙版不能应用。`, '要保留就留着，不要就 delete。')
       let commands: SceneCommand[]
       if (target.type === 'image') {
         const assetId = await context.bakeImage?.(target.id) ?? null
@@ -89,7 +91,16 @@ export const maskLayerTool = defineTool({
     if ((args.source === 'box' || args.source === 'ellipse') !== (args.region !== undefined)) {
       return rejected(args.region === undefined ? `source=${args.source} 要给 region。` : 'region 只用于 box 和 ellipse。')
     }
-    if (args.source === 'subject' && target.type !== 'image') return rejected(`${ref} 不是图片，没有主体可找。`, '文字和形状用 box、ellipse 或 selection。')
+    let subjectOf: string | undefined
+    if (args.subject_of !== undefined) {
+      if (args.source !== 'subject') return rejected('subject_of 只用于 source=subject。')
+      const of = context.refs.resolve(args.subject_of, context.scene)
+      if (typeof of === 'string') return rejected(of)
+      if (of.type !== 'image') return rejected(`${args.subject_of} 不是图片图层，没有主体可找。`)
+      subjectOf = of.id
+    }
+    if (args.source === 'subject' && target.type === 'adjustment' && subjectOf === undefined) return rejected(`${ref} 是调整图层，要用 subject_of 指出从哪个图片图层找主体。`)
+    if (args.source === 'subject' && target.type !== 'image' && target.type !== 'adjustment') return rejected(`${ref} 不是图片，没有主体可找。`, '文字和形状用 box、ellipse 或 selection。')
     if (args.source === 'current' && mask === null) return rejected(`${ref} 还没有蒙版。`, '先用别的 source 加一个。')
     if (args.source === 'current' && args.invert !== true && (args.feather ?? 0) === 0) return rejected('source=current 要配合 invert 或 feather。')
     if (args.source === 'current' && args.combine !== undefined) return rejected('source=current 不带 combine。')
@@ -102,6 +113,8 @@ export const maskLayerTool = defineTool({
       const outlines = markedOutlines(context)
       if (outlines.polygons.length === 0) return rejected('用户这一轮没有选区。', '用 box 或 ellipse 给出区域，或请用户先在画布上选出来。')
       shape = outlines
+    } else if (args.source === 'subject') {
+      shape = subjectOf === undefined ? { kind: 'subject' } : { kind: 'subject', of: subjectOf }
     } else {
       shape = { kind: args.source }
     }

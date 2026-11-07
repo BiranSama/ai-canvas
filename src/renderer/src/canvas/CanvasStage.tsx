@@ -46,11 +46,10 @@ import { warmMagicTouch } from '../selection/magic-touch'
 import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
-import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
+import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers, paintedSourceKey } from './pixel-layers'
 import { assetPixelsVersion, clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
 import { useMaskState } from './mask-state'
 import { paintClipIds } from '../../../shared/paint-ops'
-import { setLayerRenderer } from './layer-render'
 import { constrainAngle, fillAt, gradientBetween, paintTarget, startStroke, type PaintGeometry, type PaintSession } from './paint-controller'
 import {
   boundsForElements,
@@ -70,6 +69,9 @@ import {
   type SnapGuide
 } from './direct-canvas-geometry'
 import { drawRect, renderImageEffects } from './image-effects'
+import { adjustmentClipIds } from '../../../shared/adjustments'
+import { adjustmentLayerSettings, useAdjustmentPreview, withLayerPreview } from './adjustment-preview'
+import { AdjustmentBackdrop } from './adjustment-layer'
 import { ElementVisual } from './element-visual'
 import { isFinalContent } from './layer-drawing'
 
@@ -130,6 +132,23 @@ function useHtmlImage(url: string | null): HTMLImageElement | null {
   return loaded?.url === url ? loaded.image : null
 }
 
+/** The most pixels an image with effects or adjustments is worked out at. */
+const DRAWN_PIXELS = 16_000_000
+
+/**
+ * How many pixels per output pixel an image with effects or adjustments is
+ * worked out at: the screen's (box units are output pixels, zoom is screen
+ * pixels per output pixel), rounded up to a power of two so zooming redraws
+ * only now and then, and never more than the output itself. Exports draw at
+ * output size on their own.
+ */
+function drawnDetail(width: number, height: number, zoom: number): number {
+  const screen = Math.max(1 / 64, zoom * (window.devicePixelRatio || 1))
+  const stepped = Math.pow(2, Math.ceil(Math.log2(screen)))
+  const budget = Math.sqrt(DRAWN_PIXELS / Math.max(1, width * height))
+  return Math.min(1, stepped, budget)
+}
+
 function ImageVisual({ element, width, height }: { element: Extract<SceneElement, { type: 'image' }>; width: number; height: number }): React.JSX.Element {
   useSyncExternalStore(subscribeRuntimeAssets, getRuntimeAssetVersion, getRuntimeAssetVersion)
   const assetUrl = getRuntimeAssetUrl(element.assetId)
@@ -150,14 +169,36 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
     return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask, gray: gray.data, clips: maskClips, view: maskView })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas; pixelsVersion a clip or mask read
   }, [image, element.id, element.paint, element.mask, maskView, paintVersion, pixelsVersion])
-  const shownWidth = Math.round(width)
-  const shownHeight = Math.round(height)
+  // An adjustment being set up in its dialog is shown before it is recorded.
+  const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
+  // A mask looked at alone or in red shows its coverage, which the layer's own adjustments must not recolour;
+  // alone, the effects that follow the picture's outline are left out too, as the export's mask-only drawing does.
+  const shownElement = useMemo(() => {
+    const previewed = withLayerPreview(element, preview)
+    if (maskView === 'normal') return previewed
+    return { ...previewed, adjustments: undefined, ...(maskView === 'alone' ? { effects: undefined } : {}) }
+  }, [element, preview, maskView])
+  const adjustmentClips = useMemo(() => {
+    if (image === null) return null
+    const size = { width: image.naturalWidth, height: image.naturalHeight }
+    const live = preview?.kind === 'layer' ? preview.clip : null
+    const pixels = clipLookup(adjustmentClipIds(shownElement.adjustments).filter((id) => id !== live?.id), size)
+    if (pixels === null) return 'pending' as const
+    if (live !== null && live !== undefined) pixels.set(live.id, live.pixels)
+    return { ...size, pixels }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- pixelsVersion marks a clip read
+  }, [image, shownElement.adjustments, preview, pixelsVersion])
+  // Effects and adjustments are worked out in pixels: at the screen's resolution, in steps as the view zooms.
+  const zoom = useCanvasViewportStore((state) => state.artboard?.zoom ?? 1)
+  const detail = drawnDetail(width, height, zoom)
+  const shownWidth = Math.round(width * detail)
+  const shownHeight = Math.round(height * detail)
   const effected = useMemo(
-    () => source === null ? null : renderImageEffects(source, element, shownWidth, shownHeight),
+    () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(source, shownElement, shownWidth, shownHeight, adjustmentClips, source instanceof HTMLCanvasElement ? `${paintVersion}|${paintedSourceKey(element.id)}` : 0),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
-    [source, paintVersion, element.crop, element.fit, element.effects, shownWidth, shownHeight]
+    [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight]
   )
-  if (image === null || source === null) {
+  if (image === null || source === null || adjustmentClips === 'pending') {
     const missing = isRuntimeAssetMissing(element.assetId)
     const loading = isRuntimeAssetLoading(element.assetId)
     const status = missing
@@ -258,6 +299,61 @@ function MaskedBox({ element, width, height, zoom, children }: { element: Extrac
       {children}
       {masking && shown !== null && <KonvaImage image={shown.alpha} width={width} height={height} globalCompositeOperation="destination-in" listening={false} />}
       {shown !== null && maskView === 'overlay' && shown.overlay !== null && <KonvaImage image={shown.overlay} width={width} height={height} listening={false} />}
+    </Group>
+  )
+}
+
+/**
+ * An adjustment layer on the canvas: it changes what is drawn below it, over
+ * the whole artboard, through its mask. It cannot be clicked or dragged; it
+ * is picked in the layers panel. Alt+click on its mask shows the mask alone,
+ * \ shows it in red, as for any layer.
+ */
+function AdjustmentNode({ element, artboard, hidden }: { element: Extract<SceneElement, { type: 'adjustment' }>; artboard: { width: number; height: number }; hidden: boolean }): React.JSX.Element {
+  const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
+  const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
+  const maskView = useMaskState((state) => state.view?.elementId === element.id ? state.view.mode : 'normal')
+  const settings = useAdjustmentPreview((state) => adjustmentLayerSettings(element, state.preview))
+  const mask = element.mask ?? null
+  const shown = useMemo(() => {
+    if (mask === null) return null
+    const gray = grayAssetPixels(mask.assetId)
+    const clips = gray === null ? null : clipLookup(paintClipIds(mask.paint), gray)
+    if (gray === null || clips === null) return 'pending' as const
+    const { mask: pixels } = maskedBoxSource(element.id, mask, gray, clips)
+    if (maskView === 'normal') return { pixels, overlay: null }
+    const canvas = document.createElement('canvas')
+    canvas.width = pixels.width
+    canvas.height = pixels.height
+    const picture = new ImageData(pixels.width, pixels.height)
+    for (let index = 0; index < pixels.coverage.length; index += 1) {
+      const value = pixels.coverage[index]!
+      if (maskView === 'alone') picture.data.set([value, value, value, 255], index * 4)
+      else picture.data.set([255, 0, 0, Math.round((255 - value) * 0.5)], index * 4)
+    }
+    canvas.getContext('2d')?.putImageData(picture, 0, 0)
+    return { pixels, overlay: canvas }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke on the mask; pixelsVersion the mask read
+  }, [element.id, mask, maskView, paintVersion, pixelsVersion])
+  return (
+    <Group id={`element-${element.id}`} name="final-content" listening={false} visible={element.visible && !hidden}>
+      {shown === 'pending'
+        // Named so merging waits for the mask instead of drawing without it.
+        ? <Group name="image-pending" />
+        : shown !== null && maskView === 'alone' && shown.overlay !== null
+          ? <KonvaImage image={shown.overlay} width={artboard.width} height={artboard.height} listening={false} />
+          : (
+              <>
+                <AdjustmentBackdrop
+                  width={artboard.width}
+                  height={artboard.height}
+                  settings={settings}
+                  opacity={element.opacity}
+                  mask={shown !== null && mask?.enabled === true ? shown.pixels : null}
+                />
+                {shown !== null && shown.overlay !== null && <KonvaImage image={shown.overlay} width={artboard.width} height={artboard.height} listening={false} />}
+              </>
+            )}
     </Group>
   )
 }
@@ -847,10 +943,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     width: artboard.width * zoom,
     height: artboard.height * zoom
   }), [artboard.x, artboard.y, artboard.width, artboard.height, zoom])
+  // An adjustment layer has no box on the canvas: no handles, no bar of actions over it.
   const selectedElements = useMemo(
     () => selectedIds
       .map((id) => scene.elements.find((element) => element.id === id))
-      .filter((element): element is SceneElement => element !== undefined),
+      .filter((element): element is SceneElement => element !== undefined && element.type !== 'adjustment'),
     [scene.elements, selectedIds]
   )
   const selectableElements = useMemo(() => scene.elements.filter((element) => {
@@ -1189,7 +1286,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         const selected = scene.elements.find((element) => element.id === id)
         const node = stage.findOne(`#element-${id}`)
         const editingRootSelected = selected?.type === 'group' && selected.id === editingGroupId
-        return node === undefined || selected?.locked === true || editingRootSelected ? [] : [node]
+        return node === undefined || selected?.locked === true || selected?.type === 'adjustment' || editingRootSelected ? [] : [node]
       })
       transformer.nodes(nodes)
     }
@@ -1443,58 +1540,6 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   }), [pan.x, pan.y, setClampedViewport, viewFit, zoom])
 
   // Merging and rasterizing draw layers as they are shown here, at the canvas's output size, with nothing behind them.
-  useEffect(() => {
-    setLayerRenderer((ids, options) => {
-      const stage = stageRef.current
-      const content = contentLayerRef.current
-      const auxiliary = auxiliaryLayerRef.current
-      if (stage === null || content === null || auxiliary === null) return null
-      const keep = new Set(ids)
-      const nodes = [...content.find('.final-content'), ...content.find('.editor-reference')]
-      const pending = content.find('.image-pending').some((stand) => {
-        const owner = stand.findAncestor((ancestor: Konva.Node) => ancestor.id().startsWith('element-'))
-        return owner !== null && owner !== undefined && keep.has(owner.id().slice('element-'.length))
-      })
-      if (pending) return 'pending'
-      const restore: Array<() => void> = []
-      const change = <T,>(read: () => T, write: (value: T) => void, value: T): void => {
-        const before = read()
-        write(value)
-        restore.push(() => write(before))
-      }
-      for (const node of nodes) {
-        const id = node.id().startsWith('element-') ? node.id().slice('element-'.length) : null
-        if (id === null) continue
-        if (!keep.has(id)) change(() => node.visible(), (value) => node.visible(value), false)
-        else if (options.showHidden === true) change(() => node.visible(), (value) => node.visible(value), true)
-        if (id === options.base) {
-          change(() => node.opacity(), (value) => node.opacity(value), 1)
-          change(() => node.globalCompositeOperation(), (value) => node.globalCompositeOperation(value), 'source-over')
-        }
-      }
-      const background = content.findOne('.artboard-background')
-      if (background !== undefined) change(() => background.visible(), (value) => background.visible(value), false)
-      for (const chrome of stage.find('.editor-chrome')) change(() => chrome.visible(), (value) => chrome.visible(value), false)
-      change(() => auxiliary.visible(), (value) => auxiliary.visible(value), false)
-      try {
-        const renderScale = Math.max(scene.canvas.outputWidth / (artboard.width * zoom), scene.canvas.outputHeight / (artboard.height * zoom))
-        const rendered = stage.toCanvas({ x: artboard.x, y: artboard.y, width: artboard.width * zoom, height: artboard.height * zoom, pixelRatio: renderScale })
-        const output = document.createElement('canvas')
-        output.width = scene.canvas.outputWidth
-        output.height = scene.canvas.outputHeight
-        const context = output.getContext('2d')
-        if (context === null) return null
-        context.imageSmoothingEnabled = true
-        context.imageSmoothingQuality = 'high'
-        context.drawImage(rendered, 0, 0, output.width, output.height)
-        return output
-      } finally {
-        for (const undo of restore.reverse()) undo()
-        stage.draw()
-      }
-    })
-    return () => setLayerRenderer(null)
-  }, [artboard.height, artboard.width, artboard.x, artboard.y, scene.canvas.outputHeight, scene.canvas.outputWidth, zoom])
 
   const handleWheel = useCallback((event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault()
@@ -2229,7 +2274,14 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
                 exitGroupEditing()
               }}
             />
-            {sortedElements.map((element) => (
+            {sortedElements.map((element) => element.type === 'adjustment' ? (
+              <AdjustmentNode
+                key={element.id}
+                element={element}
+                artboard={baseArtboard}
+                hidden={hiddenInGroups.has(element.id) || (maskAlone !== null && maskAlone !== element.id)}
+              />
+            ) : (
               <ElementNode
                 key={element.id}
                 element={element}

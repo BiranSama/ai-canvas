@@ -42,6 +42,7 @@ import { CanvasToolbar } from './components/CanvasToolbar'
 import { PaintOptionsBar } from './components/PaintOptionsBar'
 import { SelectionOptionsBar } from './components/SelectionOptionsBar'
 import { EditDialogs } from './components/EditDialogs'
+import { AdjustmentDialog } from './components/AdjustmentDialog'
 import { SubjectModelDialog } from './components/SubjectModelDialog'
 import { elementAssetIds } from '../../shared/scene-assets'
 import { nudgeSelection } from './selection/selection-gestures'
@@ -325,6 +326,7 @@ function WorkspaceHeader({
     {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
     {exportOpen && <ExportSheet onClose={() => useExportSheet.getState().hide()} onSaveSizeAsProject={saveSizeAsProject} />}
     <EditDialogs />
+    <AdjustmentDialog />
     <SubjectModelDialog />
     </>
   )

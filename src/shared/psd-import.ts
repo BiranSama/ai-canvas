@@ -1,7 +1,8 @@
-import type { BlendMode } from '../domain'
+import type { AdjustmentSettings, BlendMode } from '../domain'
 
 /** One pixel layer of a PSD, as a PNG of its own bounds, in document pixels. */
 export interface PsdLayerImport {
+  readonly kind: 'pixels'
   readonly name: string
   readonly left: number
   readonly top: number
@@ -17,6 +18,20 @@ export interface PsdLayerImport {
   readonly png: Uint8Array<ArrayBuffer>
   /** Its layer mask over the layer's own pixels, as a grayscale PNG, or null without one. */
   readonly mask: { readonly png: Uint8Array<ArrayBuffer>; readonly enabled: boolean } | null
+  /** Adjustment layers clipped to it in Photoshop, which change it alone: its own adjustments here, bottom first. */
+  readonly adjustments: readonly { readonly settings: AdjustmentSettings; readonly enabled: boolean }[]
+}
+
+/** One of Photoshop's adjustment layers that the canvas has, changing everything below it. */
+export interface PsdAdjustmentImport {
+  readonly kind: 'adjustment'
+  readonly name: string
+  readonly opacity: number
+  readonly visible: boolean
+  readonly groupIndex: number | null
+  readonly settings: AdjustmentSettings
+  /** Its mask over the whole canvas (scaled down for very large documents), as a grayscale PNG, or null without one. */
+  readonly mask: { readonly png: Uint8Array<ArrayBuffer>; readonly enabled: boolean } | null
 }
 
 export interface PsdGroupImport {
@@ -28,7 +43,7 @@ export interface PsdDocumentImport {
   readonly width: number
   readonly height: number
   /** Bottom of the stack first. */
-  readonly layers: readonly PsdLayerImport[]
+  readonly layers: readonly (PsdLayerImport | PsdAdjustmentImport)[]
   readonly groups: readonly PsdGroupImport[]
   /** Photoshop's own flattened image, only when something could not be carried over as it was. */
   readonly composite: Uint8Array<ArrayBuffer> | null

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { blendModeSchema } from '../domain'
+import { adjustmentSettingsSchema, blendModeSchema } from '../domain'
 
 /*
  * What the export panel hands Main to write. The page draws the pixels
@@ -116,6 +116,19 @@ const psdLayerSchema = z.object({
 }).strict().superRefine((value, context) => checkPixels(value, 4, context))
 export type PsdLayer = z.infer<typeof psdLayerSchema>
 
+/** Photoshop's adjustment layer: no pixels, only its settings and its mask over the document. */
+const psdAdjustmentSchema = z.object({
+  kind: z.literal('adjustment'),
+  name: z.string().min(1).max(255),
+  hidden: z.boolean(),
+  opacity: finite.min(0).max(1),
+  /** Clipped to the layer below it, so it changes that layer alone. */
+  clipping: z.boolean(),
+  settings: adjustmentSettingsSchema,
+  mask: psdMaskSchema.nullable()
+}).strict()
+export type PsdAdjustment = z.infer<typeof psdAdjustmentSchema>
+
 export interface PsdGroup {
   readonly kind: 'group'
   readonly name: string
@@ -124,21 +137,21 @@ export interface PsdGroup {
   /** Bottom first, as a PSD lists them. */
   readonly children: readonly PsdNode[]
 }
-export type PsdNode = PsdLayer | PsdGroup
+export type PsdNode = PsdLayer | PsdGroup | PsdAdjustment
 
 const psdGroupSchema: z.ZodType<PsdGroup> = z.lazy(() => z.object({
   kind: z.literal('group'),
   name: z.string().min(1).max(255),
   hidden: z.boolean(),
   opacity: finite.min(0).max(1),
-  children: z.array(z.union([psdLayerSchema, psdGroupSchema])).max(10_000)
+  children: z.array(z.union([psdLayerSchema, psdGroupSchema, psdAdjustmentSchema])).max(10_000)
 }).strict())
 
 export const psdDocumentSchema = z.object({
   width: dimension,
   height: dimension,
   /** Bottom first. */
-  children: z.array(z.union([psdLayerSchema, psdGroupSchema])).max(10_000),
+  children: z.array(z.union([psdLayerSchema, psdGroupSchema, psdAdjustmentSchema])).max(10_000),
   /** The flattened picture, for viewers that do not read layers. */
   composite: rgbaSchema
 }).strict().superRefine((value, context) => checkPixels({ width: value.width, height: value.height, pixels: value.composite }, 4, context, ['composite']))

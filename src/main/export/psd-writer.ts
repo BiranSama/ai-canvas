@@ -1,6 +1,7 @@
 import { writePsdUint8Array, type BlendMode as PsdBlendMode, type Color, type Justification, type Layer, type LayerEffectsInfo, type LayerTextData, type Psd } from 'ag-psd'
 import type { BlendMode } from '../../domain'
-import type { PsdDocument, PsdLayer, PsdNode, PsdText } from '../../shared/artwork-export'
+import type { PsdAdjustment, PsdDocument, PsdLayer, PsdNode, PsdText } from '../../shared/artwork-export'
+import { toPsdAdjustment } from '../psd/psd-adjustments'
 
 /*
  * Writes the layers the page drew into a PSD Photoshop opens as layers:
@@ -134,8 +135,27 @@ async function layerOf(layer: PsdLayer, fonts: PsdFontLookup): Promise<Layer> {
   return result
 }
 
+/** An adjustment layer: Photoshop's own kind, with its settings and mask, clipped when it adjusts one layer. */
+function adjustmentOf(node: PsdAdjustment): Layer {
+  const result: Layer = { name: node.name, hidden: node.hidden, opacity: node.opacity, blendMode: 'normal', clipping: node.clipping, adjustment: toPsdAdjustment(node.settings) }
+  if (node.mask !== null && node.mask.width > 0 && node.mask.height > 0) {
+    result.mask = {
+      left: node.mask.left,
+      top: node.mask.top,
+      right: node.mask.left + node.mask.width,
+      bottom: node.mask.top + node.mask.height,
+      // Past the document the adjustment applies, as an adjustment layer's white mask does.
+      defaultColor: 255,
+      disabled: node.mask.disabled,
+      imageData: maskData(node.mask.width, node.mask.height, node.mask.pixels)
+    }
+  }
+  return result
+}
+
 async function nodeOf(node: PsdNode, fonts: PsdFontLookup): Promise<Layer> {
   if (node.kind === 'layer') return layerOf(node, fonts)
+  if (node.kind === 'adjustment') return adjustmentOf(node)
   const children: Layer[] = []
   for (const child of node.children) children.push(await nodeOf(child, fonts))
   return { name: node.name, hidden: node.hidden, opacity: node.opacity, blendMode: 'pass through', opened: true, children }

@@ -83,6 +83,14 @@ function isPictureLayer(element: SceneElement): element is PixelLayer {
   return element.type === 'image' || element.type === 'text' || (element.type === 'shape' && element.role === 'final')
 }
 
+type AdjustmentLayer = Extract<SceneElement, { type: 'adjustment' }>
+type MergeLayer = PixelLayer | AdjustmentLayer
+
+/** Layers a merge draws: picture layers, and adjustment layers, which merge into what is below them. */
+function isMergeable(element: SceneElement): element is MergeLayer {
+  return isPictureLayer(element) || element.type === 'adjustment'
+}
+
 function refuse(message: string): false {
   showAppNotice(message)
   return false
@@ -92,7 +100,7 @@ function refuse(message: string): false {
  * Draws the layers into the one that receives them, in place, and removes
  * the rest; the receiving layer keeps its name, grouping and place.
  */
-async function mergeInto(target: PixelLayer, layers: readonly PixelLayer[], summary: string, options: LayerRenderOptions, keepLook: boolean): Promise<boolean> {
+async function mergeInto(target: PixelLayer, layers: readonly MergeLayer[], summary: string, options: LayerRenderOptions, keepLook: boolean): Promise<boolean> {
   const drawn = await drawnAsset(layers.map((layer) => layer.id), summary, options)
   if (drawn === null) return false
   const commands: SceneCommand[] = [
@@ -124,11 +132,11 @@ export async function mergeDown(): Promise<boolean> {
   if (selected.length === 1 && selected[0]!.type === 'group') {
     const group = selected[0]!
     const children = scene.elements.filter((element) => element.groupId === group.id)
-    const layers = children.filter(isPictureLayer)
+    const layers = children.filter(isMergeable)
     const locked = lockedAmong(children)
     if (locked !== undefined) return refuse(`「${locked.name}」已锁定，解锁后才能合并。`)
-    if (layers.length === 0) return refuse(`「${group.name}」里没有可合并的图层。`)
-    if (children.some((child) => !isPictureLayer(child))) return refuse(`「${group.name}」里有 AI 标注，先把它移出组再合并。`)
+    if (!layers.some(isPictureLayer)) return refuse(`「${group.name}」里没有可合并的图层。`)
+    if (children.some((child) => !isMergeable(child))) return refuse(`「${group.name}」里有 AI 标注，先把它移出组再合并。`)
     const drawn = await drawnAsset(layers.filter((layer) => layer.visible).map((layer) => layer.id), '合并组')
     if (drawn === null) return false
     const current = useWorkspaceStore.getState()
@@ -149,22 +157,25 @@ export async function mergeDown(): Promise<boolean> {
     // A selected group brings its layers; the stack order decides which is on top.
     const ids = new Set(selected.flatMap((element) => element.type === 'group' ? element.childIds : [element.id]))
     const layers = scene.elements.filter((element) => ids.has(element.id))
-    const notPicture = layers.find((layer) => !isPictureLayer(layer))
+    const notPicture = layers.find((layer) => !isMergeable(layer))
     if (notPicture !== undefined) return refuse(`「${notPicture.name}」是 AI 标注，不能合并。`)
     const locked = lockedAmong(layers)
     if (locked !== undefined) return refuse(`「${locked.name}」已锁定，解锁后才能合并。`)
     const hidden = layers.find((layer) => !layer.visible)
     if (hidden !== undefined) return refuse(`「${hidden.name}」是隐藏的，显示它或取消选中后再合并。`)
     const pictures = layers.filter(isPictureLayer)
-    return mergeInto(pictures.at(-1)!, pictures, '合并图层', {}, false)
+    // Adjustment layers among them change the layers below them and are merged in.
+    if (pictures.length === 0) return refuse('调整图层没有像素，至少选中一个图片、文字或形状图层一起合并。')
+    return mergeInto(pictures.at(-1)!, layers.filter(isMergeable), '合并图层', {}, false)
   }
 
   const upper = selected[0]!
-  if (!isPictureLayer(upper)) return refuse(`「${upper.name}」是 AI 标注，不能合并。`)
+  if (!isMergeable(upper)) return refuse(`「${upper.name}」是 AI 标注，不能合并。`)
   const index = scene.elements.findIndex((element) => element.id === upper.id)
   const lower = scene.elements.slice(0, index).reverse().find((element) => element.groupId === upper.groupId)
   if (lower === undefined) return refuse(`「${upper.name}」下面没有可以合并进去的图层。`)
   if (lower.type === 'group') return refuse(`「${upper.name}」下面是组「${lower.name}」，不能向下合并。`)
+  if (lower.type === 'adjustment') return refuse(`下面的「${lower.name}」是调整图层，没有像素，不能合并进去。`)
   if (!isPictureLayer(lower)) return refuse(`下面的「${lower.name}」是 AI 标注，不能合并。`)
   const locked = lockedAmong([upper, lower])
   if (locked !== undefined) return refuse(`「${locked.name}」已锁定，解锁后才能合并。`)
@@ -172,23 +183,28 @@ export async function mergeDown(): Promise<boolean> {
   return mergeInto(lower, [lower, upper], '向下合并', { base: lower.id }, true)
 }
 
-function visiblePictureLayers(): PixelLayer[] {
-  return useWorkspaceStore.getState().scene.elements.filter((element): element is PixelLayer => isPictureLayer(element) && element.visible)
+/** Every visible layer a merge draws, adjustment layers included. */
+function visibleMergeLayers(): MergeLayer[] {
+  return useWorkspaceStore.getState().scene.elements.filter((element): element is MergeLayer => isMergeable(element) && element.visible)
 }
 
 /** Photoshop's Ctrl+Shift+E: every visible layer into the lowest of them; hidden layers and AI notes stay. */
 export async function mergeVisible(): Promise<boolean> {
-  const layers = visiblePictureLayers()
-  if (layers.length < 2) return refuse('至少要有两个可见图层才能合并。')
+  const layers = visibleMergeLayers()
+  const pictures = layers.filter(isPictureLayer)
+  if (layers.length < 2 || pictures.length === 0) return refuse('至少要有两个可见图层才能合并。')
   const locked = lockedAmong(layers)
   if (locked !== undefined) return refuse(`「${locked.name}」已锁定，解锁或隐藏它后再合并可见图层。`)
-  return mergeInto(layers[0]!, layers, '合并可见图层', {}, false)
+  // The adjustment layers go into the result; what they did to the canvas colour goes with them, as
+  // Photoshop's merge into the background layer keeps it.
+  const canvasBackground = layers.some((layer) => layer.type === 'adjustment') && !useWorkspaceStore.getState().scene.canvas.transparent
+  return mergeInto(pictures[0]!, layers, '合并可见图层', canvasBackground ? { canvasBackground } : {}, false)
 }
 
 /** Photoshop's Ctrl+Alt+Shift+E: every visible layer drawn into a new layer, the originals untouched. */
 export async function stampVisible(): Promise<boolean> {
-  const layers = visiblePictureLayers()
-  if (layers.length === 0) return refuse('没有可见图层可以盖印。')
+  const layers = visibleMergeLayers()
+  if (!layers.some(isPictureLayer)) return refuse('没有可见图层可以盖印。')
   const drawn = await drawnAsset(layers.map((layer) => layer.id), '盖印可见图层')
   return drawn !== null && await addImageLayer(drawn.assetId, drawn.transform, '盖印可见图层') !== null
 }
@@ -198,6 +214,8 @@ export async function rasterizeLayer(elementId: string): Promise<boolean> {
   const element = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === elementId)
   if (element === undefined || (element.type !== 'text' && element.type !== 'shape')) return false
   if (element.locked) return refuse(`「${element.name}」已锁定，解锁后才能栅格化。`)
+  // A composition placeholder is not drawn into the picture, so it would come out empty.
+  if (element.type === 'shape' && element.role !== 'final') return refuse(`「${element.name}」是构图占位，不在成品里，不能栅格化；先在属性里把用途改成成品。`)
   const drawn = await drawnAsset([element.id], '栅格化图层', { base: element.id, showHidden: true })
   if (drawn === null) return false
   return useWorkspaceStore.getState().execute('栅格化图层', [{ kind: 'element.rasterize', elementId: element.id, assetId: drawn.assetId, transform: drawn.transform }])

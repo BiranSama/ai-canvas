@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CommandBus, ELEMENT_SCHEMA_VERSION } from '../../src/domain'
 import { App } from '../../src/renderer/src/App'
@@ -166,9 +166,11 @@ describe('canvas workspace shell', () => {
     useWorkspaceStore.getState().setSelection([groupId])
     render(<App />)
     await screen.findByTestId('canvas-stage')
+    // The stage is on screen before every mount effect has run, the key listeners among them: let them settle first.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
 
     fireEvent.keyDown(window, { key: 'Enter' })
-    expect(screen.getByRole('status', { name: '组内编辑' })).toHaveTextContent('正在编辑：香水主体组')
+    expect(await screen.findByRole('status', { name: '组内编辑' })).toHaveTextContent('正在编辑：香水主体组')
     expect(useWorkspaceStore.getState().editingGroupId).toBe(groupId)
 
     fireEvent.click(screen.getByRole('button', { name: '退出组内编辑' }))

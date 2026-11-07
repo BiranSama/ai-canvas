@@ -3601,3 +3601,43 @@ button.knowledge-copy { cursor: pointer; }
 .provider-setting-row[data-provider-slot="vision"],
 .provider-setting-row[data-provider-slot="backup"] { margin-left: 18px; }
 .generation-service-hint { margin: 4px 0 0; color: #8a5a32; font-size: 10px; line-height: 1.6; }
+
+/* Adjustments: Photoshop's adjustment dialogs and properties. */
+.adjustment-dialog-layer { position: fixed; inset: 0; z-index: 90; display: flex; align-items: flex-start; justify-content: flex-end; padding: 72px 28px 24px; pointer-events: none; }
+.adjustment-dialog { width: min(340px, calc(100vw - 56px)); max-height: calc(100vh - 110px); overflow: auto; pointer-events: auto; background: var(--solid-surface); }
+.adjustment-dialog footer { align-items: center; }
+.adjustment-dialog .adjustment-preview-toggle { margin: 0 auto 0 0; }
+.adjust-controls { display: grid; gap: 6px; }
+.adjust-row { display: grid; min-height: 28px; grid-template-columns: 72px minmax(0, 1fr) 58px; align-items: center; gap: 8px; color: var(--muted-slate); font-size: 11px; }
+.adjust-row.is-select { grid-template-columns: 72px minmax(0, 1fr); }
+.adjust-row input[type="range"] { width: 100%; min-width: 0; accent-color: var(--quiet-blue); }
+.adjust-row input[type="number"], .adjust-row select { height: 26px; min-width: 0; padding: 0 6px; border: 1px solid var(--hairline); border-radius: 7px; color: var(--graphite); background: var(--field); font-size: 11px; font-variant-numeric: tabular-nums; }
+.adjust-row .checkbox-field { margin-top: 0; }
+.adjust-row input[type="color"] { width: 44px; height: 26px; padding: 0 2px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--field); }
+.adjust-heading { display: flex; align-items: center; gap: 8px; }
+.adjust-heading .adjust-row { flex: 1; }
+.adjust-heading > button { height: 26px; padding: 0 12px; border: 1px solid var(--hairline); border-radius: 7px; color: var(--graphite); background: transparent; font-size: 11px; cursor: pointer; }
+.adjust-heading > button:disabled { opacity: .5; cursor: default; }
+.adjust-histogram { width: 100%; height: 64px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--field); }
+.adjust-histogram path { fill: var(--muted-slate); opacity: .55; }
+.adjust-curves { width: 100%; aspect-ratio: 1; border: 1px solid var(--hairline); border-radius: 7px; background: var(--field); cursor: crosshair; touch-action: none; overflow: visible; }
+.adjust-curves-histogram { fill: var(--muted-slate); opacity: .22; }
+.adjust-curves-grid line { stroke: var(--hairline); stroke-width: 1; }
+.adjust-curves-diagonal { stroke: var(--faint-slate); stroke-width: 1; stroke-dasharray: 3 3; }
+.adjust-curves-line { fill: none; stroke: var(--graphite); stroke-width: 1.6; }
+.adjust-curves-line.is-red { stroke: #D2453B; }
+.adjust-curves-line.is-green { stroke: #2E9A4E; }
+.adjust-curves-line.is-blue { stroke: #3B6FD8; }
+.adjust-curves rect { fill: var(--field); stroke: var(--graphite); stroke-width: 1.2; }
+.adjust-curves rect.is-active { fill: var(--graphite); }
+.adjust-point { display: grid; gap: 4px; }
+.adjust-tones { display: flex; gap: 12px; color: var(--muted-slate); font-size: 11px; }
+.adjust-tones label { display: flex; align-items: center; gap: 4px; }
+.adjustment-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.adjustment-list { display: grid; gap: 2px; margin: 0 0 6px; padding: 0; list-style: none; }
+.adjustment-list li { display: grid; min-height: 28px; grid-template-columns: 24px minmax(0, 1fr) repeat(4, auto); align-items: center; gap: 2px; color: var(--graphite); font-size: 12px; }
+.adjustment-list li.is-off .adjustment-name { color: var(--faint-slate); text-decoration: line-through; }
+.adjustment-list .icon-button { width: 24px; height: 24px; }
+.adjustment-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.adjustment-name small { margin-left: 6px; padding: 1px 5px; border-radius: 5px; color: var(--muted-slate); background: var(--field); font-size: 10px; }
+.layer-thumb.is-adjustment { color: var(--quiet-blue); }

@@ -314,10 +314,12 @@ export function groupBoundsForChildTransforms(
 ): SceneElement['transform'] | null {
   const group = scene.elements.find((element) => element.id === groupId)
   if (group?.type !== 'group') return null
-  const children = group.childIds
+  const all = group.childIds
     .map((id) => scene.elements.find((element) => element.id === id))
     .filter((element): element is SceneElement => element !== undefined)
-  if (children.length === 0) return null
+  if (all.length === 0) return null
+  // An adjustment layer covers the whole canvas and has no box of its own, so it does not widen the group's.
+  const children = all.some((element) => element.type !== 'adjustment') ? all.filter((element) => element.type !== 'adjustment') : all
   const transforms = children.map((element) => transformOverrides.get(element.id) ?? element.transform)
   const left = Math.min(...transforms.map((transform) => transform.x))
   const top = Math.min(...transforms.map((transform) => transform.y))

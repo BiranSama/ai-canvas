@@ -8,19 +8,19 @@
     "id": "plan-once",
     "version": 1
   },
-  "promptFingerprint": "p1-4433d820512d06d1",
+  "promptFingerprint": "p1-afb005336a6e77be",
   "llm": {
     "protocol": "ark-responses",
     "transport": "buffered"
   },
-  "recordedAt": "2026-10-30T20:17:58.719Z",
+  "recordedAt": "2026-11-06T18:51:10.441Z",
   "note": "Hand-written Ark Responses reply (buffered JSON) that shrinks the title by 20%. Request shapes are stamped from the current engine with AI_CANVAS_EVAL_REFRESH_RECORDINGS=1.",
   "exchanges": [
     {
       "index": 0,
       "request": {
-        "bodySha256": "74fc6a4f496018249812425d6ace2244817939813c6263bf66c6084da82cd043",
-        "normalizedBodySha256": "4cebe0839c422892fe763ecd8eec66d63a89959b9ec60366954d9d703b06bb1f",
+        "bodySha256": "b6b8005e85a172126c7ac2b3b2b488de38ef96ee4dfc96e94c688eeb6d550976",
+        "normalizedBodySha256": "fc944d217606e70ec71be560a98469c1dfc7269f9d206412dea0d10754f736b2",
         "shape": {
           "endpoint": "responses",
           "method": "POST",
@@ -34,7 +34,7 @@
           ],
           "hasImages": false,
           "instructionsSha256": "56f6052c255033e11bc31a95ce870bc90e788f05193f4218337fedc190577852",
-          "toolsSha256": "07b70d89cbea7bfeee7f120817e45c0937a7ff216f4e26218f18d368e2d59452"
+          "toolsSha256": "67ce76952a433aa0214bd9ee48be4d40d04370471c5787fc4aa30829b8ebf683"
         }
       },
       "response": {

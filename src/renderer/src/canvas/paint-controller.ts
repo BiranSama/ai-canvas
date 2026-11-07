@@ -30,7 +30,7 @@ import {
  */
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
-type MaskableElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
+type MaskableElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' | 'adjustment' }>
 
 /** After this many operations the layer's paint is baked into a new asset. */
 const BAKE_AFTER = 100
@@ -86,7 +86,7 @@ export function paintTarget(): PaintTarget | null {
   const element = selectedIds.length === 1 ? scene.elements.find((candidate) => candidate.id === selectedIds[0]) : undefined
   const refuse = (message: string): null => { showAppNotice(message); return null }
   if (element === undefined) return refuse('先在图层里选中一个图片图层，或按 Ctrl+Shift+N 新建空白图层，再开始画。')
-  const editingMask = useMaskState.getState().editing === element.id && (element.type === 'image' || element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
+  const editingMask = useMaskState.getState().editing === element.id && (element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment') && element.mask !== null && element.mask !== undefined
   if (!editingMask) {
     if (element.type === 'text' || element.type === 'shape') return refuse(`「${element.name}」是${element.type === 'text' ? '文字' : '形状'}图层，要先栅格化（图层右键菜单）才能画；也可以给它加蒙版，在蒙版上画。`)
     if (element.type !== 'image') return refuse('只能在图片图层上画。选中一个图片图层，或按 Ctrl+Shift+N 新建空白图层。')
@@ -124,7 +124,7 @@ async function bakeIfLong(elementId: string): Promise<void> {
 
 function currentElement(id: string): MaskableElement | null {
   const element = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === id)
-  return element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape') ? element : null
+  return element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment') ? element : null
 }
 
 /** Records the operation once its clip, if any, has been imported; a clip that fails to import drops the operation. */
@@ -143,7 +143,7 @@ async function record(target: PaintTarget, op: PaintOp, clip: SelectionClip, sum
   // Appended to the record as it is when the batch runs, so a stroke whose save is still on its way keeps its place.
   const saved = await useWorkspaceStore.getState().execute(target.onMask ? `${summary}（蒙版）` : summary, (scene) => {
     const element = scene.elements.find((candidate) => candidate.id === elementId)
-    if (element === undefined || (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape')) return null
+    if (element === undefined || (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape' && element.type !== 'adjustment')) return null
     if (target.onMask) {
       const mask = element.mask
       if (mask === null || mask === undefined) return null
@@ -175,7 +175,7 @@ async function bakeMaskIfLong(elementId: string): Promise<void> {
     // Checked when the batch runs, after any undo queued before it.
     await useWorkspaceStore.getState().execute('合并蒙版绘制记录', (scene) => {
       const element = scene.elements.find((candidate) => candidate.id === elementId)
-      const current = element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape') ? element.mask : null
+      const current = element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment') ? element.mask : null
       if (current === null || current === undefined || current.assetId !== mask.assetId || !startsWithBaked(current.paint, snapshot.applied)) return null
       return [{ kind: 'element.update', elementId, changes: { mask: { ...current, assetId: asset.id, paint: (current.paint ?? []).slice(snapshot.applied.length) } } }]
     })
@@ -362,7 +362,7 @@ export function gradientBetween(target: PaintTarget, geometry: PaintGeometry, fr
 function actionTarget(element: SceneElement): PaintTarget | null {
   const onMask = useMaskState.getState().editing === element.id
   if (!onMask && element.type !== 'image') return null
-  if (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape') return null
+  if (element.type !== 'image' && element.type !== 'text' && element.type !== 'shape' && element.type !== 'adjustment') return null
   const space = spaceFor(element, onMask)
   if (space !== null) return { element, onMask, space }
   // Only a selection needs the layer placed; without one the operation applies to every pixel.

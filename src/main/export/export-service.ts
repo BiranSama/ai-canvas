@@ -42,7 +42,9 @@ const FILTERS: Readonly<Record<ExportFileChoice['kind'], { readonly name: string
 export class ExportError extends Error {}
 
 function psdBytes(nodes: readonly PsdNode[]): number {
-  return nodes.reduce((total, node) => total + (node.kind === 'group' ? psdBytes(node.children) : node.pixels.byteLength + (node.mask?.pixels.byteLength ?? 0)), 0)
+  return nodes.reduce((total, node) => total + (node.kind === 'group' ? psdBytes(node.children)
+    : node.kind === 'adjustment' ? node.mask?.pixels.byteLength ?? 0
+      : node.pixels.byteLength + (node.mask?.pixels.byteLength ?? 0)), 0)
 }
 
 export class ExportService {

@@ -1,7 +1,8 @@
 import Konva from 'konva'
 import { adaptedScene, hiddenByGroups, type Scene, type SceneElement } from '../../../domain'
 import { hasVisibleEffects } from '../../../shared/layer-effects'
-import { MAX_EXPORT_EDGE, type ExportImageFormat, type PsdLayer, type PsdNode, type PsdText } from '../../../shared/artwork-export'
+import { MAX_EXPORT_EDGE, type ExportImageFormat, type PsdAdjustment, type PsdLayer, type PsdNode, type PsdText } from '../../../shared/artwork-export'
+import { activeAdjustments, ADJUSTMENT_LABELS } from '../../../shared/adjustments'
 import { MAX_WEBP_EDGE, pdfLayout, pdfPageFits, pdfTooLarge, printedResolution, scaledSize, SOFT_PRINT_DPI, type PdfPageChoice, type SizePreset } from '../../../shared/export-presets'
 import { ArtworkSession, canvasPixels } from '../canvas/artwork-render'
 import { TEXT_SHADOW_OPACITY, textMetrics, textWrap } from '../canvas/layer-drawing'
@@ -57,7 +58,7 @@ export async function exportImage(scene: Scene, projectName: string, options: Im
   try {
     checkAborted(signal)
     const size = scaledSize(scene.canvas.outputWidth, scene.canvas.outputHeight, options.scale, options.format === 'webp' ? MAX_WEBP_EDGE : MAX_EXPORT_EDGE)
-    const canvas = session.render({ width: size.width, height: size.height, background: options.format === 'jpeg' ? { color: scene.canvas.transparent ? options.jpegBackground : scene.canvas.backgroundColor } : 'canvas' })
+    const canvas = session.render({ width: size.width, height: size.height, background: options.format === 'jpeg' && scene.canvas.transparent ? { color: options.jpegBackground } : 'canvas' })
     progress({ label: '正在保存', done: 1, total: 2 })
     // The last chance to stop: once Main is writing, the file is saved.
     checkAborted(signal)
@@ -137,7 +138,7 @@ export async function exportSizes(scene: Scene, projectName: string, sizes: read
     const adapted = adaptedScene(scene, size)
     const session = await ArtworkSession.prepare(adapted, signal)
     try {
-      const canvas = session.render({ width: size.width, height: size.height, background: format === 'jpeg' ? { color: scene.canvas.transparent ? '#FFFFFF' : scene.canvas.backgroundColor } : 'canvas' })
+      const canvas = session.render({ width: size.width, height: size.height, background: format === 'jpeg' && scene.canvas.transparent ? { color: '#FFFFFF' } : 'canvas' })
       checkAborted(signal)
       const result = await window.desktop.writeExportImage({
         target: choice.target,
@@ -294,7 +295,30 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
   progress({ label: '正在读取图层', done, total })
   const session = await ArtworkSession.prepare(scene, signal, { includeHidden: true })
   try {
-    const layerOf = async (element: SceneElement, hidden: boolean): Promise<PsdLayer> => {
+    const adjustmentOf = (element: Extract<SceneElement, { type: 'adjustment' }>, hidden: boolean): PsdAdjustment => {
+      const mask = element.mask ?? null
+      const coverage = mask === null ? null : session.adjustmentMaskAt(element.id, width, height)
+      done += 1
+      return {
+        kind: 'adjustment', name: element.name, hidden, opacity: element.opacity, clipping: false, settings: element.settings,
+        mask: mask === null || coverage === null ? null : { left: 0, top: 0, width, height, pixels: coverage, disabled: !mask.enabled }
+      }
+    }
+    const nodesFor = async (element: SceneElement, hidden: boolean): Promise<PsdNode[]> => {
+      if (element.type === 'adjustment') return [adjustmentOf(element, hidden)]
+      // An image's own adjustments become adjustment layers clipped to it, which Photoshop applies to that layer alone.
+      // With a shadow drawn into its pixels, or one made in a selection, they are drawn into its pixels instead.
+      const own = element.type === 'image' ? element.adjustments ?? [] : []
+      const clipped = own.length > 0 && element.type === 'image' && !(element.effects?.shadow !== null && element.effects?.shadow !== undefined && element.effects.shadow.opacity > 0)
+        && own.every((adjustment) => adjustment.clip === undefined)
+      if (own.length > 0 && !clipped && activeAdjustments(own).length > 0) notes.push(`「${element.name}」的调整${own.some((adjustment) => adjustment.clip !== undefined) ? '只作用在选区里' : '和投影在一起'}，并进了像素。`)
+      const layer = await layerOf(element, hidden, !clipped)
+      if (!clipped) return [layer]
+      return [layer, ...own.map((adjustment): PsdAdjustment => ({
+        kind: 'adjustment', name: ADJUSTMENT_LABELS[adjustment.settings.kind], hidden: !adjustment.enabled, opacity: 1, clipping: true, settings: adjustment.settings, mask: null
+      }))]
+    }
+    const layerOf = async (element: SceneElement, hidden: boolean, adjusted: boolean): Promise<PsdLayer> => {
       checkAborted(signal)
       progress({ label: `正在导出「${element.name}」`, done, total })
       await breathe()
@@ -304,7 +328,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
       const bakeMask = mask !== null && mask.enabled && element.type === 'image' && hasVisibleEffects(element.effects)
       // Drawn over the layer's own area, past the canvas edge too, so nothing outside the canvas is lost.
       const area = layerArea(element, width, height)
-      const plainCanvas = session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: mask === null || bakeMask ? 'scene' : 'off', textEffects: text === null } })
+      const plainCanvas = session.render({ width, height, area, background: 'none', layer: { id: element.id, mask: mask === null || bakeMask ? 'scene' : 'off', textEffects: text === null, adjustments: adjusted } })
       const plain = canvasPixels(plainCanvas)
       const bounds = opaqueBounds(plain)
       let psdMask: PsdLayer['mask'] = null
@@ -334,7 +358,7 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
     const nodesOf = async (plans: readonly LayerPlan[]): Promise<PsdNode[]> => {
       const nodes: PsdNode[] = []
       for (const item of plans) {
-        if (item.kind === 'layer') nodes.push(await layerOf(item.element, item.hidden))
+        if (item.kind === 'layer') nodes.push(...await nodesFor(item.element, item.hidden))
         else nodes.push({ kind: 'group', name: item.element.name, hidden: item.hidden, opacity: 1, children: await nodesOf(item.children) })
       }
       return nodes

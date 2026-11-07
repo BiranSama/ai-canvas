@@ -1,6 +1,7 @@
 import sharp from 'sharp'
-import { hiddenByGroups, pathInBox, sceneSchema, type ImageEffects, type Scene, type SceneElement } from '../../domain'
+import { hiddenByGroups, pathInBox, sceneSchema, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
+import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, sampleCoverage } from '../../shared/adjustments'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
@@ -45,30 +46,47 @@ export function elementPresentation(element: SceneElement, mode: RenderMode): 'o
   return 'final'
 }
 
-async function imageDataUri(path: string | Buffer, element: Extract<SceneElement, { type: 'image' }>): Promise<string> {
-  const bytes = await imageBytes(path)
-  const metadata = await sharp(bytes).metadata()
-  const width = metadata.width ?? 1
-  const height = metadata.height ?? 1
-  const crop = element.crop
+type ImageLayer = Extract<SceneElement, { type: 'image' }>
+
+/** The part of a picture of this size that the layer's crop keeps. */
+function cropRegion(width: number, height: number, crop: ImageLayer['crop']): { readonly left: number; readonly top: number; readonly width: number; readonly height: number } {
   const left = Math.min(width - 1, Math.max(0, Math.round(crop.x * width)))
   const top = Math.min(height - 1, Math.max(0, Math.round(crop.y * height)))
-  const cropWidth = Math.max(1, Math.min(width - left, Math.round(crop.width * width)))
-  const cropHeight = Math.max(1, Math.min(height - top, Math.round(crop.height * height)))
-  const cropped = await sharp(bytes).extract({ left, top, width: cropWidth, height: cropHeight }).png().toBuffer()
+  return { left, top, width: Math.max(1, Math.min(width - left, Math.round(crop.width * width))), height: Math.max(1, Math.min(height - top, Math.round(crop.height * height))) }
+}
+
+async function imageDataUri(path: string | Buffer, element: ImageLayer): Promise<string> {
+  const bytes = await imageBytes(path)
+  const metadata = await sharp(bytes).metadata()
+  const cropped = await sharp(bytes).extract(cropRegion(metadata.width ?? 1, metadata.height ?? 1, element.crop)).png().toBuffer()
   return `data:image/png;base64,${cropped.toString('base64')}`
 }
 
+/** A selection an adjustment was made in, cropped and fitted into the box as the image is: its coverage there. */
+async function clipCoverage(path: string | Buffer, element: ImageLayer, width: number, height: number): Promise<Uint8Array> {
+  const bytes = await imageBytes(path)
+  const metadata = await sharp(bytes).metadata()
+  const gray = await sharp(bytes)
+    .extract(cropRegion(metadata.width ?? 1, metadata.height ?? 1, element.crop))
+    .resize(width, height, { fit: element.fit, background: { r: 0, g: 0, b: 0, alpha: 1 } })
+    .removeAlpha()
+    .extractChannel(0)
+    .raw()
+    .toBuffer()
+  return new Uint8Array(gray)
+}
+
 /**
- * The image drawn into its box with its effects applied, and its shadow
- * beneath, as the canvas draws them.
+ * The image drawn into its box with its effects and adjustments applied, and
+ * its shadow beneath, as the canvas draws them.
  */
 async function imageWithEffects(
   uri: string,
-  element: Extract<SceneElement, { type: 'image' }>,
-  effects: ImageEffects,
-  box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+  element: ImageLayer,
+  box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  resolveAsset: ReferenceAssetResolver
 ): Promise<string> {
+  const effects = hasVisibleEffects(element.effects) ? element.effects : null
   const width = Math.max(1, Math.round(box.w))
   const height = Math.max(1, Math.round(box.h))
   const pixels = await sharp(Buffer.from(uri.slice(uri.indexOf(',') + 1), 'base64'))
@@ -76,10 +94,16 @@ async function imageWithEffects(
     .ensureAlpha()
     .raw()
     .toBuffer()
-  applyImageEffects(pixels, width, height, effects)
+  if (effects !== null) applyImageEffects(pixels, width, height, effects)
+  const coverages = new Map<string, Uint8Array | null>()
+  for (const clipId of adjustmentClipIds(element.adjustments)) {
+    const path = await resolveAsset(clipId)
+    coverages.set(clipId, path === null ? null : await clipCoverage(path, element, width, height))
+  }
+  adjustLayerPixels(pixels, element.adjustments, (clipId) => coverages.get(clipId) ?? null)
   const drawn = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer()
   let shadow = ''
-  if (effects.shadow !== null && effects.shadow.opacity > 0) {
+  if (effects !== null && effects.shadow !== null && effects.shadow.opacity > 0) {
     const geometry = shadowGeometry(effects.shadow, width, height)
     const silhouette = sharp(Buffer.from(shadowSilhouette(pixels, width, height, effects.shadow)), { raw: { width, height, channels: 4 } })
       .extend({ top: geometry.padding, bottom: geometry.padding, left: geometry.padding, right: geometry.padding, background: { r: 0, g: 0, b: 0, alpha: 0 } })
@@ -145,7 +169,7 @@ async function elementSvg(
       const masked = element.mask !== null && element.mask !== undefined && element.mask.enabled
       const painted = (element.paint !== undefined && element.paint.length > 0) || masked ? await paintedImageBytes(path, element.paint, resolveAsset, element.mask ?? null) : path
       const uri = await imageDataUri(painted, element)
-      if (hasVisibleEffects(element.effects)) return `${groupStart}${await imageWithEffects(uri, element, element.effects, box)}${groupEnd}`
+      if (hasVisibleEffects(element.effects) || activeAdjustments(element.adjustments).length > 0) return `${groupStart}${await imageWithEffects(uri, element, box, resolveAsset)}${groupEnd}`
       const aspect = element.fit === 'cover' ? 'xMidYMid slice' : element.fit === 'contain' ? 'xMidYMid meet' : 'none'
       return `${groupStart}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="${uri}" preserveAspectRatio="${aspect}"/>${groupEnd}`
     } catch {
@@ -269,15 +293,31 @@ export class CompositeReferenceRenderer {
     const width = scene.canvas.outputWidth
     const height = scene.canvas.outputHeight
     const warnings: string[] = []
-    const layers: string[] = []
+    let layers: string[] = []
     const hiddenInGroups = hiddenByGroups(scene.elements)
+    const background = scene.canvas.transparent ? 'none' : escapeXml(scene.canvas.backgroundColor)
+    // What lies under the layers still to draw: the canvas colour, then the picture so far once an adjustment layer has changed it.
+    let base = `<rect width="${width}" height="${height}" fill="${background}"/>`
+    const svg = (): string => `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${base}<g clip-path="url(#canvas-clip)"><defs><clipPath id="canvas-clip"><rect width="${width}" height="${height}"/></clipPath></defs>${layers.join('')}</g></svg>`
     for (const element of scene.elements) {
       if (hiddenInGroups.has(element.id)) continue
+      if (element.type === 'adjustment') {
+        if (elementPresentation(element, mode) === 'omit') continue
+        // An adjustment layer changes everything drawn so far: draw it, adjust it, and go on over the result.
+        const below = await sharp(Buffer.from(svg())).ensureAlpha().raw().toBuffer()
+        const mask = element.mask
+        // The mask's paint is replayed at its own size, then sampled over the canvas, as the canvas does it.
+        const own = mask === null || mask === undefined || !mask.enabled ? null : await layerMaskCoverage(mask, this.#resolveAsset)
+        const coverage = own === null ? null : sampleCoverage({ width: own.width, height: own.height, data: own.coverage }, width, height, { scaleX: own.width / width, scaleY: own.height / height, offsetX: 0, offsetY: 0 })
+        adjustPixels(below, element.settings, { coverage, amount: element.opacity })
+        const adjusted = await sharp(below, { raw: { width, height, channels: 4 } }).png().toBuffer()
+        base = `<image x="0" y="0" width="${width}" height="${height}" href="data:image/png;base64,${adjusted.toString('base64')}" preserveAspectRatio="none"/>`
+        layers = []
+        continue
+      }
       layers.push(await elementSvg(element, mode, width, height, this.#resolveAsset, warnings))
     }
-    const background = scene.canvas.transparent ? 'none' : escapeXml(scene.canvas.backgroundColor)
-    const svg = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg"><rect width="${width}" height="${height}" fill="${background}"/><g clip-path="url(#canvas-clip)"><defs><clipPath id="canvas-clip"><rect width="${width}" height="${height}"/></clipPath></defs>${layers.join('')}</g></svg>`
-    const buffer = await sharp(Buffer.from(svg)).png({ compressionLevel: 9, adaptiveFiltering: false }).toBuffer()
+    const buffer = await sharp(Buffer.from(svg())).png({ compressionLevel: 9, adaptiveFiltering: false }).toBuffer()
     return { buffer, warnings }
   }
 }

@@ -1,10 +1,12 @@
-import { withMaskViewSetAside } from './mask-state'
+import { useWorkspaceStore } from '../store/workspace-store'
+import { ArtworkSession } from './artwork-render'
 
 /*
- * Layers drawn exactly as the stage shows them, at the canvas's output
- * size and without the artboard behind them, for merging and rasterizing:
- * what the layers look like on screen is what the new pixels hold. The
- * stage registers the drawing while it is mounted.
+ * Layers drawn as they look, at the canvas's output size and, unless asked,
+ * without the canvas colour behind them, for merging, rasterizing and sampling: what the
+ * layers look like is what the new pixels hold. They are drawn by the
+ * export renderer, so images with effects or adjustments come out at full
+ * size, not at the size the screen happens to show them.
  */
 
 export interface LayerRenderOptions {
@@ -12,33 +14,30 @@ export interface LayerRenderOptions {
   readonly base?: string
   /** Draw these layers even when they are hidden. */
   readonly showHidden?: boolean
+  /** Draw the canvas colour first, as part of the picture, so adjustment layers change it as they do on the canvas. */
+  readonly canvasBackground?: boolean
 }
-
-/** The drawn layers, 'pending' while one of their pictures is still loading, or null without a stage. */
-export type LayerRenderer = (ids: readonly string[], options: LayerRenderOptions) => HTMLCanvasElement | 'pending' | null
-
-let renderer: LayerRenderer | null = null
-
-export function setLayerRenderer(next: LayerRenderer | null): void {
-  renderer = next
-}
-
-const PENDING_WAIT_MS = 8000
 
 /**
- * Draws the layers once every picture among them has loaded, so a stand-in
- * never ends up in the pixels, and without a mask being viewed alone or in red.
+ * Draws the layers once everything they need has been read, so a stand-in
+ * never ends up in the pixels; null when they cannot be drawn.
  */
-export function renderLayersAsDrawn(ids: readonly string[], options: LayerRenderOptions = {}): Promise<HTMLCanvasElement | null> {
-  return withMaskViewSetAside(async () => {
-    const deadline = performance.now() + PENDING_WAIT_MS
-    for (;;) {
-      const drawn = renderer?.(ids, options) ?? null
-      if (drawn !== 'pending') return drawn
-      if (performance.now() > deadline) return null
-      await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-  })
+export async function renderLayersAsDrawn(ids: readonly string[], options: LayerRenderOptions = {}): Promise<HTMLCanvasElement | null> {
+  const { scene } = useWorkspaceStore.getState()
+  let session: ArtworkSession | null = null
+  try {
+    session = await ArtworkSession.prepare(scene, undefined, { includeHidden: options.showHidden === true, only: ids })
+    return session.render({
+      width: scene.canvas.outputWidth,
+      height: scene.canvas.outputHeight,
+      background: options.canvasBackground === true ? 'canvas' : 'none',
+      layers: { ids, ...(options.base === undefined ? {} : { base: options.base }), ...(options.showHidden === undefined ? {} : { showHidden: options.showHidden }) }
+    })
+  } catch {
+    return null
+  } finally {
+    session?.dispose()
+  }
 }
 
 /** The smallest rectangle holding every pixel that is not fully transparent, or null for an empty picture. */

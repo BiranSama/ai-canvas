@@ -7,6 +7,9 @@ import { getRuntimeAssetUrl, isRuntimeAssetMissing, subscribeRuntimeAssets } fro
 import { clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
 import { ArtworkStage, type LayerDraw } from './artwork-stage'
 import { isFinalContent } from './layer-drawing'
+import type { AdjustmentClips } from './image-effects'
+import type { AdjustmentCoverage } from './adjustment-layer'
+import { adjustmentClipIds, sampleCoverage } from '../../../shared/adjustments'
 
 /*
  * Draws a scene away from the screen, at any pixel size, with the canvas's
@@ -18,7 +21,7 @@ import { isFinalContent } from './layer-drawing'
  */
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
-type MaskedElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
+type MaskedElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' | 'adjustment' }>
 
 export class ArtworkRenderError extends Error {}
 
@@ -34,6 +37,8 @@ export interface LayerRequest {
   readonly mask: MaskUse
   /** False draws text without its stroke and shadow, which a PSD adds back as layer styles. */
   readonly textEffects: boolean
+  /** False draws an image without its own adjustments, which a PSD adds back as clipped adjustment layers. */
+  readonly adjustments?: boolean
 }
 
 export interface ArtworkRequest {
@@ -53,6 +58,12 @@ export interface ArtworkRequest {
    * drawn on its own goes past them.
    */
   readonly area?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
+  /**
+   * Some layers together, as a merge draws them: these (hidden ones too with
+   * showHidden), the base at full opacity and in normal blend, because the
+   * merged layer keeps the base's own.
+   */
+  readonly layers?: { readonly ids: readonly string[]; readonly base?: string; readonly showHidden?: boolean }
 }
 
 const WAIT_MS = 30_000
@@ -162,17 +173,18 @@ export class ArtworkSession {
    * with includeHidden every exported kind, hidden ones too, as a PSD keeps
    * them. A layer that is not drawn never holds an export up.
    */
-  static async prepare(scene: Scene, signal?: AbortSignal, options: { readonly includeHidden?: boolean } = {}): Promise<ArtworkSession> {
+  static async prepare(scene: Scene, signal?: AbortSignal, options: { readonly includeHidden?: boolean; readonly only?: readonly string[] } = {}): Promise<ArtworkSession> {
     const session = new ArtworkSession(scene)
-    const drawable = options.includeHidden === true
+    const only = options.only === undefined ? null : new Set(options.only)
+    const drawable = (options.includeHidden === true
       ? scene.elements.filter((element) => element.type !== 'group' && isFinalContent(element))
-      : exportedLayers(scene)
-    const unblendable = exportedLayers(scene).find((element) => !blendSupported(element))
+      : exportedLayers(scene)).filter((element) => only === null || only.has(element.id))
+    const unblendable = drawable.find((element) => element.visible && !blendSupported(element))
     if (unblendable !== undefined) throw new ArtworkRenderError(`这台电脑的图形环境画不出「${unblendable.name}」的混合模式，导出出来会和画布不一样，所以先停下了。`)
     for (const element of drawable) {
       if (signal?.aborted === true) throw abortError()
       if (element.type === 'image') await session.#readImage(element, signal)
-      if ((element.type === 'image' || element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined) {
+      if ((element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment') && element.mask !== null && element.mask !== undefined) {
         await session.#readMask(element, signal)
       }
     }
@@ -194,6 +206,18 @@ export class ArtworkSession {
     const size = { width: image.naturalWidth, height: image.naturalHeight }
     const clipIds = paintClipIds(element.paint)
     if (clipIds.length > 0) await waitFor(() => clipLookup(clipIds, size), subscribeAssetPixels, signal, `图层「${element.name}」的笔触范围`)
+    const adjustmentClips = adjustmentClipIds(element.adjustments)
+    if (adjustmentClips.length > 0) await waitFor(() => clipLookup(adjustmentClips, size), subscribeAssetPixels, signal, `图层「${element.name}」调整的选区`)
+  }
+
+  /** The selections the layer's adjustments were made in, read beforehand. */
+  #adjustmentClips(element: ImageElement): AdjustmentClips | null {
+    const ids = adjustmentClipIds(element.adjustments)
+    if (ids.length === 0) return null
+    const size = this.#imageSize(element)
+    const pixels = clipLookup(ids, size)
+    if (pixels === null) throw new ArtworkRenderError(`图层「${element.name}」调整的选区还没读出来，请稍后再导出。`)
+    return { ...size, pixels }
   }
 
   async #readMask(element: MaskedElement, signal: AbortSignal | undefined): Promise<void> {
@@ -284,23 +308,48 @@ export class ArtworkSession {
     return canvas
   }
 
+  /** An adjustment layer's mask over the canvas, or null when it has none on. */
+  #adjustmentMask(element: Extract<SceneElement, { type: 'adjustment' }>, use: MaskUse): AdjustmentCoverage | null {
+    if (!maskApplies(element, use)) return null
+    const mask = element.mask!
+    const gray = grayAssetPixels(mask.assetId)
+    if (gray === null) throw new ArtworkRenderError(`调整图层「${element.name}」的蒙版还没读出来。`)
+    return { width: gray.width, height: gray.height, coverage: maskCoverage(gray.data, gray.width, gray.height, mask.paint, readClips(element, mask.paint, { width: gray.width, height: gray.height })) }
+  }
+
+  /** An adjustment layer's mask over the whole picture at this size, on or not, for a PSD's layer mask; null without one. */
+  adjustmentMaskAt(elementId: string, width: number, height: number): Uint8Array<ArrayBuffer> | null {
+    const element = this.scene.elements.find((candidate) => candidate.id === elementId)
+    if (element?.type !== 'adjustment') return null
+    const mask = this.#adjustmentMask(element, 'on')
+    if (mask === null) return null
+    return sampleCoverage({ width: mask.width, height: mask.height, data: mask.coverage }, width, height, { scaleX: mask.width / width, scaleY: mask.height / height, offsetX: 0, offsetY: 0 })
+  }
+
   /** The picture, or one layer of it, at this size. */
   render(request: ArtworkRequest): HTMLCanvasElement {
     const width = Math.max(1, Math.round(request.width))
     const height = Math.max(1, Math.round(request.height))
     const layer = request.layer
-    const elements = layer === undefined
-      ? exportedLayers(this.scene)
-      : this.scene.elements.filter((element) => element.id === layer.id && element.type !== 'group')
+    const some = request.layers
+    const hiddenInGroups = hiddenByGroups(this.scene.elements)
+    const chosen = some === undefined ? null : new Set(some.ids)
+    const elements = layer !== undefined
+      ? this.scene.elements.filter((element) => element.id === layer.id && element.type !== 'group')
+      : chosen !== null
+        ? [...this.scene.elements].sort((left, right) => left.zIndex - right.zIndex).filter((element) => chosen.has(element.id) && element.type !== 'group' && isFinalContent(element)
+          && (some?.showHidden === true || (element.visible && !hiddenInGroups.has(element.id))))
+        : exportedLayers(this.scene)
     if (layer !== undefined && elements.length === 0) throw new ArtworkRenderError('要导出的图层已经不在了。')
-    const background = request.background === 'canvas'
-      ? this.scene.canvas.transparent ? null : this.scene.canvas.backgroundColor
-      : request.background === 'none' ? null : request.background.color
+    // The canvas colour is part of the picture, so adjustment layers change it; a colour asked for here
+    // (a JPEG's matte behind a transparent canvas) only fills what the picture leaves see-through.
+    const background = request.background === 'canvas' && !this.scene.canvas.transparent ? this.scene.canvas.backgroundColor : null
+    const matte = typeof request.background === 'object' ? request.background.color : null
     const outputScale = height / this.scene.canvas.outputHeight
     const area = request.area === undefined
       ? { x: 0, y: 0, width, height }
       : { x: Math.round(request.area.x), y: Math.round(request.area.y), width: Math.max(1, Math.round(request.area.width)), height: Math.max(1, Math.round(request.area.height)) }
-    const draws = elements.map((element) => this.#layerDraw(element, layer, width, height))
+    const draws = elements.map((element) => this.#layerDraw(element, layer, width, height, some?.base))
 
     if (this.#container === null) {
       const container = document.createElement('div')
@@ -333,16 +382,30 @@ export class ArtworkSession {
     })
     if (failure !== null) throw failure instanceof Error ? failure : new ArtworkRenderError(String(failure))
     if (result === null) throw new ArtworkRenderError('这一层没画出来，请再试一次。')
-    return result
+    if (matte === null) return result
+    const drawn: HTMLCanvasElement = result
+    const { canvas, context } = context2d(drawn.width, drawn.height)
+    context.fillStyle = matte
+    context.fillRect(0, 0, drawn.width, drawn.height)
+    context.drawImage(drawn, 0, 0)
+    return canvas
   }
 
-  #layerDraw(element: SceneElement, layer: LayerRequest | undefined, width: number, height: number): LayerDraw {
+  #layerDraw(element: SceneElement, layer: LayerRequest | undefined, width: number, height: number, base?: string): LayerDraw {
     const use: MaskUse = layer?.mask ?? 'scene'
-    const isolated = layer !== undefined
+    const isolated = layer !== undefined || element.id === base
     const maskOnly = use === 'only'
+    if (element.type === 'adjustment') {
+      // Over the whole picture; its opacity is how much of the adjustment shows, not a layer's transparency.
+      return {
+        element, maskOnly, x: 0, y: 0, width, height, opacity: 1, operation: 'source-over', textEffects: true,
+        image: null, adjustmentClips: null, maskAlpha: null, adjustmentMask: this.#adjustmentMask(element, use)
+      }
+    }
+    const plain = element.type === 'image' && (maskOnly || layer?.adjustments === false)
     return {
       // The mask alone ignores the image's effects: they follow its outline, not the mask.
-      element: maskOnly && element.type === 'image' ? { ...element, effects: undefined } : element,
+      element: element.type === 'image' && plain ? { ...element, ...(maskOnly ? { effects: undefined } : {}), adjustments: undefined } : element,
       maskOnly,
       x: element.transform.x * width,
       y: element.transform.y * height,
@@ -352,7 +415,9 @@ export class ArtworkSession {
       operation: isolated ? 'source-over' : blendModeToCanvasOperation(resolveBlendMode(element)),
       textEffects: layer?.textEffects ?? true,
       image: element.type === 'image' ? this.#imageSource(element, use) : null,
-      maskAlpha: (element.type === 'text' || element.type === 'shape') && maskApplies(element, use) ? this.#boxMaskAlpha(element) : null
+      adjustmentClips: element.type === 'image' && !plain ? this.#adjustmentClips(element) : null,
+      maskAlpha: (element.type === 'text' || element.type === 'shape') && maskApplies(element, use) ? this.#boxMaskAlpha(element) : null,
+      adjustmentMask: null
     }
   }
 

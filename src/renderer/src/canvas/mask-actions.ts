@@ -15,10 +15,10 @@ import { layerMaskPixels, layerPixels, layerSourceImage } from './pixel-layers'
  * turn off, invert, load as a selection, and the ways of looking at one.
  */
 
-type MaskableElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
+type MaskableElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' | 'adjustment' }>
 
 export function isMaskable(element: SceneElement | undefined): element is MaskableElement {
-  return element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape')
+  return element !== undefined && (element.type === 'image' || element.type === 'text' || element.type === 'shape' || element.type === 'adjustment')
 }
 
 function find(elementId: string): MaskableElement | null {
@@ -63,7 +63,7 @@ function refuse(message: string): false {
  */
 export async function addLayerMask(elementId: string, hideSelection: boolean): Promise<boolean> {
   const element = find(elementId)
-  if (element === null) return refuse('只有图片、文字和形状图层能加蒙版。')
+  if (element === null) return refuse('只有图片、文字、形状和调整图层能加蒙版。')
   if (element.locked) return refuse(`「${element.name}」已锁定，解锁后才能加蒙版。`)
   if (element.mask !== null && element.mask !== undefined) return refuse(`「${element.name}」已经有蒙版了。`)
   const space = maskSpace(element)
@@ -121,6 +121,7 @@ export function deleteLayerMask(elementId: string): Promise<boolean> {
 export async function applyLayerMask(elementId: string): Promise<boolean> {
   const element = find(elementId)
   if (element === null || element.mask === null || element.mask === undefined) return false
+  if (element.type === 'adjustment') return refuse('调整图层没有像素，蒙版不能应用，只能停用或删除。')
   if (element.locked) return refuse(`「${element.name}」已锁定，解锁后才能应用蒙版。`)
   if (!element.mask.enabled) return refuse('先启用蒙版（Shift+单击蒙版缩略图），再应用。')
   if (element.type === 'image') {

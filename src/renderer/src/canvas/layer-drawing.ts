@@ -23,5 +23,5 @@ export function textWrap(element: TextElement): 'none' | 'char' | 'word' {
 export function isFinalContent(element: SceneElement): boolean {
   if (element.type === 'sketch') return element.finalVisible
   if (element.type === 'shape') return element.role === 'final'
-  return element.type === 'image' || element.type === 'text'
+  return element.type === 'image' || element.type === 'text' || element.type === 'adjustment'
 }

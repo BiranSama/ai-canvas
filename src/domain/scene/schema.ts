@@ -162,6 +162,83 @@ export const layerMaskSchema = z.object({
   enabled: z.boolean().default(true)
 })
 
+const byteSchema = z.number().int().min(0).max(255)
+const percentSchema = (min: number, max: number) => z.number().int().min(min).max(max)
+
+/** One channel of Photoshop's 色阶: input black, midtone gamma and white, and the output range. */
+export const levelsChannelSchema = z.object({
+  inputBlack: byteSchema,
+  inputWhite: byteSchema,
+  gamma: finiteNumber.min(0.1).max(9.99),
+  outputBlack: byteSchema,
+  outputWhite: byteSchema
+}).refine((channel) => channel.inputWhite - channel.inputBlack >= 2, 'The input white point stays above the black point.')
+
+/** One curve of Photoshop's 曲线: input and output pairs, left to right. */
+export const curvePointsSchema = z.array(z.tuple([byteSchema, byteSchema])).min(2).max(16)
+  .refine((points) => points.every((point, index) => index === 0 || point[0] > points[index - 1]![0]), 'Curve points go strictly left to right.')
+
+const perChannel = <T extends z.ZodType>(schema: T) => z.object({ rgb: schema, red: schema, green: schema, blue: schema })
+const balanceSchema = z.tuple([percentSchema(-100, 100), percentSchema(-100, 100), percentSchema(-100, 100)])
+
+/**
+ * Photoshop's adjustments, with its parameters and ranges. The pixel math
+ * is in shared/adjustments, which the canvas, exports and Main's renderer
+ * all use.
+ */
+export const adjustmentSettingsSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('brightness-contrast'), brightness: percentSchema(-150, 150), contrast: percentSchema(-50, 100) }),
+  z.object({ kind: z.literal('levels'), channels: perChannel(levelsChannelSchema) }),
+  z.object({ kind: z.literal('curves'), channels: perChannel(curvePointsSchema) }),
+  z.object({ kind: z.literal('exposure'), exposure: finiteNumber.min(-20).max(20), offset: finiteNumber.min(-0.5).max(0.5), gamma: finiteNumber.min(0.01).max(9.99) }),
+  z.object({ kind: z.literal('vibrance'), vibrance: percentSchema(-100, 100), saturation: percentSchema(-100, 100) }),
+  z.object({
+    kind: z.literal('hue-saturation'),
+    hue: percentSchema(-180, 180),
+    saturation: percentSchema(-100, 100),
+    lightness: percentSchema(-100, 100),
+    /** 着色: every pixel takes this hue and saturation, keeping its lightness. */
+    colorize: z.object({ hue: percentSchema(0, 360), saturation: percentSchema(0, 100), lightness: percentSchema(-100, 100) }).nullable()
+  }),
+  z.object({
+    kind: z.literal('color-balance'),
+    /** Cyan–red, magenta–green and yellow–blue for each tonal range. */
+    shadows: balanceSchema,
+    midtones: balanceSchema,
+    highlights: balanceSchema,
+    preserveLuminosity: z.boolean()
+  }),
+  z.object({
+    kind: z.literal('black-white'),
+    reds: percentSchema(-200, 300),
+    yellows: percentSchema(-200, 300),
+    greens: percentSchema(-200, 300),
+    cyans: percentSchema(-200, 300),
+    blues: percentSchema(-200, 300),
+    magentas: percentSchema(-200, 300),
+    tint: hexColorSchema.nullable()
+  }),
+  z.object({ kind: z.literal('invert') }),
+  z.object({ kind: z.literal('desaturate') })
+])
+
+export const ADJUSTMENT_KINDS = ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'invert', 'desaturate'] as const
+
+/**
+ * An adjustment on an image layer itself, as Photoshop's 图像 > 调整 changes
+ * the layer, except that the asset is kept and the adjustment can be changed
+ * or turned off. With a clip it was made inside a selection, in the layer's
+ * own pixels like a paint clip.
+ */
+export const layerAdjustmentSchema = z.object({
+  id: idSchema,
+  enabled: z.boolean().default(true),
+  clip: idSchema.optional(),
+  settings: adjustmentSettingsSchema
+})
+
+export const MAX_LAYER_ADJUSTMENTS = 24
+
 export const imageElementSchema = z.object({
   ...elementBaseShape,
   type: z.literal('image'),
@@ -180,7 +257,9 @@ export const imageElementSchema = z.object({
   paint: z.array(paintOpSchema).max(MAX_PAINT_OPS).optional(),
   /** Painting keeps each pixel's transparency (Photoshop's 锁定透明像素). */
   transparencyLocked: z.boolean().optional(),
-  mask: layerMaskSchema.nullable().optional()
+  mask: layerMaskSchema.nullable().optional(),
+  /** Adjustments of the layer's own colours, applied in order after its paint and colour match. */
+  adjustments: z.array(layerAdjustmentSchema).max(MAX_LAYER_ADJUSTMENTS).optional()
 })
 
 export const textElementSchema = z.object({
@@ -277,6 +356,21 @@ export const maskElementSchema = z.object({
   feather: finiteNumber.min(0).max(1)
 })
 
+/**
+ * Photoshop's adjustment layer: no pixels of its own, it changes everything
+ * drawn below it, through its mask. It always covers the whole canvas, so its
+ * mask is in the canvas's output pixels.
+ */
+export const adjustmentElementSchema = z.object({
+  ...elementBaseShape,
+  type: z.literal('adjustment'),
+  settings: adjustmentSettingsSchema,
+  mask: layerMaskSchema.nullable().optional()
+})
+
+/** Where an adjustment layer sits: over the whole canvas. */
+export const WHOLE_CANVAS = { x: 0, y: 0, width: 1, height: 1, rotation: 0 } as const
+
 export const groupElementSchema = z.object({
   ...elementBaseShape,
   type: z.literal('group'),
@@ -291,7 +385,8 @@ export const sceneElementSchema = z.discriminatedUnion('type', [
   placeholderElementSchema,
   lightElementSchema,
   maskElementSchema,
-  groupElementSchema
+  groupElementSchema,
+  adjustmentElementSchema
 ])
 
 export const sceneRelationSchema = z.object({
@@ -397,7 +492,7 @@ export const sceneSchema = sceneBaseSchema.superRefine((scene, context) => {
     if (
       element.blendMode !== undefined &&
       element.blendMode !== 'normal' &&
-      (element.type === 'placeholder' || element.type === 'mask' || element.type === 'group')
+      (element.type === 'placeholder' || element.type === 'mask' || element.type === 'group' || element.type === 'adjustment')
     ) {
       context.addIssue({
         code: 'custom',
@@ -431,3 +526,8 @@ export type PaintOp = z.infer<typeof paintOpSchema>
 export type LayerMask = z.infer<typeof layerMaskSchema>
 export type NormalizedTransform = z.infer<typeof normalizedTransformSchema>
 export type Canvas = z.infer<typeof canvasSchema>
+export type AdjustmentSettings = z.infer<typeof adjustmentSettingsSchema>
+export type AdjustmentKind = AdjustmentSettings['kind']
+export type LayerAdjustment = z.infer<typeof layerAdjustmentSchema>
+export type LevelsChannel = z.infer<typeof levelsChannelSchema>
+export type CurvePoints = z.infer<typeof curvePointsSchema>

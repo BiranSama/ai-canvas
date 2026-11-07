@@ -102,9 +102,9 @@ describe('opening a PSD as a project', () => {
         opaqueBackground: true,
         groups: [{ name: '标题组', visible: false }],
         layers: [
-          { name: '背景', left: 0, top: 0, width: 400, height: 200, opacity: 1, visible: true, blendMode: 'normal', groupIndex: null, png, mask: null },
-          { name: '阴影', left: 40, top: 20, width: 80, height: 40, opacity: 0.5, visible: false, blendMode: 'multiply', groupIndex: 0, png, mask: null },
-          { name: '光', left: -40, top: 100, width: 100, height: 100, opacity: 0.8, visible: true, blendMode: 'soft-light', groupIndex: 0, png, mask: { png, enabled: false } }
+          { kind: 'pixels', adjustments: [], name: '背景', left: 0, top: 0, width: 400, height: 200, opacity: 1, visible: true, blendMode: 'normal', groupIndex: null, png, mask: null },
+          { kind: 'pixels', adjustments: [], name: '阴影', left: 40, top: 20, width: 80, height: 40, opacity: 0.5, visible: false, blendMode: 'multiply', groupIndex: 0, png, mask: null },
+          { kind: 'pixels', adjustments: [], name: '光', left: -40, top: 100, width: 100, height: 100, opacity: 0.8, visible: true, blendMode: 'soft-light', groupIndex: 0, png, mask: { png, enabled: false } }
         ],
         composite: png,
         approximations: ['1 个图层的图层样式（投影、描边等）没有带过来'],
@@ -140,6 +140,26 @@ describe('opening a PSD as a project', () => {
     expect(opened?.notice).toContain('已打开“海报.psd”，3 个图层')
     expect(opened?.notice).toContain('图层样式')
     expect(opened?.notice).toContain('PSD 原样（对照用）')
+  })
+
+  it('brings adjustment layers over the whole canvas, and clipped ones as their layer\'s own adjustments', async () => {
+    const desktop = stubPsdDesktop()
+    const document = await (desktop.readPsd as unknown as () => Promise<Record<string, unknown>>)()
+    const png = new Uint8Array([137, 80, 78, 71])
+    const levels = { kind: 'levels', channels: { rgb: { inputBlack: 10, inputWhite: 240, gamma: 1.2, outputBlack: 0, outputWhite: 255 }, red: { inputBlack: 0, inputWhite: 255, gamma: 1, outputBlack: 0, outputWhite: 255 }, green: { inputBlack: 0, inputWhite: 255, gamma: 1, outputBlack: 0, outputWhite: 255 }, blue: { inputBlack: 0, inputWhite: 255, gamma: 1, outputBlack: 0, outputWhite: 255 } } }
+    desktop.readPsd.mockResolvedValue({
+      ...document,
+      groups: [],
+      layers: [
+        { kind: 'pixels', adjustments: [{ settings: { kind: 'invert' }, enabled: false }], name: '照片', left: 0, top: 0, width: 400, height: 200, opacity: 1, visible: true, blendMode: 'normal', groupIndex: null, png, mask: null },
+        { kind: 'adjustment', name: '色阶 1', opacity: 0.6, visible: true, groupIndex: null, settings: levels, mask: { png, enabled: true } }
+      ]
+    })
+    await openFileAsProject(new File([new Uint8Array([56, 66, 80, 83])], '调色.psd', { type: '' }))
+    const commands = desktop.executeSceneCommands.mock.calls[0]![0].batch.commands
+    const added = commands.filter((command: { kind: string }) => command.kind === 'element.add').map((command: { element: Record<string, unknown> }) => command.element)
+    expect(added[0]).toMatchObject({ type: 'image', name: '照片', adjustments: [{ id: expect.any(String), enabled: false, settings: { kind: 'invert' } }] })
+    expect(added[1]).toMatchObject({ type: 'adjustment', name: '色阶 1', opacity: 0.6, settings: levels, transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, mask: { assetId: expect.any(String), enabled: true } })
   })
 
   it('passes on what Main could not read, without Electron\'s wrapping', async () => {

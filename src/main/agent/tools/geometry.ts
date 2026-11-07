@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { NormalizedTransform, Scene, SceneElement } from '../../../domain'
+import { describeAdjustment } from '../../../shared/adjustments'
 import type { ElementRefs } from './refs'
 
 /** [x, y, width, height] in percent of the canvas, origin top left. */
@@ -53,7 +54,7 @@ export function boundsOf(elements: readonly SceneElement[]): NormalizedTransform
 }
 
 const TYPE_LABELS: Readonly<Record<SceneElement['type'], string>> = {
-  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体占位', light: '光', mask: '蒙版', group: '组'
+  image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体占位', light: '光', mask: '蒙版', group: '组', adjustment: '调整图层'
 }
 
 export function typeLabel(element: SceneElement): string {
@@ -92,13 +93,17 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
       ...(effects.feather === 0 ? [] : [`边缘羽化 ${round1(effects.feather * 100)}%`]),
       ...(effects.shadow === null ? [] : [`投影浓度 ${effects.shadow.opacity}`])
     ]
-    facts.push(`适配 ${element.fit}`, `参考用途 ${element.referenceRole}`, ...(blend.length === 0 ? [] : [`融合：${blend.join('、')}`]))
+    const adjustments = (element.adjustments ?? []).map((adjustment) => `${describeAdjustment(adjustment.settings)}${adjustment.clip === undefined ? '' : '（选区内）'}${adjustment.enabled ? '' : '（已关闭）'}`)
+    facts.push(`适配 ${element.fit}`, `参考用途 ${element.referenceRole}`, ...(blend.length === 0 ? [] : [`融合：${blend.join('、')}`]),
+      ...(adjustments.length === 0 ? [] : [`自身的调整：${adjustments.join('、')}`]))
   } else if (element.type === 'placeholder') {
     facts.push(`主体「${element.subject}」`, ...(element.pose === '' ? [] : [`姿态 ${element.pose}`]))
   } else if (element.type === 'light') {
     facts.push(`方向 ${element.direction}°`, `颜色 ${element.color}`, `强度 ${element.intensity}`)
   } else if (element.type === 'mask') {
     facts.push(`${element.mode === 'protect' ? '保护区' : '修改区'}`, `作用于 ${refOrUnknown(refs, element.targetElementId)}`)
+  } else if (element.type === 'adjustment') {
+    facts.push(describeAdjustment(element.settings), '作用于下面所有图层')
   } else if (element.type === 'group') {
     facts.push(`包含 ${element.childIds.filter((id) => scene.elements.some((child) => child.id === id)).map((id) => refOrUnknown(refs, id)).join('、')}`)
   }
