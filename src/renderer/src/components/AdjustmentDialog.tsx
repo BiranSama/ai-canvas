@@ -20,6 +20,8 @@ function DialogBody({ open }: { readonly open: AdjustmentDialogState }): React.J
   const element = useWorkspaceStore((state) => state.scene.elements.find((candidate) => candidate.id === open.elementId))
   const [settings, setSettings] = useState<LayerSettings>(open.adjustment.settings)
   const [preview, setPreview] = useState(true)
+  // While a slider is dragged; let go, the canvas draws the filter at full detail again.
+  const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   const ref = useRef<HTMLFormElement>(null)
   const confirm = useRef<HTMLButtonElement>(null)
@@ -36,9 +38,10 @@ function DialogBody({ open }: { readonly open: AdjustmentDialogState }): React.J
       elementId: open.elementId,
       adjustment: { ...open.adjustment, settings, ...(open.clip === null ? {} : { clip: open.clip.id }) },
       shown: true,
-      clip: open.clip === null ? null : { id: open.clip.id, pixels: open.clip.pixels }
+      clip: open.clip === null ? null : { id: open.clip.id, pixels: open.clip.pixels },
+      draft: dragging
     })
-  }, [open, settings, preview])
+  }, [open, settings, preview, dragging])
   useEffect(() => () => useAdjustmentPreview.getState().clear(open.elementId), [open.elementId])
 
   const cancel = (): void => {
@@ -68,7 +71,7 @@ function DialogBody({ open }: { readonly open: AdjustmentDialogState }): React.J
         <h2>{layerSettingsLabel(settings)}</h2>
         {element !== undefined && <p className="field-note">{`${isFilterSettings(settings) ? '作用于' : '调整'}「${element.name}」${open.clip === null ? '' : '的选区部分'}`}</p>}
         {isFilterSettings(settings)
-          ? <FilterControls settings={settings} onChange={(next) => setSettings(next)} />
+          ? <FilterControls settings={settings} onChange={(next, final) => { setSettings(next); setDragging(final === false) }} />
           : <AdjustmentControls settings={settings} histogram={histogram} onChange={(next) => setSettings(next)} />}
         <footer>
           <label className="checkbox-field adjustment-preview-toggle"><input type="checkbox" checked={preview} onChange={(event) => setPreview(event.currentTarget.checked)} /><span>预览</span></label>

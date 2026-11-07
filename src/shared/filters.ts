@@ -65,18 +65,41 @@ function boxesForGauss(sigma: number): readonly number[] {
   return [0, 1, 2].map((index) => (index < count ? lower : upper))
 }
 
-/** One box pass along rows (or columns, with the strides swapped), edges extended. */
-function boxPass(source: Float32Array, target: Float32Array, length: number, lines: number, step: number, lineStep: number, radius: number): void {
-  const span = radius * 2 + 1
-  for (let line = 0; line < lines; line += 1) {
-    const start = line * lineStep
-    const at = (index: number): number => source[start + Math.min(length - 1, Math.max(0, index)) * step]!
+/** One box pass along each row, edges extended: only the ends of a row clamp, the rest reads straight through. */
+function boxRows(source: Float32Array, target: Float32Array, width: number, height: number, radius: number): void {
+  const scale = 1 / (radius * 2 + 1)
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width
+    const first = source[row]!
+    const last = source[row + width - 1]!
     let sum = 0
-    for (let index = -radius; index <= radius; index += 1) sum += at(index)
-    for (let index = 0; index < length; index += 1) {
-      target[start + index * step] = sum / span
-      sum += at(index + radius + 1) - at(index - radius)
+    for (let index = -radius; index <= radius; index += 1) sum += index < 0 ? first : index >= width ? last : source[row + index]!
+    for (let x = 0; x < width; x += 1) {
+      target[row + x] = sum * scale
+      const add = x + radius + 1
+      const drop = x - radius
+      sum += (add < width ? source[row + add]! : last) - (drop > 0 ? source[row + drop]! : first)
     }
+  }
+}
+
+/**
+ * One box pass down each column, edges extended, row by row: a running sum
+ * per column, so memory is read in order rather than a column at a time.
+ */
+function boxColumns(source: Float32Array, target: Float32Array, width: number, height: number, radius: number): void {
+  const scale = 1 / (radius * 2 + 1)
+  const sums = new Float64Array(width)
+  for (let index = -radius; index <= radius; index += 1) {
+    const row = Math.min(height - 1, Math.max(0, index)) * width
+    for (let x = 0; x < width; x += 1) sums[x] = sums[x]! + source[row + x]!
+  }
+  for (let y = 0; y < height; y += 1) {
+    const out = y * width
+    for (let x = 0; x < width; x += 1) target[out + x] = sums[x]! * scale
+    const add = Math.min(height - 1, y + radius + 1) * width
+    const drop = Math.max(0, y - radius) * width
+    for (let x = 0; x < width; x += 1) sums[x] = sums[x]! + (source[add + x]! - source[drop + x]!)
   }
 }
 
@@ -87,8 +110,8 @@ export function blurChannel(channel: Float32Array, width: number, height: number
   for (const box of boxesForGauss(sigma)) {
     const radius = Math.max(0, (box - 1) / 2)
     if (radius === 0) continue
-    boxPass(channel, temp, width, height, 1, width, radius)
-    boxPass(temp, channel, height, width, width, 1, radius)
+    boxRows(channel, temp, width, height, radius)
+    boxColumns(temp, channel, width, height, radius)
   }
 }
 
@@ -118,10 +141,62 @@ function unpremultiply(channels: readonly Float32Array[], target: Pixels): void 
 }
 
 /** A Gaussian blur of the picture, sigma in pixels, written to target. */
+/** One box pass along each row of interleaved RGBA, the four channels together, edges extended. */
+function boxRowsRgba(source: Float32Array, target: Float32Array, width: number, height: number, radius: number): void {
+  const scale = 1 / (radius * 2 + 1)
+  const stride = width * 4
+  const sums = new Float64Array(4)
+  for (let y = 0; y < height; y += 1) {
+    const row = y * stride
+    const last = row + stride - 4
+    sums.fill(0)
+    for (let index = -radius; index <= radius; index += 1) {
+      const at = index < 0 ? row : index >= width ? last : row + index * 4
+      for (let channel = 0; channel < 4; channel += 1) sums[channel] = sums[channel]! + source[at + channel]!
+    }
+    for (let x = 0; x < width; x += 1) {
+      const out = row + x * 4
+      const add = x + radius + 1 < width ? row + (x + radius + 1) * 4 : last
+      const drop = x - radius > 0 ? row + (x - radius) * 4 : row
+      for (let channel = 0; channel < 4; channel += 1) {
+        target[out + channel] = sums[channel]! * scale
+        sums[channel] = sums[channel]! + (source[add + channel]! - source[drop + channel]!)
+      }
+    }
+  }
+}
+
+/**
+ * The picture blurred, premultiplied by alpha so colour does not bleed out
+ * of transparent pixels: the four channels interleaved in one array, each
+ * pass reading it once, the column passes as rows of four times the width.
+ */
 function gaussianBlur(data: Pixels, width: number, height: number, sigma: number, target: Pixels): void {
-  const channels = premultiplied(data, width * height)
-  for (const channel of channels) blurChannel(channel, width, height, sigma)
-  unpremultiply(channels, target)
+  const pixels = width * height
+  if (sigma < 0.2 || pixels === 0) { target.set(data); return }
+  const values = new Float32Array(pixels * 4)
+  for (let index = 0; index < values.length; index += 4) {
+    const alpha = data[index + 3]!
+    values[index] = data[index]! * alpha / 255
+    values[index + 1] = data[index + 1]! * alpha / 255
+    values[index + 2] = data[index + 2]! * alpha / 255
+    values[index + 3] = alpha
+  }
+  const temp = new Float32Array(values.length)
+  for (const box of boxesForGauss(sigma)) {
+    const radius = Math.max(0, (box - 1) / 2)
+    if (radius === 0) continue
+    boxRowsRgba(values, temp, width, height, radius)
+    boxColumns(temp, values, width * 4, height, radius)
+  }
+  for (let index = 0; index < values.length; index += 4) {
+    const alpha = values[index + 3]!
+    if (alpha <= 0.01) { target[index] = 0; target[index + 1] = 0; target[index + 2] = 0; target[index + 3] = 0; continue }
+    target[index] = Math.round(Math.min(255, values[index]! * 255 / alpha))
+    target[index + 1] = Math.round(Math.min(255, values[index + 1]! * 255 / alpha))
+    target[index + 2] = Math.round(Math.min(255, values[index + 2]! * 255 / alpha))
+    target[index + 3] = Math.round(Math.min(255, alpha))
+  }
 }
 
 /** One channel sampled between pixels, bilinearly, edges extended. */

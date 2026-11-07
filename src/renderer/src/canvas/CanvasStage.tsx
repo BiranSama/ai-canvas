@@ -212,7 +212,9 @@ function ImageVisual({ element, width, height, plain = false }: {
   }, [image, shownElement.adjustments, preview, pixelsVersion])
   // Effects and adjustments are worked out in pixels: at the screen's resolution, in steps as the view zooms.
   const zoom = useCanvasViewportStore((state) => state.artboard?.zoom ?? 1)
-  const detail = drawnDetail(width, height, zoom)
+  // While a filter's slider is dragged, a blur's preview is worked out at half the detail, so it keeps up.
+  const draft = preview?.kind === 'layer' && preview.elementId === element.id && preview.draft === true && hasSpatialFilters([preview.adjustment])
+  const detail = drawnDetail(width, height, zoom) * (draft ? 0.5 : 1)
   const shownWidth = Math.round(width * detail)
   const shownHeight = Math.round(height * detail)
   const effected = useMemo(
