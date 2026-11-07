@@ -142,9 +142,10 @@ describe('warp', () => {
 
   it('gives a raster that covers corners beyond the box', () => {
     const layout = warpLayout([[-0.5, 0], [1, 0], [1.5, 1], [0, 1]], 100, 50, 2)
-    expect(layout.x).toBeCloseTo(-50.5)
-    expect(layout.width).toBeCloseTo(201)
-    expect(layout.rasterWidth).toBe(402)
+    // On whole box pixels, a pixel to spare each side.
+    expect(layout.x).toBe(-51)
+    expect(layout.width).toBe(202)
+    expect(layout.rasterWidth).toBe(404)
   })
 })
 

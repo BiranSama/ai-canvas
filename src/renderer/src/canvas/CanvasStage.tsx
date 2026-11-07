@@ -42,6 +42,8 @@ import { useIslandLayoutStore } from '../islands/island-layout-store'
 import { groupBoundsForChildTransforms, isPaintTool, isSelectionTool, useWorkspaceStore } from '../store/workspace-store'
 import { cancelSelectionGesture, polygonLassoActive, selectionKeyDown, selectionPointerDown, selectionPointerMove, selectionPointerUp } from '../selection/selection-gestures'
 import { SelectionOverlay } from '../selection/SelectionOverlay'
+import { FreeTransformOverlay } from './FreeTransformOverlay'
+import { useFreeTransform, withFreeTransformPreview } from './free-transform-store'
 import { warmMagicTouch } from '../selection/magic-touch'
 import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
@@ -429,7 +431,7 @@ function ClipBaseShape({ element, artboard, zoom, styled = false }: { element: S
     : visual
   // An image warps and styles itself; a text or shape is warped and styled here, as its own node is.
   const corners = shown.type === 'text' || shown.type === 'shape' ? shown.corners : null
-  const masked = <CornersLayer corners={corners} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
+  const masked = <CornersLayer corners={corners} text={shown.type === 'text'} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
   const content = styled && (shown.type === 'text' || shown.type === 'shape') && styledLayer(shown) ? (
     <StyledLayer element={shown} width={width} height={height} extent={warpedExtent(corners, width, height)} unit={1} ratio={drawnDetail(width, height, zoom)} rotation={shown.transform.rotation} blend="normal" contentKey={shown}>
       {masked}
@@ -857,7 +859,7 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         // An image warps and styles itself, from the pixels it draws; text and shapes are warped and styled here.
         if (styledElement.type !== 'text' && styledElement.type !== 'shape') return maskedBox
         const corners = styledElement.corners
-        const masked = <CornersLayer corners={corners} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
+        const masked = <CornersLayer corners={corners} text={styledElement.type === 'text'} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
         if (!styledLayer(styledElement)) return masked
         return (
           <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(corners, width, height)} unit={1} ratio={drawnDetail(width, height, zoom)}
@@ -1022,6 +1024,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   const setSelection = useWorkspaceStore((state) => state.setSelection)
   const exitGroupEditing = useWorkspaceStore((state) => state.exitGroupEditing)
   const activeTool = useWorkspaceStore((state) => state.activeTool)
+  // Photoshop's free transform: its box replaces the handles, and the layers are drawn as it previews them.
+  const freeTransform = useFreeTransform((state) => state.session)
   const setActiveTool = useWorkspaceStore((state) => state.setActiveTool)
   const addElement = useWorkspaceStore((state) => state.addElement)
   const execute = useWorkspaceStore((state) => state.execute)
@@ -1410,7 +1414,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     const transformer = transformerRef.current
     if (stage === null || transformer === null) return
     // Photoshop shows transform handles with the move tool only; painting and selecting reach through to the canvas.
-    if (preview || inlineTextId !== null || cropSession !== null || shapeEditElement?.shape === 'line' || selectedIds.length === 0 || isPaintTool(activeTool) || isSelectionTool(activeTool)) {
+    if (preview || freeTransform !== null || inlineTextId !== null || cropSession !== null || shapeEditElement?.shape === 'line' || selectedIds.length === 0 || isPaintTool(activeTool) || isSelectionTool(activeTool)) {
       transformer.nodes([])
     } else {
       const nodes = selectedIds.flatMap((id) => {
@@ -1429,7 +1433,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     // canvas one frame behind the visible transformer, making a first click
     // on an anchor intermittently miss.
     transformer.getLayer()?.draw()
-  }, [activeTool, cropSession, editingGroupId, inlineTextId, preview, scene.elements, selectedIds, shapeEditElement?.shape, size.width])
+  }, [activeTool, cropSession, editingGroupId, freeTransform, inlineTextId, preview, scene.elements, selectedIds, shapeEditElement?.shape, size.width])
 
   const restoreTransformSession = useCallback((session: TransformSession): void => {
     const stage = stageRef.current
@@ -1731,10 +1735,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
   }, [baseArtboard.height, baseArtboard.width, cropElement, cropSession, displayedArtboard, pan.x, pan.y, setClampedViewport, size.height, size.width, zoom])
 
   const hiddenInGroups = useMemo(() => hiddenByGroups(scene.elements), [scene.elements])
-  const sortedElements = [...scene.elements]
+  const shownElements = freeTransform === null ? scene.elements : scene.elements.map((element) => withFreeTransformPreview(element, freeTransform))
+  const sortedElements = [...shownElements]
     .sort((left, right) => left.zIndex - right.zIndex)
     .filter((element) => element.type !== 'mask' || activeTool === 'mask' || selectedIds.includes(element.id))
-  const clipStackOf = clipStacks(scene.elements)
+  const clipStackOf = clipStacks(shownElements)
   const clippedIds = new Set([...clipStackOf.values()].flatMap((stack) => stack.memberIds))
   const sortedById = new Map(sortedElements.map((element) => [element.id, element]))
   /** One layer's node; shown is what it draws, which inside a clipping stack leaves opacity and blend to the stack. */
@@ -1759,7 +1764,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       isDragCancelled={() => dragCancelledRef.current}
       onRequestEdit={requestElementEdit}
       isInlineEditing={inlineTextId === element.id}
-      viewportPanReady={spacePressed || activeTool === 'hand'}
+      viewportPanReady={spacePressed || activeTool === 'hand' || freeTransform !== null}
       cropOverride={cropSession?.elementId === element.id ? cropSession.draft : undefined}
       shapeCornerRadiusOverride={shapeRadiusDraft?.elementId === element.id ? shapeRadiusDraft.value : undefined}
       shapeTransformOverride={shapeLineDraft?.elementId === element.id ? shapeLineDraft.transform : undefined}
@@ -2625,6 +2630,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         </Layer>
       </Stage>
       {!preview && <SelectionOverlay originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} />}
+      {!preview && <FreeTransformOverlay originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} stageContent={() => stageRef.current?.content ?? null} />}
       {!preview && (activeTool === 'select' || isSelectionTool(activeTool)) && <GenerativeFillBar originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} stageWidth={size.width} stageHeight={size.height} />}
       {/* The brush's real size on the canvas, light over dark so it reads on any picture. */}
       {!preview && (activeTool === 'brush' || activeTool === 'eraser') && !spacePressed && <div ref={brushRingRef} className="brush-ring" aria-hidden="true" hidden />}

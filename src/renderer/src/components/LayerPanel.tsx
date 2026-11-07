@@ -33,6 +33,7 @@ import { canBeClipped, clipStacks, pathInBox, type SceneElement } from '../../..
 import { blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
 import { mergeDown, mergeVisible, needsRasterizeToPaint, rasterizeLayer, toggleClippingMask } from '../canvas/layer-actions'
+import { transformSelection } from '../canvas/free-transform-store'
 import { ADJUSTMENT_LAYER_KINDS, createAdjustmentLayer } from '../adjustments/adjustment-actions'
 import { ADJUSTMENT_LABELS } from '../../../shared/adjustments'
 import { addLayerMask, applyLayerMask, deleteLayerMask, editMask, isMaskable, loadMaskAsSelection, loadTransparencyAsSelection, setMaskEnabled, toggleMaskAlone } from '../canvas/mask-actions'
@@ -356,7 +357,7 @@ export function LayerPanel(): React.JSX.Element {
     setRenaming(null)
   }
 
-  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup' | 'merge' | 'merge-visible' | 'rasterize' | 'mask-add' | 'mask-hide' | 'mask-apply' | 'mask-delete' | 'mask-toggle' | 'clip'): void => {
+  const act = (id: string, action: 'duplicate' | 'delete' | 'front' | 'forward' | 'backward' | 'back' | 'rename' | 'visibility' | 'lock' | 'group' | 'ungroup' | 'merge' | 'merge-visible' | 'rasterize' | 'mask-add' | 'mask-hide' | 'mask-apply' | 'mask-delete' | 'mask-toggle' | 'clip' | 'flip-horizontal' | 'flip-vertical'): void => {
     setMenu(null)
     const element = byId.get(id)
     if (element === undefined) return
@@ -374,6 +375,7 @@ export function LayerPanel(): React.JSX.Element {
     else if (action === 'merge') void mergeDown()
     else if (action === 'merge-visible') void mergeVisible()
     else if (action === 'rasterize') void rasterizeLayer(id)
+    else if (action === 'flip-horizontal' || action === 'flip-vertical') void transformSelection(action)
     else if (action === 'clip') void toggleClippingMask(selectedIds.includes(id) ? selectedIds : [id])
     else if (action === 'mask-add' || action === 'mask-hide') void addLayerMask(id, action === 'mask-hide')
     else if (action === 'mask-apply') void applyLayerMask(id)
@@ -641,6 +643,10 @@ export function LayerPanel(): React.JSX.Element {
             <button type="button" role="menuitem" onClick={() => { setMenu(null); void clearLayerStyle(selectedIds.includes(menuElement.id) ? selectedIds : [menuElement.id]) }} disabled={menuElement.locked || !hasLayerStyles(menuElement.style)}>清除图层样式</button>
           </>}
           {canBeClipped(menuElement) && <button type="button" role="menuitem" onClick={() => act(menu.id, 'clip')} disabled={menuElement.locked}>{menuElement.clipped === true ? '释放剪贴蒙版' : '创建剪贴蒙版'}<kbd>Ctrl+Alt+G</kbd></button>}
+          {menuElement.type !== 'adjustment' && menuElement.type !== 'mask' && <>
+            <button type="button" role="menuitem" onClick={() => act(menu.id, 'flip-horizontal')} disabled={menuElement.locked}>水平翻转</button>
+            <button type="button" role="menuitem" onClick={() => act(menu.id, 'flip-vertical')} disabled={menuElement.locked}>垂直翻转</button>
+          </>}
           {(menuElement.type === 'text' || menuElement.type === 'shape' || needsRasterizeToPaint(menuElement)) && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge')}>{menuElement.type === 'group' ? '合并组' : selected.length > 1 && selectedIds.includes(menu.id) ? '合并图层' : '向下合并'}<kbd>Ctrl+E</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge-visible')}>合并可见图层<kbd>Ctrl+Shift+E</kbd></button>

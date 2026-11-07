@@ -1,5 +1,5 @@
 import sharp from 'sharp'
-import { affineOf, boxWarpMatrix, clipStacks, cornersAreAffine, cornersAreIdentity, cornersExtent, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Corners, type Scene, type SceneElement } from '../../domain'
+import { affineOf, boxWarpMatrix, clipStacks, cornersAreIdentity, cornersDrawnAsMatrix, cornersExtent, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Corners, type Scene, type SceneElement } from '../../domain'
 import { warpLayout, warpPixels, warpSourceMatrix } from '../../shared/warp'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, coverageInBox, hasSpatialFilters, sampleCoverage } from '../../shared/adjustments'
@@ -133,10 +133,10 @@ function layerCorners(element: SceneElement): Corners | null {
   return cornersAreIdentity(corners) ? null : corners!
 }
 
-/** A flip or skew as an SVG matrix about the box's top-left corner, inside the layer's turn; nothing for a plain box. */
+/** A flip, or a text's skew, as an SVG matrix about the box's top-left corner, inside the layer's turn; nothing otherwise. */
 function affineWarp(element: SceneElement, box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number }): string {
   const corners = layerCorners(element)
-  if (corners === null || !cornersAreAffine(corners)) return ''
+  if (corners === null || !cornersDrawnAsMatrix(corners, element.type === 'text')) return ''
   const [a, b, c, d, e, f] = affineOf(boxWarpMatrix(corners, box.w, box.h))
   const precise = (value: number): string => Number(value.toFixed(6)).toString()
   return ` matrix(${[a, b, c, d, box.x + e - a * box.x - c * box.y, box.y + f - b * box.x - d * box.y].map(precise).join(' ')})`
@@ -151,7 +151,7 @@ function warpedExtent(element: SceneElement, w: number, h: number): { readonly x
 }
 
 /**
- * A distorted or perspective layer: drawn upright in its box, resampled
+ * A skewed, distorted or perspective layer: drawn upright in its box, resampled
  * through its corners with the shared warp the canvas uses, and laid back
  * turned, in its opacity and blend mode.
  */
@@ -205,13 +205,16 @@ async function styledElementSvg(element: StyledElement, mode: RenderMode, width:
   const reach = styledLayerReach(element, extent.width, extent.height)
   const upright = { ...element, opacity: 1, blendMode: 'normal' as const, style: undefined, transform: { ...element.transform, rotation: 0 } } as StyledElement
   const inner = await elementSvg(upright, mode, width, height, resolveAsset, warnings)
-  const left = box.x + extent.x - reach
-  const top = box.y + extent.y - reach
-  const rasterWidth = Math.max(1, Math.ceil(extent.width + reach * 2))
-  const rasterHeight = Math.max(1, Math.ceil(extent.height + reach * 2))
+  // From a whole pixel of the box, as the canvas caches it.
+  const originX = Math.floor(extent.x - reach)
+  const originY = Math.floor(extent.y - reach)
+  const left = box.x + originX
+  const top = box.y + originY
+  const rasterWidth = Math.max(1, Math.ceil(extent.x + extent.width + reach) - originX)
+  const rasterHeight = Math.max(1, Math.ceil(extent.y + extent.height + reach) - originY)
   const svg = `<svg width="${rasterWidth}" height="${rasterHeight}" viewBox="${finite(left)} ${finite(top)} ${rasterWidth} ${rasterHeight}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
   const pixels = await sharp(Buffer.from(svg)).ensureAlpha().raw().toBuffer()
-  const styled = applyLayerStyles(pixels, { x: reach, y: reach, width: extent.width, height: extent.height, rasterWidth, rasterHeight }, element.style!, 1, element.transform.rotation)
+  const styled = applyLayerStyles(pixels, { x: extent.x - originX, y: extent.y - originY, width: extent.width, height: extent.height, rasterWidth, rasterHeight }, element.style!, 1, element.transform.rotation)
   const image = async (data: Uint8Array | Uint8ClampedArray): Promise<string> => {
     const png = await sharp(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { raw: { width: rasterWidth, height: rasterHeight, channels: 4 } }).png().toBuffer()
     return `<image x="${finite(left)}" y="${finite(top)}" width="${rasterWidth}" height="${rasterHeight}" href="data:image/png;base64,${png.toString('base64')}" preserveAspectRatio="none"/>`
@@ -236,7 +239,7 @@ async function elementSvg(
     return styledElementSvg(element, mode, width, height, resolveAsset, warnings)
   }
   const corners = layerCorners(element)
-  if (corners !== null && !cornersAreAffine(corners)) return warpedElementSvg(element, corners, mode, width, height, resolveAsset, warnings)
+  if (corners !== null && !cornersDrawnAsMatrix(corners, element.type === 'text')) return warpedElementSvg(element, corners, mode, width, height, resolveAsset, warnings)
   const box = transform(element, width, height)
   const opacity = finite(element.opacity)
   const layerMask = await layerMaskSvg(element, box, resolveAsset)

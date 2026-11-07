@@ -1,3 +1,4 @@
+import { useFreeTransform } from '../canvas/free-transform-store'
 import type { SceneCommand, SceneElement } from '../../../domain'
 import { BLEND_MODES, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible, toggleClippingMask } from '../canvas/layer-actions'
@@ -303,6 +304,18 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     return true
   }
 
+  // In free transform, Enter applies and Esc puts it back; Ctrl+Z starts it over. Other keys would change the
+  // layers under the box, so they wait, as in Photoshop; zooming still works.
+  const transforming = useFreeTransform.getState()
+  if (transforming.session !== null) {
+    if (event.key === 'Enter' && !command) return run(() => { void transforming.apply() })
+    if (event.key === 'Escape') return run(() => transforming.cancel())
+    if (command && key === 'z') return run(() => transforming.cancel())
+    if (command && (event.key === '0' || event.key === '1' || event.key === '+' || event.key === '=' || event.key === '-')) return false
+    if (['Shift', 'Control', 'Alt', 'Meta', ' '].includes(event.key)) return false
+    return run(() => {})
+  }
+
   if (event.key === 'Backspace' || event.key === 'Delete') {
     if (event.altKey && !command) return run(() => fill(state.foregroundColor, '前景色'))
     if (command && !event.altKey) return run(() => fill(state.backgroundColor, '背景色'))
@@ -354,7 +367,7 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     if (key === 'u') return run(() => { void adjustSelectedLayer('hue-saturation') })
     if (key === 'b') return run(() => { void adjustSelectedLayer('color-balance') })
     if (event.code === 'KeyE') return run(() => { void mergeDown() })
-    if (key === 't') return run(() => state.setActiveTool('select'))
+    if (key === 't') return run(() => { state.setActiveTool('select'); useFreeTransform.getState().start() })
     if (event.key === ',') {
       return run(() => {
         const elements = selectedElements()

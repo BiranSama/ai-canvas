@@ -124,7 +124,7 @@ function ArtworkLayer({ draw, outputScale }: { readonly draw: LayerDraw; readonl
   const element = draw.element
   // Through its free-transform corners, mask and all, before its styles.
   const corners = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null
-  const masked = <CornersLayer corners={corners} width={draw.width} height={draw.height} ratio={1} maxPixels={Math.max(WARP_EXPORT_PIXELS, draw.width * draw.height * 4)}>{maskedBox}</CornersLayer>
+  const masked = <CornersLayer corners={corners} text={element.type === 'text'} width={draw.width} height={draw.height} ratio={1} maxPixels={Math.max(WARP_EXPORT_PIXELS, draw.width * draw.height * 4)}>{maskedBox}</CornersLayer>
   const styled = !draw.maskOnly && (element.type === 'image' || element.type === 'text' || element.type === 'shape') && hasLayerStyles(element.style)
   return (
     // A styled layer blends its content itself, so its shadow and glow keep their own modes.

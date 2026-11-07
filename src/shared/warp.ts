@@ -30,10 +30,11 @@ export const WARP_PIXELS = 36_000_000
 export function warpLayout(corners: Corners, boxWidth: number, boxHeight: number, ratio: number): WarpLayout {
   const extent = cornersExtent(corners)
   const pad = 1 / Math.max(1e-6, ratio)
-  const x = extent.x * boxWidth - pad
-  const y = extent.y * boxHeight - pad
-  const width = extent.width * boxWidth + pad * 2
-  const height = extent.height * boxHeight + pad * 2
+  // On whole box pixels, so a box on whole canvas pixels is not resampled again where it is laid.
+  const x = Math.floor(extent.x * boxWidth - pad)
+  const y = Math.floor(extent.y * boxHeight - pad)
+  const width = Math.ceil((extent.x + extent.width) * boxWidth + pad) - x
+  const height = Math.ceil((extent.y + extent.height) * boxHeight + pad) - y
   const fit = Math.min(ratio, Math.sqrt(WARP_PIXELS / Math.max(1, width * height)))
   return { x, y, width, height, rasterWidth: Math.max(1, Math.ceil(width * fit)), rasterHeight: Math.max(1, Math.ceil(height * fit)) }
 }
@@ -70,9 +71,10 @@ export function warpPixels(source: Uint8ClampedArray | Uint8Array, sourceWidth: 
     let at = row * rasterWidth * 4
     for (let column = 0; column < rasterWidth; column += 1, nx += m0, ny += m3, nw += m6, at += 4) {
       if (nw <= 1e-12) continue
-      // The source pixel whose centre is at the integer part.
-      const fx = nx / nw - 0.5
-      const fy = ny / nw - 0.5
+      // The source pixel whose centre is at the integer part, on a 1/65536 grid: the canvas and Main reach
+      // the same point by slightly different sums, and a coverage right at a half must round the same way in both.
+      const fx = Math.round((nx / nw - 0.5) * 65536) / 65536
+      const fy = Math.round((ny / nw - 0.5) * 65536) / 65536
       if (fx <= -1 || fy <= -1 || fx >= sourceWidth || fy >= sourceHeight) continue
       const x0 = Math.floor(fx)
       const y0 = Math.floor(fy)

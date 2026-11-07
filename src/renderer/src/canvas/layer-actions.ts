@@ -1,4 +1,4 @@
-import { canBeClipBase, canBeClipped, clipBases, clipStacks, cornersAreIdentity, cornersAreMirror, type NormalizedTransform, type PaintOp, type SceneCommand, type SceneElement } from '../../../domain'
+import { canBeClipBase, canBeClipped, clipBases, clipStacks, cornersBendPaint, type NormalizedTransform, type PaintOp, type SceneCommand, type SceneElement } from '../../../domain'
 import { imageLayerSpace } from '../../../shared/layer-space'
 import type { GrayMask } from '../../../shared/mask-raster'
 import { showAppNotice } from '../components/app-notice'
@@ -28,8 +28,7 @@ const FULL_CANVAS: NormalizedTransform = { x: 0, y: 0, width: 1, height: 1, rota
  * objects, it has to be rasterized first.
  */
 export function needsRasterizeToPaint(element: SceneElement): boolean {
-  const corners = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null
-  return !cornersAreIdentity(corners) && !cornersAreMirror(corners)
+  return cornersBendPaint(element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null)
 }
 
 async function drawnAsset(ids: readonly string[], summary: string, options: LayerRenderOptions = {}, within: GrayMask | null = null): Promise<{ readonly assetId: string; readonly transform: NormalizedTransform } | null> {

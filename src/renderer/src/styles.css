@@ -726,6 +726,23 @@ select:focus-visible {
 .generative-fill-form .is-primary { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; color: #FFFFFF; background: var(--quiet-blue); font-size: 12px; cursor: pointer; }
 .generative-fill-close { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--muted-slate); background: transparent; cursor: pointer; }
 .selection-ants { position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; }
+/* Free transform (Ctrl+T): the box, its handles, and the bar of modes over the stage. */
+.free-transform-overlay { position: absolute; top: 0; left: 0; z-index: 5; cursor: crosshair; touch-action: none; }
+.free-transform-box { fill: rgba(0,0,0,0); stroke: #73A7E5; stroke-width: 1.2; cursor: move; }
+.free-transform-handle { fill: #FCFDFE; stroke: #5E91D0; stroke-width: 1.2; }
+.free-transform-centre { fill: rgba(252,253,254,.7); stroke: #5E91D0; stroke-width: 1.2; pointer-events: none; }
+.free-transform-bar { position: absolute; top: 12px; left: 50%; z-index: 7; display: flex; max-width: calc(100% - 24px); height: 40px; align-items: center; gap: 2px; padding: 0 6px; border-radius: 12px; box-shadow: var(--shadow-float); transform: translateX(-50%); }
+.free-transform-bar button, .free-transform-menu button { display: grid; min-width: 28px; height: 28px; padding: 0 8px; place-items: center; border: 0; border-radius: 8px; color: var(--graphite); background: transparent; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.free-transform-bar button:hover:not(:disabled), .free-transform-menu button:hover:not(:disabled) { background: var(--quiet-blue-soft); }
+.free-transform-bar button:disabled, .free-transform-menu button:disabled { opacity: .4; cursor: default; }
+.free-transform-bar button.is-active { color: #FFFFFF; background: var(--quiet-blue); }
+.free-transform-bar button.is-primary { color: #FFFFFF; background: var(--quiet-blue); }
+.free-transform-modes { display: flex; gap: 2px; }
+.free-transform-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--hairline); }
+.free-transform-hint { overflow: hidden; margin: 0 6px; color: var(--muted-slate); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.free-transform-menu { position: absolute; z-index: 8; display: flex; min-width: 140px; flex-direction: column; padding: 4px; border-radius: 10px; box-shadow: var(--shadow-float); }
+.free-transform-menu button { display: block; width: 100%; text-align: left; }
+.free-transform-menu hr { width: 100%; margin: 3px 0; border: 0; border-top: 1px solid var(--hairline); }
 .brush-ring { position: absolute; top: 0; left: 0; z-index: 3; box-sizing: border-box; border: 1px solid rgba(255,255,255,.9); border-radius: 50%; box-shadow: 0 0 0 1px rgba(0,0,0,.5), inset 0 0 0 1px rgba(0,0,0,.5); pointer-events: none; will-change: transform; }
 .canvas-stage.is-pan-ready canvas { cursor: grab; }
 .canvas-stage.is-panning canvas { cursor: grabbing; }

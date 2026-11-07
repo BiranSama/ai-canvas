@@ -46,6 +46,21 @@ export function cornersAreMirror(corners: Corners | null | undefined): boolean {
   return corners !== undefined && corners !== null && sameCorners(corners, MIRRORED_CORNERS)
 }
 
+/** Whether painting would bend with the layer: after a skew, distort or perspective; a flip maps pixel for pixel. */
+export function cornersBendPaint(corners: Corners | null | undefined): boolean {
+  return !cornersAreIdentity(corners) && !cornersAreMirror(corners)
+}
+
+/**
+ * Whether the canvas and SVG draw these corners as a matrix: a flip, and
+ * text's skew (type stays crisp and Photoshop keeps it editable). An image
+ * or shape skew, a distort or a perspective is resampled by shared/warp, so
+ * every renderer gets the same pixels.
+ */
+export function cornersDrawnAsMatrix(corners: Corners, text: boolean): boolean {
+  return cornersAreMirror(corners) || (text && cornersAreAffine(corners))
+}
+
 /** Twice the signed area of a quadrilateral, positive when it keeps the box's turn. */
 function signedArea(points: readonly Point[]): number {
   let sum = 0
