@@ -25,7 +25,7 @@ function decimals(step: number): number {
 }
 
 /** A slider with its number, as Photoshop pairs them; the number is typed and taken on Enter or leaving it. */
-function AdjustSlider({ label, min, max, step = 1, value, onChange }: {
+export function AdjustSlider({ label, min, max, step = 1, value, onChange }: {
   readonly label: string
   readonly min: number
   readonly max: number

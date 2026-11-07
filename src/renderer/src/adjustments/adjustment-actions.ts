@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import { ELEMENT_SCHEMA_VERSION, WHOLE_CANVAS, type AdjustmentKind, type AdjustmentSettings, type LayerAdjustment, type LayerMask, type SceneCommand, type SceneElement } from '../../../domain'
-import { ADJUSTMENT_LABELS, adjustLayerPixels, autoLevels, defaultAdjustment, histogram, type Histogram } from '../../../shared/adjustments'
+import { ELEMENT_SCHEMA_VERSION, WHOLE_CANVAS, type AdjustmentKind, type AdjustmentSettings, type FilterKind, type FilterSettings, type LayerAdjustment, type LayerMask, type LayerSettings, type SceneCommand, type SceneElement } from '../../../domain'
+import { ADJUSTMENT_LABELS, adjustLayerPixels, autoLevels, defaultAdjustment, histogram, layerSettingsLabel, type Histogram } from '../../../shared/adjustments'
+import { defaultFilter, FILTER_LABELS } from '../../../shared/filters'
 import { boxLayerSpace, boxMaskSize, imageLayerSpace, maskInLayerSpace } from '../../../shared/layer-space'
 import { applyImageEffects, hasVisibleEffects } from '../../../shared/layer-effects'
 import { showAppNotice } from '../components/app-notice'
@@ -24,7 +25,7 @@ type ImageElement = Extract<SceneElement, { type: 'image' }>
 type AdjustmentLayer = Extract<SceneElement, { type: 'adjustment' }>
 
 /** The adjustments without settings: Photoshop applies them at once. */
-const IMMEDIATE: ReadonlySet<AdjustmentKind> = new Set(['invert', 'desaturate'])
+const IMMEDIATE: ReadonlySet<string> = new Set<AdjustmentKind>(['invert', 'desaturate'])
 
 /** The kinds Photoshop's 新建调整图层 menu lists, in its order (去色 is a command, not an adjustment layer). */
 export const ADJUSTMENT_LAYER_KINDS: readonly AdjustmentKind[] = ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'invert']
@@ -73,7 +74,7 @@ function layerClip(element: ImageElement): AdjustmentDialogState['clip'] | 'outs
 }
 
 /** Records an image layer's adjustment: a new one at the end of its list, or the changed one in its place. */
-export async function commitLayerAdjustment(open: AdjustmentDialogState, settings: AdjustmentSettings): Promise<boolean> {
+export async function commitLayerAdjustment(open: AdjustmentDialogState, settings: LayerSettings): Promise<boolean> {
   const store = useWorkspaceStore.getState()
   const element = store.scene.elements.find((candidate) => candidate.id === open.elementId)
   if (element?.type !== 'image') return false
@@ -83,8 +84,12 @@ export async function commitLayerAdjustment(open: AdjustmentDialogState, setting
     if (clipId === null) return refuse('选区没有存好，没有调整。')
     adjustment = { ...adjustment, clip: clipId }
   }
+  if (FILTER_KINDS_SET.has(settings.kind)) {
+    lastFilter = settings as FilterSettings
+    lastSettings.set(settings.kind as FilterKind, settings as FilterSettings)
+  }
   // Built when the step runs, on the list the steps queued before it left, so two quick ones both count.
-  return useWorkspaceStore.getState().execute(ADJUSTMENT_LABELS[settings.kind], (scene) => {
+  return useWorkspaceStore.getState().execute(layerSettingsLabel(settings), (scene) => {
     const current = scene.elements.find((candidate) => candidate.id === open.elementId)
     if (current?.type !== 'image') return null
     const list = current.adjustments ?? []
@@ -135,6 +140,52 @@ export async function adjustSelectedLayer(kind: AdjustmentKind): Promise<boolean
   return true
 }
 
+const FILTER_KINDS_SET: ReadonlySet<string> = new Set(Object.keys(FILTER_LABELS))
+
+/** The filter last applied, which Ctrl+Alt+F applies again, and each kind's last settings, which its dialog opens with, as Photoshop remembers them. */
+let lastFilter: FilterSettings | null = null
+const lastSettings = new Map<FilterKind, FilterSettings>()
+
+/** A new noise filter gets its own grain, so two of them do not add the same grain twice. */
+function withNewGrain(settings: FilterSettings): FilterSettings {
+  return settings.kind === 'add-noise' ? { ...settings, seed: Math.floor(Math.random() * 2_147_483_647) } : settings
+}
+
+/** The image layer a filter can go on, or why not. */
+function filterTarget(name: string): ImageElement | string {
+  const element = selectedOne()
+  if (element === undefined) return `先选中一个图片图层，再用${name}。`
+  if (element.type === 'text' || element.type === 'shape') return `「${element.name}」是${element.type === 'text' ? '文字' : '形状'}图层，滤镜要先栅格化（右键菜单「栅格化」）。`
+  if (element.type !== 'image') return `${name}只能用在图片图层上。`
+  if (element.locked) return `「${element.name}」已锁定，解锁后才能用滤镜。`
+  if (!element.visible) return `「${element.name}」是隐藏的，显示后才能用滤镜。`
+  return element
+}
+
+/** Photoshop's 滤镜 menu on the selected image layer: the filter's dialog opens, inside the selection when there is one. */
+export function filterSelectedLayer(kind: FilterKind): boolean {
+  const element = filterTarget(FILTER_LABELS[kind])
+  if (typeof element === 'string') return refuse(element)
+  const clip = layerClip(element)
+  if (clip === 'pending') return refuse(`「${element.name}」还没画好，稍后再试。`)
+  if (clip === 'outside') return refuse(`选区不在「${element.name}」上，滤镜作用不到。`)
+  const settings = withNewGrain(lastSettings.get(kind) ?? defaultFilter(kind))
+  useAdjustmentDialog.getState().show({ elementId: element.id, adjustment: { id: newId(), enabled: true, settings }, isNew: true, clip })
+  return true
+}
+
+/** Ctrl+Alt+F: the last filter again, with the same settings, on the selected image layer. */
+export async function repeatLastFilter(): Promise<boolean> {
+  if (lastFilter === null) return refuse('还没有用过滤镜。')
+  const element = filterTarget(FILTER_LABELS[lastFilter.kind])
+  if (typeof element === 'string') return refuse(element)
+  const clip = layerClip(element)
+  if (clip === 'pending') return refuse(`「${element.name}」还没画好，稍后再试。`)
+  if (clip === 'outside') return refuse(`选区不在「${element.name}」上，滤镜作用不到。`)
+  const settings = withNewGrain(lastFilter)
+  return commitLayerAdjustment({ elementId: element.id, adjustment: { id: newId(), enabled: true, settings }, isNew: true, clip }, settings)
+}
+
 /** How large a histogram is worked out: plenty for its 256 bins, and quick. */
 const HISTOGRAM_EDGE = 512
 
@@ -166,7 +217,8 @@ export function layerHistogram(element: ImageElement, adjustmentId: string): His
   // The colour match and feather come first, as the layer is drawn.
   if (hasVisibleEffects(element.effects)) applyImageEffects(pixels.data, pixels.width, pixels.height, element.effects)
   // Earlier adjustments made in a selection are left out here: the histogram is a guide, not the picture.
-  adjustLayerPixels(pixels.data, (index < 0 ? list : list.slice(0, index)).filter((adjustment) => adjustment.clip === undefined))
+  const sourceWidth = source instanceof HTMLImageElement ? source.naturalWidth : source.width
+  adjustLayerPixels(pixels.data, (index < 0 ? list : list.slice(0, index)).filter((adjustment) => adjustment.clip === undefined), { width: pixels.width, height: pixels.height, scale: pixels.width / Math.max(1, sourceWidth) })
   return histogram(pixels.data)
 }
 

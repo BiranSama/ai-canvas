@@ -46,7 +46,7 @@ import { warmMagicTouch } from '../selection/magic-touch'
 import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
 import { useCanvasViewportStore } from './canvas-viewport-store'
-import { maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers, paintedSourceKey } from './pixel-layers'
+import { layerMaskPixels, maskedBoxSource, paintedSource, pixelLayerVersion, subscribePixelLayers, paintedSourceKey } from './pixel-layers'
 import { assetPixelsVersion, clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
 import { useMaskState } from './mask-state'
 import { paintClipIds } from '../../../shared/paint-ops'
@@ -69,7 +69,7 @@ import {
   type SnapGuide
 } from './direct-canvas-geometry'
 import { drawRect, renderImageEffects } from './image-effects'
-import { adjustmentClipIds } from '../../../shared/adjustments'
+import { adjustmentClipIds, hasSpatialFilters } from '../../../shared/adjustments'
 import { adjustmentLayerSettings, useAdjustmentPreview, withLayerPreview } from './adjustment-preview'
 import { AdjustmentBackdrop } from './adjustment-layer'
 import { ElementVisual } from './element-visual'
@@ -156,6 +156,8 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
   const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
   const maskView = useMaskState((state) => state.view?.elementId === element.id ? state.view.mode : 'normal')
+  // A filter that looks at neighbouring pixels works on the unmasked picture, and the mask goes on after it, as on a smart object.
+  const maskLater = maskView === 'normal' && element.mask?.enabled === true && hasSpatialFilters(element.adjustments)
   // With paint on it or a mask, the layer is drawn from its asset with the operations replayed, through its mask.
   const source = useMemo(() => {
     if (image === null) return null
@@ -166,9 +168,9 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
     const maskClips = mask === null ? new Map<string, Uint8Array>() : clipLookup(paintClipIds(mask.paint), size)
     // A clip or mask still being read keeps the layer pending, so nothing is drawn beyond its selection.
     if (clips === null || (mask !== null && (gray === null || maskClips === null))) return null
-    return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask, gray: gray.data, clips: maskClips, view: maskView })
+    return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask: maskLater ? { ...mask, enabled: false } : mask, gray: gray.data, clips: maskClips, view: maskView })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas; pixelsVersion a clip or mask read
-  }, [image, element.id, element.paint, element.mask, maskView, paintVersion, pixelsVersion])
+  }, [image, element.id, element.paint, element.mask, maskView, maskLater, paintVersion, pixelsVersion])
   // An adjustment being set up in its dialog is shown before it is recorded.
   const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
   // A mask looked at alone or in red shows its coverage, which the layer's own adjustments must not recolour;
@@ -194,9 +196,12 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
   const shownWidth = Math.round(width * detail)
   const shownHeight = Math.round(height * detail)
   const effected = useMemo(
-    () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(source, shownElement, shownWidth, shownHeight, adjustmentClips, source instanceof HTMLCanvasElement ? `${paintVersion}|${paintedSourceKey(element.id)}` : 0),
+    () => source === null || adjustmentClips === null || adjustmentClips === 'pending' ? null : renderImageEffects(
+      source, shownElement, shownWidth, shownHeight, adjustmentClips, source instanceof HTMLCanvasElement ? `${paintVersion}|${paintedSourceKey(element.id)}` : 0,
+      detail, maskLater ? layerMaskPixels(element.id) : null
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
-    [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight]
+    [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight, maskLater]
   )
   if (image === null || source === null || adjustmentClips === 'pending') {
     const missing = isRuntimeAssetMissing(element.assetId)

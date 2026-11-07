@@ -2,7 +2,7 @@ import type { SceneCommand, SceneElement } from '../../../domain'
 import { BLEND_MODES, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible } from '../canvas/layer-actions'
 import { invertLayerMask, toggleMaskOverlay } from '../canvas/mask-actions'
-import { adjustSelectedLayer, autoTone } from '../adjustments/adjustment-actions'
+import { adjustSelectedLayer, autoTone, repeatLastFilter } from '../adjustments/adjustment-actions'
 import { useMaskState } from '../canvas/mask-state'
 import { clearSelected, fillLayer } from '../canvas/paint-controller'
 import { showAppNotice } from '../components/app-notice'
@@ -89,6 +89,13 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+Shift+U', action: '去色' },
       { keys: 'Ctrl+Shift+L / Ctrl+Alt+Shift+L', action: '自动色调 / 自动对比度' },
       { keys: '图层面板底部半圆按钮', action: '新建调整图层（有选区时只调整选区）' }
+    ]
+  },
+  {
+    title: '滤镜',
+    entries: [
+      { keys: 'Ctrl+Alt+F', action: '再用一次上次的滤镜，设置不变' },
+      { keys: '属性面板「添加滤镜」', action: '高斯模糊、USM 锐化、添加杂色、动感模糊（有选区时只作用于选区）' }
     ]
   },
   {
@@ -327,6 +334,8 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     if (event.shiftKey && !event.altKey && key === 'l') return run(() => { void autoTone('tone') })
     if (event.shiftKey && event.altKey && event.code === 'KeyL') return run(() => { void autoTone('contrast') })
     if (event.shiftKey && event.altKey && event.code === 'KeyB') return run(() => { void adjustSelectedLayer('black-white') })
+    // Photoshop's 滤镜 > 上次的滤镜.
+    if (event.altKey && !event.shiftKey && event.code === 'KeyF') return run(() => { void repeatLastFilter() })
     if (event.altKey || event.shiftKey) return false
     if (key === 'a') return run(selectAll)
     // Ctrl+D drops the pixel selection first; with none, the selected layers, as before.

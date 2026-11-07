@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import type { NormalizedTransform, Scene, SceneElement } from '../../../domain'
-import { describeAdjustment } from '../../../shared/adjustments'
+import { describeAdjustment, describeLayerSettings } from '../../../shared/adjustments'
 import type { ElementRefs } from './refs'
 
 /** [x, y, width, height] in percent of the canvas, origin top left. */
@@ -93,9 +93,9 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
       ...(effects.feather === 0 ? [] : [`边缘羽化 ${round1(effects.feather * 100)}%`]),
       ...(effects.shadow === null ? [] : [`投影浓度 ${effects.shadow.opacity}`])
     ]
-    const adjustments = (element.adjustments ?? []).map((adjustment) => `${describeAdjustment(adjustment.settings)}${adjustment.clip === undefined ? '' : '（选区内）'}${adjustment.enabled ? '' : '（已关闭）'}`)
+    const adjustments = (element.adjustments ?? []).map((adjustment) => `${describeLayerSettings(adjustment.settings)}${adjustment.clip === undefined ? '' : '（选区内）'}${adjustment.enabled ? '' : '（已关闭）'}`)
     facts.push(`适配 ${element.fit}`, `参考用途 ${element.referenceRole}`, ...(blend.length === 0 ? [] : [`融合：${blend.join('、')}`]),
-      ...(adjustments.length === 0 ? [] : [`自身的调整：${adjustments.join('、')}`]))
+      ...(adjustments.length === 0 ? [] : [`自身的调整与滤镜：${adjustments.join('、')}`]))
   } else if (element.type === 'placeholder') {
     facts.push(`主体「${element.subject}」`, ...(element.pose === '' ? [] : [`姿态 ${element.pose}`]))
   } else if (element.type === 'light') {

@@ -3613,6 +3613,9 @@ button.knowledge-copy { cursor: pointer; }
 .adjust-row input[type="range"] { width: 100%; min-width: 0; accent-color: var(--quiet-blue); }
 .adjust-row input[type="number"], .adjust-row select { height: 26px; min-width: 0; padding: 0 6px; border: 1px solid var(--hairline); border-radius: 7px; color: var(--graphite); background: var(--field); font-size: 11px; font-variant-numeric: tabular-nums; }
 .adjust-row .checkbox-field { margin-top: 0; }
+.adjust-choice { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0; padding: 0; border: 0; color: var(--muted-slate); font-size: 11px; }
+.adjust-choice legend { float: left; width: 72px; padding: 0; }
+.adjust-choice label { display: inline-flex; align-items: center; gap: 5px; color: var(--graphite); }
 .adjust-row input[type="color"] { width: 44px; height: 26px; padding: 0 2px; border: 1px solid var(--hairline); border-radius: 7px; background: var(--field); }
 .adjust-heading { display: flex; align-items: center; gap: 8px; }
 .adjust-heading .adjust-row { flex: 1; }

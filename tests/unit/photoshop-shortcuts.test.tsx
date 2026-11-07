@@ -19,11 +19,12 @@ vi.mock('../../src/renderer/src/canvas/CanvasStage', async () => {
   }
 })
 
-const adjusting = vi.hoisted(() => ({ layer: [] as string[], auto: [] as string[] }))
+const adjusting = vi.hoisted(() => ({ layer: [] as string[], auto: [] as string[], repeats: 0 }))
 vi.mock('../../src/renderer/src/adjustments/adjustment-actions', async (importOriginal) => ({
   ...await importOriginal<typeof AdjustmentActions>(),
   adjustSelectedLayer: vi.fn(async (kind: string) => { adjusting.layer.push(kind); return true }),
-  autoTone: vi.fn(async (mode: string) => { adjusting.auto.push(mode); return true })
+  autoTone: vi.fn(async (mode: string) => { adjusting.auto.push(mode); return true }),
+  repeatLastFilter: vi.fn(async () => { adjusting.repeats += 1; return true })
 }))
 
 const desktop = {
@@ -365,6 +366,13 @@ describe('Photoshop shortcuts on the canvas', () => {
     useMaskState.setState({ editing: NIGHT_VEIL_IDS.bottle })
     press({ key: 'i', code: 'KeyI', ctrlKey: true })
     expect(adjusting.layer).toHaveLength(7)
+  })
+
+  it('applies the last filter again with Ctrl+Alt+F', async () => {
+    adjusting.repeats = 0
+    await renderWorkspace([NIGHT_VEIL_IDS.bottle])
+    press({ key: 'f', code: 'KeyF', ctrlKey: true, altKey: true })
+    expect(adjusting.repeats).toBe(1)
   })
 
   it('opens Feather with Shift+F6 and Fill with Shift+F5', async () => {

@@ -228,17 +228,38 @@ export const adjustmentSettingsSchema = z.discriminatedUnion('kind', [
 
 export const ADJUSTMENT_KINDS = ['brightness-contrast', 'levels', 'curves', 'exposure', 'vibrance', 'hue-saturation', 'color-balance', 'black-white', 'invert', 'desaturate'] as const
 
+/** Photoshop's filters a layer can carry, with its ranges; sizes are output pixels. */
+export const filterSettingsSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('gaussian-blur'), radius: finiteNumber.min(0.1).max(250) }),
+  z.object({ kind: z.literal('unsharp-mask'), amount: finiteNumber.min(1).max(500), radius: finiteNumber.min(0.1).max(250), threshold: z.number().int().min(0).max(255) }),
+  z.object({
+    kind: z.literal('add-noise'),
+    /** Percent, as Photoshop's 数量. */
+    amount: finiteNumber.min(0.1).max(400),
+    distribution: z.enum(['uniform', 'gaussian']),
+    monochromatic: z.boolean(),
+    /** Fixes the grain, so it is the same each time the layer is drawn. */
+    seed: z.number().int().min(0).max(2_147_483_647)
+  }),
+  z.object({ kind: z.literal('motion-blur'), angle: finiteNumber.min(-360).max(360), distance: finiteNumber.min(1).max(1000) })
+])
+
+export const FILTER_KINDS = ['gaussian-blur', 'unsharp-mask', 'add-noise', 'motion-blur'] as const
+
+/** What a layer's own list holds: Photoshop's adjustments and filters, applied in order. */
+export const layerSettingsSchema = z.discriminatedUnion('kind', [...adjustmentSettingsSchema.options, ...filterSettingsSchema.options])
+
 /**
- * An adjustment on an image layer itself, as Photoshop's 图像 > 调整 changes
- * the layer, except that the asset is kept and the adjustment can be changed
- * or turned off. With a clip it was made inside a selection, in the layer's
- * own pixels like a paint clip.
+ * An adjustment or filter on an image layer itself, as Photoshop's 图像 >
+ * 调整 and 滤镜 change the layer, except that the asset is kept and each can
+ * be changed or turned off, like smart filters. With a clip it was made
+ * inside a selection, in the layer's own pixels like a paint clip.
  */
 export const layerAdjustmentSchema = z.object({
   id: idSchema,
   enabled: z.boolean().default(true),
   clip: idSchema.optional(),
-  settings: adjustmentSettingsSchema
+  settings: layerSettingsSchema
 })
 
 export const MAX_LAYER_ADJUSTMENTS = 24
@@ -532,6 +553,9 @@ export type NormalizedTransform = z.infer<typeof normalizedTransformSchema>
 export type Canvas = z.infer<typeof canvasSchema>
 export type AdjustmentSettings = z.infer<typeof adjustmentSettingsSchema>
 export type AdjustmentKind = AdjustmentSettings['kind']
+export type FilterSettings = z.infer<typeof filterSettingsSchema>
+export type FilterKind = FilterSettings['kind']
+export type LayerSettings = z.infer<typeof layerSettingsSchema>
 export type LayerAdjustment = z.infer<typeof layerAdjustmentSchema>
 export type LevelsChannel = z.infer<typeof levelsChannelSchema>
 export type CurvePoints = z.infer<typeof curvePointsSchema>

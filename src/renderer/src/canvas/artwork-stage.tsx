@@ -5,7 +5,7 @@ import type { SceneElement } from '../../../domain'
 import { resolveBlendMode } from '../../../shared/blend-mode'
 import { ElementVisual } from './element-visual'
 import { AdjustmentBackdrop, type AdjustmentCoverage } from './adjustment-layer'
-import { drawRect, renderImageEffects, type AdjustmentClips } from './image-effects'
+import { drawRect, renderImageEffects, type AdjustmentClips, type LaterMask } from './image-effects'
 
 /*
  * The stage an export is drawn on, away from the screen: each layer in its
@@ -28,6 +28,8 @@ export interface LayerDraw {
   readonly image: HTMLImageElement | HTMLCanvasElement | null
   /** The selections an image layer's adjustments were made in. */
   readonly adjustmentClips: AdjustmentClips | null
+  /** An image layer's mask that goes on after its filters, rather than into its source. */
+  readonly laterMask: LaterMask | null
   readonly maskAlpha: HTMLCanvasElement | null
   /** An adjustment layer's mask over the whole picture. */
   readonly adjustmentMask: AdjustmentCoverage | null
@@ -72,7 +74,7 @@ function ArtworkLayer({ draw, outputScale }: { readonly draw: LayerDraw; readonl
       height={draw.height}
       outputScale={outputScale}
       textEffects={draw.textEffects}
-      renderImage={(element, width, height) => <ArtworkImage element={element} source={draw.image!} clips={draw.adjustmentClips} width={width} height={height} />}
+      renderImage={(element, width, height) => <ArtworkImage element={element} source={draw.image!} clips={draw.adjustmentClips} laterMask={draw.laterMask} scale={outputScale} width={width} height={height} />}
     />
   )
   return (
@@ -83,8 +85,17 @@ function ArtworkLayer({ draw, outputScale }: { readonly draw: LayerDraw; readonl
 }
 
 /** The image in its box with its effects, as the canvas draws it, at the size it is exported. */
-function ArtworkImage({ element, source, clips, width, height }: { readonly element: ImageElement; readonly source: HTMLImageElement | HTMLCanvasElement; readonly clips: AdjustmentClips | null; readonly width: number; readonly height: number }): React.JSX.Element {
-  const effected = renderImageEffects(source, element, width, height, clips)
+function ArtworkImage({ element, source, clips, laterMask, scale, width, height }: {
+  readonly element: ImageElement
+  readonly source: HTMLImageElement | HTMLCanvasElement
+  readonly clips: AdjustmentClips | null
+  readonly laterMask: LaterMask | null
+  /** Drawn pixels per output pixel. */
+  readonly scale: number
+  readonly width: number
+  readonly height: number
+}): React.JSX.Element {
+  const effected = renderImageEffects(source, element, width, height, clips, 0, scale, laterMask)
   if (effected !== null) {
     const scaleX = width / effected.drawn.width
     const scaleY = height / effected.drawn.height

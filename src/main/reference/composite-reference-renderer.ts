@@ -1,7 +1,7 @@
 import sharp from 'sharp'
 import { hiddenByGroups, pathInBox, sceneSchema, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
-import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, sampleCoverage } from '../../shared/adjustments'
+import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, hasSpatialFilters, sampleCoverage } from '../../shared/adjustments'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import type { RenderMode } from '../../shared/reference'
 import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
@@ -76,6 +76,14 @@ async function clipCoverage(path: string | Buffer, element: ImageLayer, width: n
   return new Uint8Array(gray)
 }
 
+/** A layer mask in the image's own pixels, cropped and fitted into the box as the image is. */
+async function maskInBox(mask: { readonly width: number; readonly height: number; readonly coverage: Uint8Array }, element: ImageLayer, width: number, height: number): Promise<Uint8Array> {
+  const gray = await sharp(Buffer.from(mask.coverage.buffer, mask.coverage.byteOffset, mask.coverage.byteLength), { raw: { width: mask.width, height: mask.height, channels: 1 } })
+    .png()
+    .toBuffer()
+  return clipCoverage(gray, element, width, height)
+}
+
 /**
  * The image drawn into its box with its effects and adjustments applied, and
  * its shadow beneath, as the canvas draws them.
@@ -84,7 +92,9 @@ async function imageWithEffects(
   uri: string,
   element: ImageLayer,
   box: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
-  resolveAsset: ReferenceAssetResolver
+  resolveAsset: ReferenceAssetResolver,
+  /** A mask that goes on after the filters, as on a smart object, rather than into the source. */
+  laterMask: { readonly width: number; readonly height: number; readonly coverage: Uint8Array } | null = null
 ): Promise<string> {
   const effects = hasVisibleEffects(element.effects) ? element.effects : null
   const width = Math.max(1, Math.round(box.w))
@@ -100,7 +110,11 @@ async function imageWithEffects(
     const path = await resolveAsset(clipId)
     coverages.set(clipId, path === null ? null : await clipCoverage(path, element, width, height))
   }
-  adjustLayerPixels(pixels, element.adjustments, (clipId) => coverages.get(clipId) ?? null)
+  adjustLayerPixels(pixels, element.adjustments, { width, height, scale: width / Math.max(1e-6, box.w) }, (clipId) => coverages.get(clipId) ?? null)
+  if (laterMask !== null) {
+    const coverage = await maskInBox(laterMask, element, width, height)
+    for (let pixel = 0; pixel < coverage.length; pixel += 1) pixels[pixel * 4 + 3] = Math.round(pixels[pixel * 4 + 3]! * coverage[pixel]! / 255)
+  }
   const drawn = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer()
   let shadow = ''
   if (effects !== null && effects.shadow !== null && effects.shadow.opacity > 0) {
@@ -167,9 +181,15 @@ async function elementSvg(
     }
     try {
       const masked = element.mask !== null && element.mask !== undefined && element.mask.enabled
-      const painted = (element.paint !== undefined && element.paint.length > 0) || masked ? await paintedImageBytes(path, element.paint, resolveAsset, element.mask ?? null) : path
+      // A filter that looks at neighbouring pixels works on the unmasked picture; the mask goes on after it.
+      const laterMask = masked && hasSpatialFilters(element.adjustments)
+      const painted = (element.paint !== undefined && element.paint.length > 0) || (masked && !laterMask) ? await paintedImageBytes(path, element.paint, resolveAsset, laterMask ? null : element.mask ?? null) : path
       const uri = await imageDataUri(painted, element)
-      if (hasVisibleEffects(element.effects) || activeAdjustments(element.adjustments).length > 0) return `${groupStart}${await imageWithEffects(uri, element, box, resolveAsset)}${groupEnd}`
+      if (hasVisibleEffects(element.effects) || activeAdjustments(element.adjustments).length > 0) {
+        const size = await sharp(await imageBytes(path)).metadata()
+        const mask = laterMask ? await layerMaskCoverage(element.mask!, resolveAsset, { width: size.width ?? 1, height: size.height ?? 1 }) : null
+        return `${groupStart}${await imageWithEffects(uri, element, box, resolveAsset, mask)}${groupEnd}`
+      }
       const aspect = element.fit === 'cover' ? 'xMidYMid slice' : element.fit === 'contain' ? 'xMidYMid meet' : 'none'
       return `${groupStart}<image x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" href="${uri}" preserveAspectRatio="${aspect}"/>${groupEnd}`
     } catch {
