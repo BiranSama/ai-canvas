@@ -1,11 +1,11 @@
 import { flushSync } from 'react-dom'
 import { createRoot, type Root } from 'react-dom/client'
-import { hiddenByGroups, type Scene, type SceneElement } from '../../../domain'
+import { clipStacks, hiddenByGroups, type ClipStack, type Scene, type SceneElement } from '../../../domain'
 import { blendModeToCanvasOperation, resolveBlendMode } from '../../../shared/blend-mode'
 import { applyMaskAlpha, applyPaintOps, maskCoverage, paintClipIds } from '../../../shared/paint-ops'
 import { getRuntimeAssetUrl, isRuntimeAssetMissing, subscribeRuntimeAssets } from '../assets/runtime-assets'
 import { clipLookup, grayAssetPixels, subscribeAssetPixels } from './asset-pixels'
-import { ArtworkStage, type LayerDraw } from './artwork-stage'
+import { ArtworkStage, type ArtworkItem, type LayerDraw } from './artwork-stage'
 import { isFinalContent } from './layer-drawing'
 import type { AdjustmentClips, LaterMask } from './image-effects'
 import type { AdjustmentCoverage } from './adjustment-layer'
@@ -367,6 +367,23 @@ export class ArtworkSession {
       ? { x: 0, y: 0, width, height }
       : { x: Math.round(request.area.x), y: Math.round(request.area.y), width: Math.max(1, Math.round(request.area.width)), height: Math.max(1, Math.round(request.area.height)) }
     const draws = elements.map((element) => this.#layerDraw(element, layer, width, height, some?.base))
+    // Clipping stacks are drawn together; a layer drawn alone is drawn as it is, its clipping left to the PSD.
+    const stacks = layer !== undefined ? new Map<string, ClipStack>() : clipStacks(this.scene.elements)
+    const bases = new Map([...stacks.values()].flatMap((stack) => stack.memberIds.map((id) => [id, stack.baseId] as const)))
+    const byId = new Map(draws.map((draw) => [draw.element.id, draw]))
+    const items: ArtworkItem[] = []
+    for (const draw of draws) {
+      const baseId = bases.get(draw.element.id)
+      if (baseId !== undefined) {
+        // Drawn in its stack; with its base hidden it is hidden too; in a merge without its base it is drawn as it is.
+        if (byId.has(baseId) || chosen === null) continue
+        items.push({ kind: 'layer', draw })
+        continue
+      }
+      const stack = stacks.get(draw.element.id)
+      const members = stack === undefined ? [] : stack.memberIds.flatMap((id) => byId.get(id) ?? [])
+      items.push(members.length === 0 ? { kind: 'layer', draw } : { kind: 'stack', base: draw, members })
+    }
 
     if (this.#container === null) {
       const container = document.createElement('div')
@@ -385,7 +402,7 @@ export class ArtworkSession {
           height={height}
           background={background}
           outputScale={outputScale}
-          draws={draws}
+          items={items}
           clip={request.area === undefined}
           onDrawn={(layerNode) => {
             try {

@@ -50,6 +50,8 @@ const elementBaseShape = {
   zIndex: z.number().int().nonnegative(),
   opacity: finiteNumber.min(0).max(1).default(1),
   blendMode: blendModeSchema.optional(),
+  /** Clipped to the nearest unclipped layer below it in its group, as Photoshop's 剪贴蒙版: shown only where that layer is. */
+  clipped: z.boolean().optional(),
   visible: z.boolean().default(true),
   locked: z.boolean().default(false),
   groupId: idSchema.nullable().default(null),
@@ -554,6 +556,10 @@ export const sceneSchema = sceneBaseSchema.superRefine((scene, context) => {
           })
         }
       }
+    }
+
+    if (element.clipped === true && element.type !== 'image' && element.type !== 'text' && element.type !== 'shape' && element.type !== 'adjustment') {
+      context.addIssue({ code: 'custom', path: ['elements', index, 'clipped'], message: `A ${element.type} element cannot be clipped.` })
     }
 
     if (

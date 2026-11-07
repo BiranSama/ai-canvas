@@ -1,11 +1,11 @@
 import sharp from 'sharp'
-import { hiddenByGroups, pathInBox, sceneSchema, type Scene, type SceneElement } from '../../domain'
+import { clipStacks, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Scene, type SceneElement } from '../../domain'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, coverageInBox, hasSpatialFilters, sampleCoverage } from '../../shared/adjustments'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import { applyLayerStyles, hasLayerStyles, styledLayerReach } from '../../shared/layer-styles'
 import type { RenderMode } from '../../shared/reference'
-import { blendModeToSvgStyle, resolveBlendMode } from '../../shared/blend-mode'
+import { blendModeToSvgStyle, compositeOver, resolveBlendMode } from '../../shared/blend-mode'
 import { layoutTextLines } from './text-layout'
 import { imageBytes } from '../storage/image-file'
 
@@ -330,6 +330,45 @@ export class CompositeReferenceRenderer {
     this.#resolveAsset = resolveAsset
   }
 
+  /** One layer alone over the whole canvas, as raw RGBA. */
+  async #raster(element: SceneElement, mode: RenderMode, width: number, height: number, warnings: string[]): Promise<Buffer> {
+    const fragment = await elementSvg(element, mode, width, height, this.#resolveAsset, warnings)
+    return sharp(Buffer.from(`<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${fragment}</svg>`)).ensureAlpha().raw().toBuffer()
+  }
+
+  /**
+   * A clipping stack, as the canvas draws it: the base at full strength,
+   * each clipped layer shown only where the base's content is and laid over
+   * in its own mode (a clipped adjustment layer adjusts the stack so far),
+   * and the whole laid over the picture with the base's opacity and mode.
+   */
+  async #clipStackSvg(scene: Scene, base: SceneElement, stack: ClipStack, mode: RenderMode, hidden: ReadonlySet<string>, warnings: string[]): Promise<string> {
+    const width = scene.canvas.outputWidth
+    const height = scene.canvas.outputHeight
+    const full = { ...base, opacity: 1, blendMode: 'normal' as const } as SceneElement
+    const pixels = await this.#raster(full, mode, width, height, warnings)
+    // What clips is the base's own content, not its shadow, glow or stroke.
+    const shape = (base.type === 'image' || base.type === 'text' || base.type === 'shape') && hasLayerStyles(base.style)
+      ? await this.#raster({ ...full, style: undefined } as SceneElement, mode, width, height, warnings)
+      : Buffer.from(pixels)
+    for (const id of stack.memberIds) {
+      const member = scene.elements.find((element) => element.id === id)
+      if (member === undefined || hidden.has(id) || elementPresentation(member, mode) === 'omit') continue
+      if (member.type === 'adjustment') {
+        const mask = member.mask
+        const own = mask === null || mask === undefined || !mask.enabled ? null : await layerMaskCoverage(mask, this.#resolveAsset)
+        const coverage = own === null ? null : sampleCoverage({ width: own.width, height: own.height, data: own.coverage }, width, height, { scaleX: own.width / width, scaleY: own.height / height, offsetX: 0, offsetY: 0 })
+        adjustPixels(pixels, member.settings, { coverage, amount: member.opacity, blend: resolveBlendMode(member) })
+        continue
+      }
+      const layer = await this.#raster({ ...member, blendMode: 'normal' } as SceneElement, mode, width, height, warnings)
+      for (let index = 3; index < layer.length; index += 4) layer[index] = Math.round(layer[index]! * shape[index]! / 255)
+      compositeOver(pixels, layer, resolveBlendMode(member))
+    }
+    const png = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer()
+    return `<g opacity="${finite(base.opacity)}"${blendModeToSvgStyle(resolveBlendMode(base))}><image x="0" y="0" width="${width}" height="${height}" href="data:image/png;base64,${png.toString('base64')}" preserveAspectRatio="none"/></g>`
+  }
+
   async render(sceneInput: Scene, mode: RenderMode = 'reference'): Promise<CompositeRenderResult> {
     const scene = sceneSchema.parse(sceneInput)
     const width = scene.canvas.outputWidth
@@ -341,8 +380,17 @@ export class CompositeReferenceRenderer {
     // What lies under the layers still to draw: the canvas colour, then the picture so far once an adjustment layer has changed it.
     let base = `<rect width="${width}" height="${height}" fill="${background}"/>`
     const svg = (): string => `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">${base}<g clip-path="url(#canvas-clip)"><defs><clipPath id="canvas-clip"><rect width="${width}" height="${height}"/></clipPath></defs>${layers.join('')}</g></svg>`
+    const stacks = clipStacks(scene.elements)
+    const clipped = new Set([...stacks.values()].flatMap((stack) => stack.memberIds))
     for (const element of scene.elements) {
       if (hiddenInGroups.has(element.id)) continue
+      // A clipped layer is drawn with its base; hidden with it too.
+      if (clipped.has(element.id)) continue
+      const stack = stacks.get(element.id)
+      if (stack !== undefined) {
+        if (elementPresentation(element, mode) !== 'omit') layers.push(await this.#clipStackSvg(scene, element, stack, mode, hiddenInGroups, warnings))
+        continue
+      }
       if (element.type === 'adjustment') {
         if (elementPresentation(element, mode) === 'omit') continue
         // An adjustment layer changes everything drawn so far: draw it, adjust it, and go on over the result.

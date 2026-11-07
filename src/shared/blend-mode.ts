@@ -214,3 +214,33 @@ export function blendInPlace(
     data[index + 2] = mix(b, out[2]!)
   }
 }
+
+/**
+ * Lays one picture over another in a blend mode, as the canvas's
+ * globalCompositeOperation and SVG's mix-blend-mode do (W3C source-over
+ * with blending), in place. Pixels are RGBA, not premultiplied.
+ */
+export function compositeOver(below: Uint8Array | Uint8ClampedArray, above: Uint8Array | Uint8ClampedArray, mode: BlendMode): void {
+  const out = new Float64Array(3)
+  for (let index = 0; index < below.length; index += 4) {
+    const as = above[index + 3]! / 255
+    if (as <= 0) continue
+    const ab = below[index + 3]! / 255
+    const alpha = as + ab * (1 - as)
+    const br = below[index]! / 255
+    const bg = below[index + 1]! / 255
+    const bb = below[index + 2]! / 255
+    const sr = above[index]! / 255
+    const sg = above[index + 1]! / 255
+    const sb = above[index + 2]! / 255
+    blendColor(mode, br, bg, bb, sr, sg, sb, out)
+    const mix = (backdrop: number, source: number, blended: number): number => {
+      const value = (1 - ab) * source + ab * Math.max(0, Math.min(1, blended))
+      return Math.round(Math.max(0, Math.min(1, (as * value + ab * (1 - as) * backdrop) / alpha)) * 255)
+    }
+    below[index] = mix(br, sr, out[0]!)
+    below[index + 1] = mix(bg, sg, out[1]!)
+    below[index + 2] = mix(bb, sb, out[2]!)
+    below[index + 3] = Math.round(alpha * 255)
+  }
+}

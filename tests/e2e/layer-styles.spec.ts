@@ -1,13 +1,13 @@
-import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
-import Database from 'better-sqlite3'
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { expect, test } from '@playwright/test'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import sharp from 'sharp'
-import { blendModeSchema, ELEMENT_SCHEMA_VERSION, type Scene } from '../../src/domain'
+import { blendModeSchema, ELEMENT_SCHEMA_VERSION } from '../../src/domain'
 import { CompositeReferenceRenderer } from '../../src/main/reference/composite-reference-renderer'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { exportThroughPanel } from '../helpers/export-file'
+import { currentScene as scene, openCoffeePoster as openPoster, POSTER_HEIGHT as HEIGHT, POSTER_WIDTH as WIDTH, projectAssets, rawPixels as raw, worstDifference } from '../helpers/render-compare'
 
 /*
  * Blend modes, filters and layer styles look the same wherever the picture
@@ -15,54 +15,7 @@ import { exportThroughPanel } from '../helpers/export-file'
  * receives) agree pixel for pixel.
  */
 
-const WIDTH = 1024
-const HEIGHT = 1280
-
-async function openCoffeePoster(exportDirectory: string): Promise<{ app: ElectronApplication; page: Page; userData: string }> {
-  const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-styles-'))
-  const app = await electron.launch({
-    args: ['.', `--user-data-dir=${userData}`],
-    cwd: resolve('.'),
-    env: { ...process.env, AI_CANVAS_E2E: 'r2', AI_CANVAS_STARTUP: 'library', AI_CANVAS_E2E_EXPORT_DIR: exportDirectory }
-  })
-  const page = await app.firstWindow()
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.getByRole('region', { name: '连上服务' }).getByRole('button', { name: '先用示例看看' }).click()
-  await page.getByRole('region', { name: '从示例开始' }).getByRole('button', { name: '从示例开始：咖啡店海报' }).click()
-  await expect(page.locator('.conversation-title p')).toContainText('4:5')
-  return { app, page, userData }
-}
-
-function scene(page: Page): Promise<Scene> {
-  return page.evaluate(async () => (await (globalThis as unknown as { desktop: DesktopApi }).desktop.getWorkspaceBootstrap()).scene)
-}
-
-async function projectAssets(userData: string, projectId: string): Promise<(assetId: string) => Promise<string | null>> {
-  for (const entry of await readdir(join(userData, 'projects'), { withFileTypes: true })) {
-    if (!entry.isDirectory() || !entry.name.endsWith('.aicanvas')) continue
-    const folder = join(userData, 'projects', entry.name)
-    const db = new Database(join(folder, 'project.db'), { readonly: true })
-    const matches = (db.prepare('SELECT id FROM projects').get() as { id: string }).id === projectId
-    const rows = db.prepare('SELECT id, relative_path FROM assets').all() as { id: string; relative_path: string }[]
-    db.close()
-    if (matches) return async (assetId) => { const row = rows.find((candidate) => candidate.id === assetId); return row === undefined ? null : join(folder, row.relative_path) }
-  }
-  throw new Error('The project folder was not found.')
-}
-
-async function raw(source: string | Buffer): Promise<Buffer> {
-  return sharp(typeof source === 'string' ? await readFile(source) : source).ensureAlpha().raw().toBuffer()
-}
-
-/** The largest difference between two pictures, and where it is. */
-function worstDifference(left: Buffer, right: Buffer): { readonly value: number; readonly x: number; readonly y: number } {
-  let worst = { value: 0, x: 0, y: 0 }
-  for (let index = 0; index < left.length; index += 1) {
-    const value = Math.abs(left[index]! - right[index]!)
-    if (value > worst.value) worst = { value, x: Math.floor(index / 4) % WIDTH, y: Math.floor(index / 4 / WIDTH) }
-  }
-  return worst
-}
+const openCoffeePoster = (exportDirectory: string): ReturnType<typeof openPoster> => openPoster(exportDirectory, 'ai-canvas-styles-')
 
 test('blend modes, filters and layer styles draw the same in the export and in Main', async () => {
   test.setTimeout(180_000)

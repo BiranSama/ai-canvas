@@ -1361,6 +1361,10 @@ select:focus-visible {
 .layer-disclosure.is-open svg { transform: rotate(90deg); }
 .layer-indent,
 .layer-disclosure-spacer { display: block; }
+/* A clipped layer: an arrow down to its base, set in from the rows around it; the base's name underlined. */
+.layer-clip-arrow { display: grid; width: 16px; place-items: center; color: var(--muted-slate); }
+.layer-row.is-clipped .layer-thumbs { margin-left: 6px; }
+.layer-copy strong.is-clip-base { text-decoration: underline; text-underline-offset: 2px; }
 .layer-thumb { display: grid; width: 30px; height: 30px; overflow: hidden; place-items: center; border-radius: 6px; color: var(--muted-slate); background:
   repeating-conic-gradient(color-mix(in srgb, var(--graphite) 7%, transparent) 0 25%, transparent 0 50%) 50% / 8px 8px,
   color-mix(in srgb, var(--pearl) 85%, white); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--graphite) 10%, transparent); }

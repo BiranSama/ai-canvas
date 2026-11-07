@@ -1,6 +1,6 @@
 import type { SceneCommand, SceneElement } from '../../../domain'
 import { BLEND_MODES, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
-import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible } from '../canvas/layer-actions'
+import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible, toggleClippingMask } from '../canvas/layer-actions'
 import { invertLayerMask, toggleMaskOverlay } from '../canvas/mask-actions'
 import { adjustSelectedLayer, autoTone, repeatLastFilter } from '../adjustments/adjustment-actions'
 import { useMaskState } from '../canvas/mask-state'
@@ -130,6 +130,7 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'Ctrl+Alt+Shift+E', action: '盖印：可见图层合成到一个新图层' },
       { keys: 'Alt+拖动', action: '拖出一个副本' },
       { keys: 'Ctrl+G / Ctrl+Shift+G', action: '组合 / 取消组合' },
+      { keys: 'Ctrl+Alt+G', action: '创建剪贴蒙版：只在下面的图层有内容的地方显示；再按一次释放' },
       { keys: 'Ctrl+] / Ctrl+[', action: '上移一层 / 下移一层' },
       { keys: 'Ctrl+Shift+] / Ctrl+Shift+[', action: '置于顶层 / 置于底层' },
       { keys: 'Ctrl+,', action: '隐藏或显示所选图层' },
@@ -336,6 +337,8 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     if (event.shiftKey && event.altKey && event.code === 'KeyB') return run(() => { void adjustSelectedLayer('black-white') })
     // Photoshop's 滤镜 > 上次的滤镜.
     if (event.altKey && !event.shiftKey && event.code === 'KeyF') return run(() => { void repeatLastFilter() })
+    // Photoshop's 创建剪贴蒙版 / 释放剪贴蒙版.
+    if (event.altKey && !event.shiftKey && event.code === 'KeyG') return run(() => { void toggleClippingMask() })
     if (event.altKey || event.shiftKey) return false
     if (key === 'a') return run(selectAll)
     // Ctrl+D drops the pixel selection first; with none, the selected layers, as before.

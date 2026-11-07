@@ -5,6 +5,7 @@ import type { SceneElement } from '../../../domain'
 import { resolveBlendMode } from '../../../shared/blend-mode'
 import { hasLayerStyles } from '../../../shared/layer-styles'
 import { StyledLayer } from './styled-layer'
+import { IsolatedGroup } from './clip-stack'
 import { ElementVisual } from './element-visual'
 import { AdjustmentBackdrop, type AdjustmentCoverage } from './adjustment-layer'
 import { drawRect, renderImageEffects, type AdjustmentClips, type LaterMask } from './image-effects'
@@ -37,12 +38,17 @@ export interface LayerDraw {
   readonly adjustmentMask: AdjustmentCoverage | null
 }
 
-export function ArtworkStage({ width, height, background, outputScale, draws, clip, onDrawn }: {
+/** A layer to draw, or a clipping stack: a base and the layers clipped to it, drawn together. */
+export type ArtworkItem =
+  | { readonly kind: 'layer'; readonly draw: LayerDraw }
+  | { readonly kind: 'stack'; readonly base: LayerDraw; readonly members: readonly LayerDraw[] }
+
+export function ArtworkStage({ width, height, background, outputScale, items, clip, onDrawn }: {
   readonly width: number
   readonly height: number
   readonly background: string | null
   readonly outputScale: number
-  readonly draws: readonly LayerDraw[]
+  readonly items: readonly ArtworkItem[]
   /** Cut at the picture's edges, as the canvas shows it; a layer drawn for a PSD keeps what lies past them. */
   readonly clip: boolean
   onDrawn(layer: Konva.Layer): void
@@ -57,10 +63,36 @@ export function ArtworkStage({ width, height, background, outputScale, draws, cl
       <Layer ref={layerRef} listening={false}>
         <Group {...(clip ? { clipX: 0, clipY: 0, clipWidth: width, clipHeight: height } : {})}>
           {background !== null && <Rect width={width} height={height} fill={background} />}
-          {draws.map((draw) => <ArtworkLayer key={draw.element.id} draw={draw} outputScale={outputScale} />)}
+          {items.map((item) => item.kind === 'layer'
+            ? <ArtworkLayer key={item.draw.element.id} draw={item.draw} outputScale={outputScale} />
+            : <ArtworkClipStack key={item.base.element.id} base={item.base} members={item.members} outputScale={outputScale} maxPixels={Math.max(16_000_000, width * height * 2)} />)}
         </Group>
       </Layer>
     </Stage>
+  )
+}
+
+/**
+ * A clipping stack: the base at full strength, each clipped layer cut to
+ * the base's content and laid over in its own mode, the whole laid over the
+ * picture with the base's opacity and mode, as Main draws it.
+ */
+function ArtworkClipStack({ base, members, outputScale, maxPixels }: { readonly base: LayerDraw; readonly members: readonly LayerDraw[]; readonly outputScale: number; readonly maxPixels: number }): React.JSX.Element {
+  const plainBase: LayerDraw = { ...base, opacity: 1, operation: 'source-over' }
+  // What clips is the base's own content, not its shadow, glow or stroke.
+  const shape: LayerDraw = { ...plainBase, element: { ...base.element, style: undefined } as SceneElement }
+  return (
+    <IsolatedGroup operation={base.operation} opacity={base.opacity} pixelRatio={1} maxPixels={maxPixels}>
+      <ArtworkLayer draw={plainBase} outputScale={outputScale} />
+      {members.map((member) => member.element.type === 'adjustment'
+        ? <ArtworkLayer key={member.element.id} draw={member} outputScale={outputScale} />
+        : (
+          <IsolatedGroup key={member.element.id} operation={member.operation} pixelRatio={1} maxPixels={maxPixels}>
+            <ArtworkLayer draw={{ ...member, operation: 'source-over' }} outputScale={outputScale} />
+            <IsolatedGroup operation="destination-in" coverParent pixelRatio={1} maxPixels={maxPixels}><ArtworkLayer draw={shape} outputScale={outputScale} /></IsolatedGroup>
+          </IsolatedGroup>
+        ))}
+    </IsolatedGroup>
   )
 }
 

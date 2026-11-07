@@ -6,6 +6,7 @@ import { blendModeToCanvasOperation } from '../../../shared/blend-mode'
 import { applyLayerStyles, hasLayerStyles, styledLayerReach } from '../../../shared/layer-styles'
 import { assetPixelsVersion, subscribeAssetPixels } from './asset-pixels'
 import { pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
+import { useIsolationRefresh } from './isolation-refresh'
 
 /*
  * A layer with its layer styles, as the canvas and the export stage draw it:
@@ -101,6 +102,7 @@ export function StyledLayer({ element, width, height, unit, ratio, rotation, ble
     // eslint-disable-next-line react-hooks/exhaustive-deps -- worked out again only when what it draws or how it is styled changes
   }, [contentKey, styleKey, width, height, reach, fit, unit, rotation, paintVersion, pixelsVersion, active])
 
+  useIsolationRefresh()
   const operation = blendModeToCanvasOperation(blend)
   return (
     <Group>
