@@ -2,6 +2,7 @@ import { writePsdUint8Array, type Color, type Justification, type Layer, type La
 import type { PsdAdjustment, PsdDocument, PsdLayer, PsdNode, PsdText } from '../../shared/artwork-export'
 import { toPsdAdjustment } from '../psd/psd-adjustments'
 import { PSD_BLEND_MODES } from '../psd/psd-blend'
+import { mergePsdEffects, toPsdEffects } from '../psd/psd-styles'
 
 /*
  * Writes the layers the page drew into a PSD Photoshop opens as layers:
@@ -9,7 +10,8 @@ import { PSD_BLEND_MODES } from '../psd/psd-blend'
  * masks as Photoshop has them. Text stays editable: the layer keeps the
  * canvas's pixels for its look and carries the words, font and layout for
  * Photoshop to set again once someone edits it; its stroke and shadow become
- * layer styles, so the pixels hold the letters alone.
+ * layer styles, so the pixels hold the letters alone. Layer styles and
+ * clipping masks are Photoshop's own, so they stay editable there.
  */
 
 /** The installed face for a family at a weight, as Photoshop names fonts. */
@@ -106,6 +108,7 @@ async function layerOf(layer: PsdLayer, fonts: PsdFontLookup): Promise<Layer> {
     right: layer.left + layer.width,
     bottom: layer.top + layer.height
   }
+  if (layer.clipping === true) result.clipping = true
   if (layer.width > 0 && layer.height > 0) result.imageData = pixelData(layer.width, layer.height, layer.pixels)
   if (layer.mask !== null && layer.mask.width > 0 && layer.mask.height > 0) {
     result.mask = {
@@ -119,11 +122,14 @@ async function layerOf(layer: PsdLayer, fonts: PsdFontLookup): Promise<Layer> {
       imageData: maskData(layer.mask.width, layer.mask.height, layer.mask.pixels)
     }
   }
+  let effects = toPsdEffects(layer.style)
   if (layer.text !== null) {
-    const { text, effects } = await textData(layer.text, fonts)
-    result.text = text
-    if (effects !== undefined) result.effects = effects
+    const typed = await textData(layer.text, fonts)
+    result.text = typed.text
+    // The text's own stroke and shadow first, then its layer styles.
+    effects = mergePsdEffects(typed.effects, effects)
   }
+  if (effects !== undefined) result.effects = effects
   return result
 }
 

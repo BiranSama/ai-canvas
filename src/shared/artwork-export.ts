@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { adjustmentSettingsSchema, blendModeSchema } from '../domain'
+import { adjustmentSettingsSchema, blendModeSchema, layerStyleSchema } from '../domain'
 
 /*
  * What the export panel hands Main to write. The page draws the pixels
@@ -112,7 +112,11 @@ const psdLayerSchema = z.object({
   height: z.number().int().nonnegative().max(MAX_EXPORT_EDGE),
   pixels: rgbaSchema,
   mask: psdMaskSchema.nullable(),
-  text: psdTextSchema.nullable()
+  text: psdTextSchema.nullable(),
+  /** Clipped to the layer below it, its clipping mask's base. */
+  clipping: z.boolean().optional(),
+  /** Its layer styles, written as Photoshop's layer effects rather than drawn into its pixels. */
+  style: layerStyleSchema.optional()
 }).strict().superRefine((value, context) => checkPixels(value, 4, context))
 export type PsdLayer = z.infer<typeof psdLayerSchema>
 

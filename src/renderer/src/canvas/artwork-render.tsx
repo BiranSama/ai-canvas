@@ -39,6 +39,8 @@ export interface LayerRequest {
   readonly textEffects: boolean
   /** False draws an image without its own adjustments, which a PSD adds back as clipped adjustment layers. */
   readonly adjustments?: boolean
+  /** False draws the layer without its layer styles, which a PSD keeps as Photoshop's layer effects. */
+  readonly styles?: boolean
 }
 
 export interface ArtworkRequest {
@@ -438,9 +440,10 @@ export class ArtworkSession {
     }
     const plain = element.type === 'image' && (maskOnly || layer?.adjustments === false)
     const laterMask = element.type === 'image' && !plain ? this.#laterMask(element, use) : null
+    const unstyled = layer?.styles === false && (element.type === 'image' || element.type === 'text' || element.type === 'shape') ? { ...element, style: undefined } as SceneElement : element
     return {
       // The mask alone ignores the image's effects: they follow its outline, not the mask.
-      element: element.type === 'image' && plain ? { ...element, ...(maskOnly ? { effects: undefined } : {}), adjustments: undefined } : element,
+      element: unstyled.type === 'image' && plain ? { ...unstyled, ...(maskOnly ? { effects: undefined } : {}), adjustments: undefined } : unstyled,
       maskOnly,
       x: element.transform.x * width,
       y: element.transform.y * height,

@@ -1,4 +1,4 @@
-import type { AdjustmentSettings, BlendMode } from '../domain'
+import type { AdjustmentSettings, BlendMode, LayerStyle } from '../domain'
 
 /** One pixel layer of a PSD, as a PNG of its own bounds, in document pixels. */
 export interface PsdLayerImport {
@@ -20,6 +20,10 @@ export interface PsdLayerImport {
   readonly mask: { readonly png: Uint8Array<ArrayBuffer>; readonly enabled: boolean } | null
   /** Adjustment layers clipped to it in Photoshop, which change it alone: its own adjustments here, bottom first. */
   readonly adjustments: readonly { readonly settings: AdjustmentSettings; readonly enabled: boolean }[]
+  /** Clipped to the layer below it, as in Photoshop. */
+  readonly clipped: boolean
+  /** Its Photoshop layer effects that the canvas has, as layer styles. */
+  readonly style: LayerStyle | undefined
 }
 
 /** One of Photoshop's adjustment layers that the canvas has, changing everything below it. */
@@ -31,6 +35,8 @@ export interface PsdAdjustmentImport {
   readonly visible: boolean
   readonly groupIndex: number | null
   readonly settings: AdjustmentSettings
+  /** Clipped to the layer below it, as in Photoshop: it changes that layer's clipping mask alone. */
+  readonly clipped: boolean
   /** Its mask over the whole canvas (scaled down for very large documents), as a grayscale PNG, or null without one. */
   readonly mask: { readonly png: Uint8Array<ArrayBuffer>; readonly enabled: boolean } | null
 }

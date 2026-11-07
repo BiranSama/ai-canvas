@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test'
+import { readPsd } from 'ag-psd'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ELEMENT_SCHEMA_VERSION } from '../../src/domain'
+import { readPsdForImport } from '../../src/main/psd/psd-import'
 import { CompositeReferenceRenderer } from '../../src/main/reference/composite-reference-renderer'
 import type { DesktopApi } from '../../src/shared/desktop-api'
 import { exportThroughPanel } from '../helpers/export-file'
@@ -120,6 +122,23 @@ test('a clipping stack draws the same in the export and in Main, shown only wher
     same(250, 750)
     // Nor is the hidden clipped layer: the second base keeps its own colours outside the screened disc.
     expect(pixelAt(exported, 565, 395)[0]).toBeLessThan(150)
+
+    // In a PSD the clipping masks and layer styles are Photoshop's own; its picture is the PNG's, and it opens as it went.
+    const bytes = await readFile(await exportThroughPanel(page, { kind: 'psd' }))
+    const psd = readPsd(bytes, { useImageData: true })
+    const byName = new Map((psd.children ?? []).map((child) => [child.name, child]))
+    expect(['底', '渐变', '条纹', '反相', '底二', '圆', '隐藏的', '隐藏的底', '跟着隐藏'].map((name) => byName.get(name)?.clipping === true))
+      .toEqual([false, true, true, true, false, true, true, false, true])
+    expect(byName.get('底')?.effects?.dropShadow?.[0]).toMatchObject({ blendMode: 'multiply', distance: { value: 12 } })
+    expect(byName.get('底')?.effects?.stroke?.[0]).toMatchObject({ position: 'outside', size: { value: 6 } })
+    const composite = Buffer.from(psd.imageData!.data.buffer, psd.imageData!.data.byteOffset, psd.imageData!.data.byteLength)
+    expect(worstDifference(composite, exported).value).toBeLessThanOrEqual(2)
+    const opened = await readPsdForImport(bytes)
+    const layer = (name: string): (typeof opened.layers)[number] | undefined => opened.layers.find((candidate) => candidate.name === name)
+    expect(layer('渐变')?.clipped).toBe(true)
+    expect(layer('反相')).toMatchObject({ kind: 'adjustment', clipped: true })
+    const base = layer('底')
+    expect(base?.kind === 'pixels' ? base.style : null).toEqual((scene.elements.find((element) => element.name === '底') as { style?: unknown }).style)
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true })

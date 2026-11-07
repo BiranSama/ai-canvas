@@ -103,8 +103,11 @@ describe('adjustments in a PSD', () => {
     expect(levels.kind === 'adjustment' && levels.mask).toMatchObject({ enabled: true })
     expect(levels.kind === 'adjustment' && levels.blendMode).toBe('color')
     expect(document.layers[1]!.opacity).toBeCloseTo(0.5, 2)
+    // Not plain enough to be the photo's own, it stays clipped to the photo as an adjustment layer.
+    expect(document.layers[1]).toMatchObject({ kind: 'adjustment', clipped: true })
+    expect(document.layers[2]).toMatchObject({ kind: 'adjustment', clipped: false })
     expect(document.approximations.join('；')).toContain('1 个调整图层或填充图层没有带过来')
-    expect(document.approximations.join('；')).toContain('1 个剪贴蒙版按普通图层导入')
+    expect(document.approximations.join('；')).not.toContain('剪贴蒙版')
   })
 
   it('brings clipped adjustments past what a layer holds as adjustment layers, so the PSD still opens', async () => {
@@ -140,6 +143,8 @@ describe('adjustments in a PSD', () => {
     const [photo, , , second] = document.layers
     expect(photo!.kind === 'pixels' && photo!.adjustments).toEqual([{ settings: SAMPLES[2], enabled: true }])
     expect(second!.kind === 'pixels' && second!.adjustments).toEqual([])
+    // All of them stay clipped, so each changes its own clipping mask alone.
+    expect(document.layers.map((layer) => layer.clipped)).toEqual([false, true, true, false, true, true])
   })
 
   it('clips to the nearest unclipped layer below, even one it cannot bring', async () => {
@@ -156,5 +161,8 @@ describe('adjustments in a PSD', () => {
     const photo = document.layers[0]!
     expect(photo.kind === 'pixels' && photo.adjustments).toEqual([])
     expect(document.layers.map((layer) => layer.name)).toEqual(['照片', '剪贴在滤镜上'])
+    // Its base did not come over, so it comes as a plain layer, and says so.
+    expect(document.layers[1]).toMatchObject({ clipped: false })
+    expect(document.approximations.join('；')).toContain('1 个剪贴蒙版的底层没有带过来')
   })
 })
