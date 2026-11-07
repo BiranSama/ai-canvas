@@ -458,6 +458,22 @@ describe('fill and merge_layers', () => {
     expect((await harness.call('adjust', { kind: 'levels', target: 'E1', values: { midtones: 1 } })).result).toMatchObject({ ok: false })
   })
 
+  it('puts an adjustment layer given a group to sit above above the group\'s topmost layer', async () => {
+    const harness = new Harness()
+    withImage(harness)
+    await harness.call('add_text', { content: '晨雾', role: 'title' })
+    await harness.call('add_text', { content: '山行', role: 'subtitle' })
+    await harness.call('group', { targets: ['E2', 'E3'], name: '标题组' })
+    const group = harness.scene.elements.find((element) => element.type === 'group')!
+    await harness.call('add_text', { content: '落款', role: 'body' })
+    const groupRef = harness.refs.ref(group.id)
+    expect((await harness.call('adjust', { kind: 'invert', above: groupRef })).result.ok).toBe(true)
+    const order = harness.scene.elements.map((element) => element.type === 'text' ? element.content : element.type)
+    // The group marker sits at its lowest child; the layer goes over both titles and under the later text.
+    expect(order.indexOf('adjustment')).toBe(Math.max(order.indexOf('晨雾'), order.indexOf('山行')) + 1)
+    expect(order.indexOf('adjustment')).toBeLessThan(order.indexOf('落款'))
+  })
+
   it('fills a new canvas-sized layer when no target is given', async () => {
     const harness = new Harness()
     harness.extra = { blankLayer: async () => ASSET }

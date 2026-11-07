@@ -126,7 +126,10 @@ export const adjustTool = defineTool({
       const base = elementBase(context, { name: args.name ?? `${ADJUSTMENT_LABELS[args.kind]} 调整`, transform: { ...WHOLE_CANVAS }, role: 'adjustment' })
       const layer: SceneElement = { ...base, type: 'adjustment', opacity: args.opacity ?? 1, settings, mask: null }
       const commands: SceneCommand[] = [{ kind: 'element.add', element: layer }]
-      if (above !== null && above.zIndex + 1 < context.scene.elements.length) commands.push({ kind: 'element.reorder', elementId: layer.id, toIndex: above.zIndex + 1 })
+      // A group's marker sits at its lowest child, so above a group means above its topmost child.
+      const aboveId = above?.id
+      const top = above === null ? -1 : Math.max(above.zIndex, ...context.scene.elements.filter((element) => element.groupId === aboveId).map((element) => element.zIndex))
+      if (above !== null && top + 1 < context.scene.elements.length) commands.push({ kind: 'element.reorder', elementId: layer.id, toIndex: top + 1 })
       return sceneWrite(batchPlan(`新建调整图层「${layer.name}」`, commands), context,
         `已新建调整图层「${layer.name}」：${describeAdjustment(settings)}，作用于${above === null ? '它下面的所有图层（在最上面）' : `${context.refs.ref(above.id)} 及以下的所有图层`}`, [layer.id])
     }
