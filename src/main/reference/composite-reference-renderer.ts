@@ -340,17 +340,25 @@ export class CompositeReferenceRenderer {
    * A clipping stack, as the canvas draws it: the base at full strength,
    * each clipped layer shown only where the base's content is and laid over
    * in its own mode (a clipped adjustment layer adjusts the stack so far),
-   * and the whole laid over the picture with the base's opacity and mode.
+   * keeping the base's coverage, and the whole laid over the picture with
+   * the base's opacity and mode.
    */
   async #clipStackSvg(scene: Scene, base: SceneElement, stack: ClipStack, mode: RenderMode, hidden: ReadonlySet<string>, warnings: string[]): Promise<string> {
     const width = scene.canvas.outputWidth
     const height = scene.canvas.outputHeight
     const full = { ...base, opacity: 1, blendMode: 'normal' as const } as SceneElement
     const pixels = await this.#raster(full, mode, width, height, warnings)
-    // What clips is the base's own content, not its shadow, glow or stroke.
+    // What clips is the base's own content, not its shadow, glow or stroke: anywhere it is at all.
     const shape = (base.type === 'image' || base.type === 'text' || base.type === 'shape') && hasLayerStyles(base.style)
       ? await this.#raster({ ...full, style: undefined } as SceneElement, mode, width, height, warnings)
       : Buffer.from(pixels)
+    // Worked out over the base made opaque where it is, then cut back to its coverage at the end,
+    // so the clipped layers keep the base's transparency (W3C source-atop), as the canvas draws it.
+    const coverage = new Uint8Array(width * height)
+    for (let pixel = 0; pixel < coverage.length; pixel += 1) {
+      coverage[pixel] = pixels[pixel * 4 + 3]!
+      if (coverage[pixel]! > 0) pixels[pixel * 4 + 3] = 255
+    }
     for (const id of stack.memberIds) {
       const member = scene.elements.find((element) => element.id === id)
       if (member === undefined || hidden.has(id) || elementPresentation(member, mode) === 'omit') continue
@@ -362,9 +370,10 @@ export class CompositeReferenceRenderer {
         continue
       }
       const layer = await this.#raster({ ...member, blendMode: 'normal' } as SceneElement, mode, width, height, warnings)
-      for (let index = 3; index < layer.length; index += 4) layer[index] = Math.round(layer[index]! * shape[index]! / 255)
+      for (let index = 3; index < layer.length; index += 4) if (shape[index] === 0) layer[index] = 0
       compositeOver(pixels, layer, resolveBlendMode(member))
     }
+    for (let pixel = 0; pixel < coverage.length; pixel += 1) pixels[pixel * 4 + 3] = Math.round(pixels[pixel * 4 + 3]! * coverage[pixel]! / 255)
     const png = await sharp(pixels, { raw: { width, height, channels: 4 } }).png().toBuffer()
     return `<g opacity="${finite(base.opacity)}"${blendModeToSvgStyle(resolveBlendMode(base))}><image x="0" y="0" width="${width}" height="${height}" href="data:image/png;base64,${png.toString('base64')}" preserveAspectRatio="none"/></g>`
   }

@@ -90,6 +90,22 @@ describe('layer styles, clipping and blend modes in a PSD', () => {
     expect(opened.approximations.join('；')).not.toContain('剪贴蒙版')
   })
 
+  it('keeps an adjustment clipped to a styled base as a layer above it, so it goes on after the styles', async () => {
+    const bytes = await buildPsd(documentOf([
+      layer('底', { style: { colorOverlay: { enabled: true, blendMode: 'normal', color: '#FF0000', opacity: 1 } } }),
+      { kind: 'adjustment', name: '反相', hidden: false, opacity: 1, blendMode: 'normal', clipping: true, settings: { kind: 'invert' }, mask: null }
+    ]), fonts)
+    const opened = await readPsdForImport(bytes)
+    expect(opened.layers.map((child) => [child.kind, child.name, child.clipped])).toEqual([['pixels', '底', false], ['adjustment', '反相', true]])
+    expect(opened.layers[0]?.kind === 'pixels' && opened.layers[0].adjustments).toEqual([])
+  })
+
+  it('writes styles that are switched off, and opens them switched off', async () => {
+    const off: LayerStyle = { stroke: { ...STYLE.stroke!, enabled: false }, dropShadow: { ...STYLE.dropShadow!, enabled: false } }
+    const opened = await readPsdForImport(await buildPsd(documentOf([layer('关着的', { style: off })]), fonts))
+    expect(opened.layers[0]).toMatchObject({ kind: 'pixels', style: off })
+  })
+
   it('carries all sixteen blend modes', async () => {
     const modes = blendModeSchema.options
     const bytes = writePsdUint8Array({

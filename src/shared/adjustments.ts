@@ -380,7 +380,8 @@ export interface AdjustOptions {
 export function adjustPixels(data: Pixels, settings: AdjustmentSettings, options: AdjustOptions = {}): void {
   const amount = options.amount ?? 1
   const coverage = options.coverage ?? null
-  if (amount <= 0 || isNeutralAdjustment(settings)) return
+  if (amount <= 0) return
+  // In another mode even an adjustment that changes nothing lays the picture over itself, as an empty curve in 滤色 brightens.
   if (options.blend !== undefined && options.blend !== 'normal') {
     // A copy, not a view: Buffer's slice shares its memory.
     const adjusted = new Uint8ClampedArray(data)
@@ -388,6 +389,7 @@ export function adjustPixels(data: Pixels, settings: AdjustmentSettings, options
     blendInPlace(data, adjusted, options.blend, { coverage, amount })
     return
   }
+  if (isNeutralAdjustment(settings)) return
   const tables = channelTables(settings)
   // The adjusted picture is mixed with the original, so a value past the range is cut first, as the picture would have it.
   const mix = (pixel: number, value: number, original: number): number => {

@@ -173,11 +173,11 @@ function grown(alpha: Float32Array, width: number, height: number, by: number): 
   return result
 }
 
-/** The picture moved by (dx, dy) pixels, sampled between pixels, nothing coming in from past the edges. */
-function moved(alpha: Float32Array, width: number, height: number, dx: number, dy: number): Float32Array {
+/** The picture moved by (dx, dy) pixels, sampled between pixels; what comes in from past the edges is `beyond`. */
+function moved(alpha: Float32Array, width: number, height: number, dx: number, dy: number, beyond = 0): Float32Array {
   if (dx === 0 && dy === 0) return alpha
   const result = new Float32Array(alpha.length)
-  const value = (x: number, y: number): number => x < 0 || y < 0 || x >= width || y >= height ? 0 : alpha[y * width + x]!
+  const value = (x: number, y: number): number => x < 0 || y < 0 || x >= width || y >= height ? beyond : alpha[y * width + x]!
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const sx = x - dx
@@ -327,7 +327,8 @@ export function applyLayerStyles(data: Pixels, box: StyleBox, style: LayerStyle,
     const outside = new Float32Array(alpha.length)
     for (let pixel = 0; pixel < alpha.length; pixel += 1) outside[pixel] = 1 - alpha[pixel]!
     const [dx, dy] = offsetFor(inner.angle, inner.distance, rotation, scale)
-    const shade = moved(softened(outside, width, height, inner.size * scale, inner.choke), width, height, dx, dy)
+    // Past the raster is outside the layer too, so what moves in from there shades the edge.
+    const shade = moved(softened(outside, width, height, inner.size * scale, inner.choke), width, height, dx, dy, 1)
     const rgb = hex(inner.color).map((value) => value / 255)
     layOver(data, (pixel) => shade[pixel]! * inner.opacity, (_pixel, out) => { out[0] = rgb[0]!; out[1] = rgb[1]!; out[2] = rgb[2]! }, inner.blendMode)
   }

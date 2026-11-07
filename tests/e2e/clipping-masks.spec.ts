@@ -90,7 +90,8 @@ test('a clipping stack draws the same in the export and in Main, shown only wher
       image('条纹', assets.stripes!, box(200, 160, 300, 200), { clipped: true, opacity: 0.6 }),
       adjustment('反相', { kind: 'invert' }, { clipped: true, opacity: 0.25 }),
       // A second stack, with a hidden clipped layer.
-      image('底二', assets.ramp2!, box(560, 100, 300, 300)),
+      // A style switched off draws nothing, but goes to the PSD switched off.
+    image('底二', assets.ramp2!, box(560, 100, 300, 300), { style: { stroke: { enabled: false, size: 4, position: 'outside', color: '#FF00FF', opacity: 1 } } }),
       image('圆', assets.disc!, box(600, 160, 288, 288), { clipped: true, blendMode: 'screen' }),
       image('隐藏的', assets.red!, box(560, 100, 300, 300), { clipped: true, visible: false }),
       // A hidden base hides what is clipped to it.
@@ -131,6 +132,7 @@ test('a clipping stack draws the same in the export and in Main, shown only wher
       .toEqual([false, true, true, true, false, true, true, false, true])
     expect(byName.get('底')?.effects?.dropShadow?.[0]).toMatchObject({ blendMode: 'multiply', distance: { value: 12 } })
     expect(byName.get('底')?.effects?.stroke?.[0]).toMatchObject({ position: 'outside', size: { value: 6 } })
+    expect(byName.get('底二')?.effects?.stroke?.[0]).toMatchObject({ enabled: false, size: { value: 4 } })
     const composite = Buffer.from(psd.imageData!.data.buffer, psd.imageData!.data.byteOffset, psd.imageData!.data.byteLength)
     expect(worstDifference(composite, exported).value).toBeLessThanOrEqual(2)
     const opened = await readPsdForImport(bytes)

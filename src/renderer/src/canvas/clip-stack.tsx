@@ -1,4 +1,5 @@
 import type Konva from 'konva'
+import type { FilterFunction } from 'konva/lib/Node'
 import { useCallback, useContext, useLayoutEffect, useMemo, useRef } from 'react'
 import { Group } from 'react-konva'
 import { IsolationContext } from './isolation-refresh'
@@ -53,13 +54,15 @@ function cacheIsolated(group: Konva.Group, pixelRatio: number, maxPixels: number
   cacheOne(group, pixelRatio, maxPixels)
 }
 
-export function IsolatedGroup({ operation, opacity = 1, pixelRatio, maxPixels = ISOLATED_PIXELS, coverParent = false, clipFunc, beforeRedraw, children }: {
+export function IsolatedGroup({ operation, opacity = 1, pixelRatio, maxPixels = ISOLATED_PIXELS, coverParent = false, clipFunc, filters, beforeRedraw, children }: {
   /** How the group's picture is laid over what is below. */
   readonly operation: GlobalCompositeOperation
   /** Drawn over the whole of what its parent holds, transparent past its content: for a cut laid on with destination-in. */
   readonly coverParent?: boolean
   /** Cuts what is drawn, and where it can be clicked, to a path. */
   readonly clipFunc?: (context: Konva.Context, group: Konva.Group) => void
+  /** Konva filters on its cached picture. */
+  readonly filters?: FilterFunction[]
   readonly opacity?: number
   /** Raster pixels per unit of the group. */
   readonly pixelRatio: number
@@ -100,7 +103,9 @@ export function IsolatedGroup({ operation, opacity = 1, pixelRatio, maxPixels = 
   })
   return (
     <IsolationContext.Provider value={refresh}>
-    <Group ref={ref} name="isolated-group" coverParent={coverParent} {...(clipFunc === undefined ? {} : { clipFunc: (context: Konva.Context) => { if (ref.current !== null) clipFunc(context, ref.current) } })} opacity={opacity} {...(operation === 'source-over' ? {} : { globalCompositeOperation: operation })} onDragMove={redraw} onTransform={redraw}>
+    <Group ref={ref} name="isolated-group" coverParent={coverParent} {...(filters === undefined ? {} : { filters })} {...(clipFunc === undefined ? {} : { clipFunc: (context: Konva.Context) => { if (ref.current !== null) clipFunc(context, ref.current) } })} opacity={opacity} {...(operation === 'source-over' ? {} : { globalCompositeOperation: operation })}
+      // The outermost group draws everything inside it again; one inside it would only repeat part of that.
+      {...(outer === null ? { onDragMove: redraw, onTransform: redraw } : {})}>
       {children}
     </Group>
     </IsolationContext.Provider>

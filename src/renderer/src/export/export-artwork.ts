@@ -1,7 +1,6 @@
 import Konva from 'konva'
-import { adaptedScene, clipBases, hiddenByGroups, type Scene, type SceneElement } from '../../../domain'
+import { adaptedScene, clipBases, hiddenByGroups, LAYER_STYLE_KINDS, type Scene, type SceneElement } from '../../../domain'
 import { hasVisibleEffects } from '../../../shared/layer-effects'
-import { hasLayerStyles } from '../../../shared/layer-styles'
 import { MAX_EXPORT_EDGE, type ExportImageFormat, type PsdAdjustment, type PsdLayer, type PsdNode, type PsdText } from '../../../shared/artwork-export'
 import { activeAdjustments, ADJUSTMENT_LABELS, isFilterSettings } from '../../../shared/adjustments'
 import { resolveBlendMode } from '../../../shared/blend-mode'
@@ -369,7 +368,8 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
         mask: psdMask,
         text,
         ...(clipped.has(element.id) ? { clipping: true } : {}),
-        ...(style !== undefined && hasLayerStyles(style) ? { style } : {})
+        // Switched-off styles go too, so they come back switched off with their settings.
+        ...(style !== undefined && LAYER_STYLE_KINDS.some((kind) => style[kind] !== undefined) ? { style } : {})
       }
     }
     const nodesOf = async (plans: readonly LayerPlan[]): Promise<PsdNode[]> => {

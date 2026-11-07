@@ -77,6 +77,7 @@ import { ElementVisual } from './element-visual'
 import { isFinalContent } from './layer-drawing'
 import { StyledLayer } from './styled-layer'
 import { IsolatedGroup } from './clip-stack'
+import { opaqueWhereCovered } from './opaque-filter'
 import { useIsolationRefresh } from './isolation-refresh'
 import { useStylePreview, withStylePreview } from '../layer-styles/style-actions'
 import { hasLayerStyles } from '../../../shared/layer-styles'
@@ -174,8 +175,11 @@ function ImageVisual({ element, width, height, plain = false }: {
   const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(element.id), () => pixelLayerVersion(element.id))
   const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
   const maskView = useMaskState((state) => state.view?.elementId === element.id ? state.view.mode : 'normal')
-  // A filter that looks at neighbouring pixels works on the unmasked picture, and the mask goes on after it, as on a smart object.
-  const maskLater = maskView === 'normal' && element.mask?.enabled === true && hasSpatialFilters(element.adjustments)
+  // An adjustment being set up in its dialog is shown before it is recorded, and so are layer styles.
+  const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
+  // A filter that looks at neighbouring pixels works on the unmasked picture, and the mask goes on after it, as on a smart object;
+  // judged by the list as shown, so a filter being set up in its dialog previews as it will be recorded.
+  const maskLater = maskView === 'normal' && element.mask?.enabled === true && hasSpatialFilters(withLayerPreview(element, preview).adjustments)
   // With paint on it or a mask, the layer is drawn from its asset with the operations replayed, through its mask.
   const source = useMemo(() => {
     if (image === null) return null
@@ -189,8 +193,6 @@ function ImageVisual({ element, width, height, plain = false }: {
     return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask: maskLater ? { ...mask, enabled: false } : mask, gray: gray.data, clips: maskClips, view: maskView })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas; pixelsVersion a clip or mask read
   }, [image, element.id, element.paint, element.mask, maskView, maskLater, paintVersion, pixelsVersion])
-  // An adjustment being set up in its dialog is shown before it is recorded, and so are layer styles.
-  const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
   const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
   const styledElement = withStylePreview(element, stylePreview)
   // A mask looked at alone or in red shows its coverage, which the layer's own adjustments must not recolour;
@@ -395,27 +397,38 @@ function AdjustmentNode({ element, artboard, hidden }: { element: Extract<SceneE
 }
 
 /**
- * The base of a clipping stack drawn again, without its styles and
- * unclickable, to cut each layer clipped to it to the base's content. It
- * follows the base while the base is dragged (see the stack's beforeRedraw).
+ * The base of a clipping stack drawn again, unclickable: without its styles,
+ * to cut what is clipped to it to the base's content, or with them, for the
+ * coverage the whole stack is cut back to. It follows the base while the
+ * base is dragged (see the stack's beforeRedraw).
  */
-function ClipBaseShape({ element, artboard, zoom }: { element: SceneElement; artboard: { width: number; height: number }; zoom: number }): React.JSX.Element {
+function ClipBaseShape({ element, artboard, zoom, styled = false }: { element: SceneElement; artboard: { width: number; height: number }; zoom: number; styled?: boolean }): React.JSX.Element {
+  const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
   const width = element.transform.width * artboard.width
   const height = element.transform.height * artboard.height
+  const plain = { ...element, opacity: 1, blendMode: 'normal' } as SceneElement
+  const shown = styled ? withStylePreview(plain, stylePreview) : { ...plain, style: undefined } as SceneElement
   const visual = (
     <ElementVisual
-      element={{ ...element, style: undefined } as SceneElement}
+      element={shown}
       width={width}
       height={height}
       outputScale={1}
-      renderImage={(image, imageWidth, imageHeight) => <ImageVisual element={image} width={imageWidth} height={imageHeight} plain />}
+      renderImage={(image, imageWidth, imageHeight) => <ImageVisual element={image} width={imageWidth} height={imageHeight} plain={!styled} />}
     />
   )
+  const masked = (shown.type === 'text' || shown.type === 'shape') && shown.mask !== null && shown.mask !== undefined
+    ? <MaskedBox element={shown} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
+    : visual
+  // An image styles itself; a text or shape is styled here, as its own node is.
+  const content = styled && (shown.type === 'text' || shown.type === 'shape') && styledLayer(shown) ? (
+    <StyledLayer element={shown} width={width} height={height} unit={1} ratio={drawnDetail(width, height, zoom)} rotation={shown.transform.rotation} blend="normal" contentKey={shown}>
+      {masked}
+    </StyledLayer>
+  ) : masked
   return (
     <Group name={`clip-base-${element.id}`} x={element.transform.x * artboard.width} y={element.transform.y * artboard.height} rotation={element.transform.rotation} listening={false}>
-      {(element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
-        ? <MaskedBox element={element} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
-        : visual}
+      {content}
     </Group>
   )
 }
@@ -2422,17 +2435,24 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
               const ratio = Math.max(0.25, zoom * (window.devicePixelRatio || 1))
               return (
                 <Group key={`clip-stack-${element.id}`} visible={element.visible && !hiddenInGroups.has(element.id)}>
+                  {/* Worked out over the base made opaque where it is, then cut back to its coverage, so the clipped layers keep the base's transparency. */}
                   <IsolatedGroup operation={blendModeToCanvasOperation(resolveBlendMode(element))} opacity={element.opacity} pixelRatio={ratio} beforeRedraw={followBase(element.id)}>
-                    {renderLayer(element, { ...element, opacity: 1, blendMode: 'normal' } as SceneElement)}
+                    <IsolatedGroup operation="source-over" filters={[opaqueWhereCovered]} pixelRatio={ratio}>
+                      {renderLayer(element, { ...element, opacity: 1, blendMode: 'normal' } as SceneElement)}
+                    </IsolatedGroup>
                     {stack.memberIds.flatMap((id) => sortedById.get(id) ?? []).map((member) => member.type === 'adjustment' ? renderLayer(member, member) : (
                       <IsolatedGroup key={member.id} operation={blendModeToCanvasOperation(resolveBlendMode(member))} pixelRatio={ratio}
                         clipFunc={clipToBase(element.id, element.transform.width * baseArtboard.width, element.transform.height * baseArtboard.height)}>
                         {renderLayer(member, { ...member, blendMode: 'normal' } as SceneElement)}
-                        <IsolatedGroup operation="destination-in" coverParent pixelRatio={ratio}>
+                        {/* Shown wherever the base's own content is at all, not on its shadow or stroke; how much is the final cut's. */}
+                        <IsolatedGroup operation="destination-in" coverParent filters={[opaqueWhereCovered]} pixelRatio={ratio}>
                           <ClipBaseShape element={element} artboard={baseArtboard} zoom={zoom} />
                         </IsolatedGroup>
                       </IsolatedGroup>
                     ))}
+                    <IsolatedGroup operation="destination-in" coverParent pixelRatio={ratio}>
+                      <ClipBaseShape element={element} artboard={baseArtboard} zoom={zoom} styled />
+                    </IsolatedGroup>
                   </IsolatedGroup>
                 </Group>
               )

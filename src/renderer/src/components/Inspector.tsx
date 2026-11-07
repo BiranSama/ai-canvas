@@ -461,8 +461,9 @@ export function Inspector({ onRequestCollapse, projection = 'vertical' }: { read
                   <div className="simple-property-title"><span>{selectedTypeLabel}</span><strong>{selected.name}</strong><small>{properties.length} 个常用属性</small></div>
                   {selected.type === 'adjustment' && <AdjustmentLayerSection element={selected} />}
                   <SimpleElementProperties element={selected} canvas={scene.canvas} horizontal={horizontal} />
-                  {selected.type === 'image' && <LayerAdjustmentsSection element={selected} />}
-                  {isStylable(selected) && <LayerStyleSection element={selected} />}
+                  {/* Docked along the top or bottom, the panel is one strip of the common fields; the lists stay in the vertical panel and their menus. */}
+                  {!horizontal && selected.type === 'image' && <LayerAdjustmentsSection element={selected} />}
+                  {!horizontal && isStylable(selected) && <LayerStyleSection element={selected} />}
                 </>
               : <>
                   <label className="property-search"><Search size={13} /><span className="visually-hidden">搜索高级属性</span><input aria-label="搜索高级属性" value={propertySearch} placeholder="搜索属性…" onChange={(event) => setPropertySearch(event.currentTarget.value)} /></label>

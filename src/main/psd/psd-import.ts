@@ -1,7 +1,7 @@
 import { getCompositeImageData, getLayerImageData, getLayerMaskImageData, initializeCanvas, readPsd, type Layer, type PixelData } from 'ag-psd'
 import sharp from 'sharp'
 import type { PsdAdjustmentImport, PsdDocumentImport, PsdGroupImport, PsdLayerImport } from '../../shared/psd-import'
-import { MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings } from '../../domain'
+import { LAYER_STYLE_KINDS, MAX_LAYER_ADJUSTMENTS, type AdjustmentSettings } from '../../domain'
 import { fromPsdAdjustment } from './psd-adjustments'
 import { fromPsdBlendMode } from './psd-blend'
 import { fromPsdEffects } from './psd-styles'
@@ -235,7 +235,9 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     const adjustments: { settings: AdjustmentSettings; enabled: boolean }[] = []
     const clipped = clippedHere(layer)
     // A picture not clipped is the base of what is clipped above it; a clipped one comes between its base and what follows.
-    if (layer.clipping === true) { if (chain !== null) chain.collapse = null } else chain = { base: true, collapse: adjustments }
+    // A styled base keeps its clipped adjustments as layers: its own adjustments go on before its styles, clipped ones after.
+    const styled = effects.style !== undefined && LAYER_STYLE_KINDS.some((kind) => effects.style![kind] !== undefined)
+    if (layer.clipping === true) { if (chain !== null) chain.collapse = null } else chain = { base: true, collapse: styled ? null : adjustments }
     layers.push({
       kind: 'pixels',
       adjustments,

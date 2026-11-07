@@ -6,6 +6,7 @@ import { resolveBlendMode } from '../../../shared/blend-mode'
 import { hasLayerStyles } from '../../../shared/layer-styles'
 import { StyledLayer } from './styled-layer'
 import { IsolatedGroup } from './clip-stack'
+import { opaqueWhereCovered } from './opaque-filter'
 import { ElementVisual } from './element-visual'
 import { AdjustmentBackdrop, type AdjustmentCoverage } from './adjustment-layer'
 import { drawRect, renderImageEffects, type AdjustmentClips, type LaterMask } from './image-effects'
@@ -74,24 +75,27 @@ export function ArtworkStage({ width, height, background, outputScale, items, cl
 
 /**
  * A clipping stack: the base at full strength, each clipped layer cut to
- * the base's content and laid over in its own mode, the whole laid over the
- * picture with the base's opacity and mode, as Main draws it.
+ * the base's content and laid over in its own mode, keeping the base's
+ * coverage, the whole laid over the picture with the base's opacity and
+ * mode, as Main draws it.
  */
 function ArtworkClipStack({ base, members, outputScale, maxPixels }: { readonly base: LayerDraw; readonly members: readonly LayerDraw[]; readonly outputScale: number; readonly maxPixels: number }): React.JSX.Element {
   const plainBase: LayerDraw = { ...base, opacity: 1, operation: 'source-over' }
   // What clips is the base's own content, not its shadow, glow or stroke.
   const shape: LayerDraw = { ...plainBase, element: { ...base.element, style: undefined } as SceneElement }
+  // Worked out over the base made opaque where it is, then cut back to its coverage, so the clipped layers keep its transparency.
   return (
     <IsolatedGroup operation={base.operation} opacity={base.opacity} pixelRatio={1} maxPixels={maxPixels}>
-      <ArtworkLayer draw={plainBase} outputScale={outputScale} />
+      <IsolatedGroup operation="source-over" filters={[opaqueWhereCovered]} pixelRatio={1} maxPixels={maxPixels}><ArtworkLayer draw={plainBase} outputScale={outputScale} /></IsolatedGroup>
       {members.map((member) => member.element.type === 'adjustment'
         ? <ArtworkLayer key={member.element.id} draw={member} outputScale={outputScale} />
         : (
           <IsolatedGroup key={member.element.id} operation={member.operation} pixelRatio={1} maxPixels={maxPixels}>
             <ArtworkLayer draw={{ ...member, operation: 'source-over' }} outputScale={outputScale} />
-            <IsolatedGroup operation="destination-in" coverParent pixelRatio={1} maxPixels={maxPixels}><ArtworkLayer draw={shape} outputScale={outputScale} /></IsolatedGroup>
+            <IsolatedGroup operation="destination-in" coverParent filters={[opaqueWhereCovered]} pixelRatio={1} maxPixels={maxPixels}><ArtworkLayer draw={shape} outputScale={outputScale} /></IsolatedGroup>
           </IsolatedGroup>
         ))}
+      <IsolatedGroup operation="destination-in" coverParent pixelRatio={1} maxPixels={maxPixels}><ArtworkLayer draw={plainBase} outputScale={outputScale} /></IsolatedGroup>
     </IsolatedGroup>
   )
 }

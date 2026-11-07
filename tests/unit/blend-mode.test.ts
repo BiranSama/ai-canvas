@@ -88,4 +88,13 @@ describe('blend modes', () => {
     adjustPixels(half, brighten, { blend: 'luminosity', amount: 0.5 })
     expect(Math.abs(half[1]! - (60 + luminosity[1]!) / 2)).toBeLessThanOrEqual(1)
   })
+
+  it('lays even an adjustment that changes nothing over the picture in another mode, as an empty curve in 滤色 brightens', () => {
+    const gray = new Uint8ClampedArray([128, 128, 128, 255])
+    adjustPixels(gray, { kind: 'brightness-contrast', brightness: 0, contrast: 0 }, { blend: 'multiply' })
+    expect([...gray]).toEqual([64, 64, 64, 255])
+    const plain = new Uint8ClampedArray([128, 128, 128, 255])
+    adjustPixels(plain, { kind: 'brightness-contrast', brightness: 0, contrast: 0 })
+    expect([...plain]).toEqual([128, 128, 128, 255])
+  })
 })

@@ -113,6 +113,15 @@ describe('layer styles', () => {
     expect(rgbAt(data, width, 19, 32)).toEqual([220, 30, 30])
   })
 
+  it('shades the whole edge facing the light even with little room past the layer', () => {
+    // Two pixels past the layer, a shadow ten pixels in: what moves in from past the raster is outside the layer too.
+    const { data, box } = square(30, 2)
+    applyLayerStyles(data, box, { innerShadow: { enabled: true, blendMode: 'normal', color: '#000000', opacity: 1, angle: 90, distance: 10, choke: 0, size: 0 } }, 1)
+    const width = box.rasterWidth
+    for (let row = 2; row < 2 + 10; row += 1) expect(rgbAt(data, width, 17, row), `row ${row}`).toEqual([0, 0, 0])
+    expect(rgbAt(data, width, 17, 2 + 12)).toEqual([220, 30, 30])
+  })
+
   it('checks its settings and reports what is on and how far it reaches', () => {
     const style: LayerStyle = { dropShadow: defaultLayerStyle('dropShadow'), stroke: { ...defaultLayerStyle('stroke', '#FFFFFF'), enabled: false } }
     expect(layerStyleSchema.safeParse(style).success).toBe(true)

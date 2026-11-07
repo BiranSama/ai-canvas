@@ -27,7 +27,7 @@ import {
   Trash2,
   Ungroup
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { canBeClipped, clipStacks, pathInBox, type SceneElement } from '../../../domain'
 import { blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
@@ -248,6 +248,12 @@ export function LayerPanel(): React.JSX.Element {
   const [solo, setSolo] = useState<{ readonly id: string; readonly before: ReadonlyMap<string, boolean> } | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  // The menu opens at the pointer and moves up as far as its own height needs, to stay on screen.
+  const [menuTop, setMenuTop] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    const height = menuRef.current?.offsetHeight
+    setMenuTop(menu === null || height === undefined ? null : Math.max(8, Math.min(menu.y, window.innerHeight - height - 8)))
+  }, [menu])
   const maskEditing = useMaskState((state) => state.editing)
   // The add-mask button's tooltip says whether a selection will shape the mask.
   const selectionPresent = useSelectionStore((state) => state.mask !== null)
@@ -604,7 +610,7 @@ export function LayerPanel(): React.JSX.Element {
       )}
       {/* The island's backdrop filter would make it the containing block of a fixed menu, so the menu lives on the body. */}
       {menu !== null && menuElement !== undefined && createPortal(
-        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: Math.max(8, Math.min(menu.y, window.innerHeight - 540)) }}>
+        <div className="layer-menu" role="menu" aria-label={`${menuElement.name} 的操作`} ref={menuRef} style={{ left: Math.min(menu.x, window.innerWidth - 196), top: menuTop ?? Math.max(8, menu.y) }}>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'rename')}>重命名<kbd>F2</kbd></button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'duplicate')}>复制</button>
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'visibility')} disabled={menuElement.locked}>{menuElement.visible ? '隐藏' : '显示'}</button>
