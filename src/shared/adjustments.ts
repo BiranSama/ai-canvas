@@ -460,7 +460,8 @@ function clipPoints(counts: Uint32Array, total: number): readonly [number, numbe
   const limit = total * AUTO_CLIP
   let low = 0
   let seen = 0
-  while (low < 254 && seen + counts[low]! <= limit) { seen += counts[low]!; low += 1 }
+  // The white point stays two above the black and within the byte range, so a channel all at 254–255 still gives valid levels.
+  while (low < 253 && seen + counts[low]! <= limit) { seen += counts[low]!; low += 1 }
   let high = 255
   seen = 0
   while (high > low + 2 && seen + counts[high]! <= limit) { seen += counts[high]!; high -= 1 }

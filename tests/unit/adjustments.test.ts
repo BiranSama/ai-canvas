@@ -165,6 +165,16 @@ describe('mixing and leaving things alone', () => {
     expect([contrast.inputBlack, contrast.inputWhite]).toEqual([50, 200])
   })
 
+  it('gives valid levels for a white picture and a channel at its top', () => {
+    const white = histogram(new Uint8ClampedArray(4 * 100).fill(255))
+    const saturated = new Uint8ClampedArray(4 * 100)
+    for (let index = 0; index < 100; index += 1) saturated.set([254 + (index % 2), 20 + index, 0, 255], index * 4)
+    for (const settings of [autoLevels(white, 'tone'), autoLevels(white, 'contrast'), autoLevels(histogram(saturated), 'tone')]) {
+      expect(adjustmentSettingsSchema.safeParse(settings).success).toBe(true)
+    }
+    expect(autoLevels(white, 'contrast').channels.rgb).toMatchObject({ inputBlack: 253, inputWhite: 255 })
+  })
+
   it('describes the settings in words', () => {
     expect(describeAdjustment(levels({ inputBlack: 12, inputWhite: 240, gamma: 1.2 }))).toBe('色阶（RGB 输入 12–240，中间调 1.20，输出 0–255）')
     expect(describeAdjustment({ kind: 'invert' })).toBe('反相')

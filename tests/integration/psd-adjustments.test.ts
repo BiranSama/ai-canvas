@@ -116,6 +116,31 @@ describe('adjustments in a PSD', () => {
     expect(document.layers.slice(1).map((layer) => [layer.kind, layer.name])).toEqual([['adjustment', `反相 ${MAX_LAYER_ADJUSTMENTS + 1}`]])
   })
 
+  it('keeps the order of a clipping chain once one of it comes as a layer of its own', async () => {
+    const imageData = { width: 4, height: 4, data: new Uint8ClampedArray(64).fill(180) }
+    const half = { width: 4, height: 4, data: new Uint8ClampedArray(64).fill(128) }
+    const bytes = writePsdUint8Array({
+      width: 4, height: 4,
+      children: [
+        { name: '照片', left: 0, top: 0, right: 4, bottom: 4, imageData },
+        { name: '照片的曲线', clipping: true, adjustment: toPsdAdjustment(SAMPLES[2]!) },
+        { name: '带蒙版的反相', clipping: true, adjustment: toPsdAdjustment({ kind: 'invert' }), mask: { left: 0, top: 0, right: 4, bottom: 4, defaultColor: 255, imageData: half } },
+        { name: '之后的色阶', clipping: true, adjustment: toPsdAdjustment(SAMPLES[1]!) },
+        { name: '照片 2', left: 0, top: 0, right: 4, bottom: 4, imageData },
+        { name: '剪贴的图', clipping: true, left: 0, top: 0, right: 4, bottom: 4, imageData },
+        { name: '图上的反相', clipping: true, adjustment: toPsdAdjustment({ kind: 'invert' }) }
+      ]
+    }, { noBackground: true })
+    const document = await readPsdForImport(bytes)
+    // Only what lies below the kept layer goes into the picture; the rest stays above it, in order.
+    expect(document.layers.map((layer) => [layer.kind, layer.name])).toEqual([
+      ['pixels', '照片'], ['adjustment', '带蒙版的反相'], ['adjustment', '之后的色阶'], ['pixels', '照片 2'], ['pixels', '剪贴的图'], ['adjustment', '图上的反相']
+    ])
+    const [photo, , , second] = document.layers
+    expect(photo!.kind === 'pixels' && photo!.adjustments).toEqual([{ settings: SAMPLES[2], enabled: true }])
+    expect(second!.kind === 'pixels' && second!.adjustments).toEqual([])
+  })
+
   it('clips to the nearest unclipped layer below, even one it cannot bring', async () => {
     const imageData = { width: 4, height: 4, data: new Uint8ClampedArray(64).fill(180) }
     const bytes = writePsdUint8Array({

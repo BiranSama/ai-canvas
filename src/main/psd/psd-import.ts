@@ -186,7 +186,8 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
         base.adjustments.push({ settings: imported.settings, enabled: layer.hidden !== true })
         return
       }
-      if (layer.clipping === true) notes.clipped += 1
+      // Kept as a layer of its own, it ends the chain: what is clipped above it cannot move under it into the base.
+      if (layer.clipping === true) { notes.clipped += 1; clipBase = null }
       if (blend !== 'normal' && blend !== 'pass through') notes.blends += 1
       layers.push({
         kind: 'adjustment',
@@ -222,7 +223,8 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
         && (mask === null || !mask.enabled || mask.gray.every((value) => value === 255))
     }
     const adjustments: { settings: AdjustmentSettings; enabled: boolean }[] = []
-    if (layer.clipping !== true) clipBase = { adjustments }
+    // A clipped picture comes as a plain layer, which also ends the chain below what is clipped above it.
+    clipBase = layer.clipping === true ? null : { adjustments }
     layers.push({
       kind: 'pixels',
       adjustments,
