@@ -74,6 +74,9 @@ import { adjustmentLayerSettings, useAdjustmentPreview, withLayerPreview } from 
 import { AdjustmentBackdrop } from './adjustment-layer'
 import { ElementVisual } from './element-visual'
 import { isFinalContent } from './layer-drawing'
+import { StyledLayer } from './styled-layer'
+import { useStylePreview, withStylePreview } from '../layer-styles/style-actions'
+import { hasLayerStyles } from '../../../shared/layer-styles'
 
 interface Size {
   width: number
@@ -142,6 +145,11 @@ const DRAWN_PIXELS = 16_000_000
  * only now and then, and never more than the output itself. Exports draw at
  * output size on their own.
  */
+/** Whether the layer carries layer styles that are on, and so is drawn through StyledLayer. */
+function styledLayer(element: SceneElement): boolean {
+  return (element.type === 'image' || element.type === 'text' || element.type === 'shape') && hasLayerStyles(element.style)
+}
+
 function drawnDetail(width: number, height: number, zoom: number): number {
   const screen = Math.max(1 / 64, zoom * (window.devicePixelRatio || 1))
   const stepped = Math.pow(2, Math.ceil(Math.log2(screen)))
@@ -171,8 +179,10 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
     return paintedSource(element.id, image, element.paint, clips, mask === null || gray === null || maskClips === null ? null : { mask: maskLater ? { ...mask, enabled: false } : mask, gray: gray.data, clips: maskClips, view: maskView })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- paintVersion marks a live stroke or a replay in the same canvas; pixelsVersion a clip or mask read
   }, [image, element.id, element.paint, element.mask, maskView, maskLater, paintVersion, pixelsVersion])
-  // An adjustment being set up in its dialog is shown before it is recorded.
+  // An adjustment being set up in its dialog is shown before it is recorded, and so are layer styles.
   const preview = useAdjustmentPreview((state) => state.preview?.kind === 'layer' && state.preview.elementId === element.id ? state.preview : null)
+  const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
+  const styledElement = withStylePreview(element, stylePreview)
   // A mask looked at alone or in red shows its coverage, which the layer's own adjustments must not recolour;
   // alone, the effects that follow the picture's outline are left out too, as the export's mask-only drawing does.
   const shownElement = useMemo(() => {
@@ -221,11 +231,17 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
       </Group>
     )
   }
+  const styled = (picture: React.JSX.Element): React.JSX.Element => !styledLayer(styledElement) ? picture : (
+    <StyledLayer element={styledElement} width={width} height={height} unit={1} ratio={detail}
+      rotation={element.transform.rotation} blend={resolveBlendMode(element)} contentKey={effected?.drawn ?? source}>
+      {picture}
+    </StyledLayer>
+  )
   if (effected !== null) {
     // Drawn at the shown size; scaled back to the box while a resize is between whole pixels.
     const scaleX = width / effected.drawn.width
     const scaleY = height / effected.drawn.height
-    return (
+    return styled(
       <Group>
         {effected.shadow !== null && <KonvaImage image={effected.shadow.canvas} x={effected.shadow.x * scaleX} y={effected.shadow.y * scaleY} scaleX={scaleX} scaleY={scaleY} listening={false} />}
         <KonvaImage image={effected.drawn} width={width} height={height} />
@@ -233,7 +249,7 @@ function ImageVisual({ element, width, height }: { element: Extract<SceneElement
     )
   }
   const { crop, draw } = drawRect(source, element, width, height)
-  return (
+  return styled(
     <Group clipX={0} clipY={0} clipWidth={width} clipHeight={height}>
       <KonvaImage
         name={`pixels-${element.id}`}
@@ -392,6 +408,9 @@ interface ElementNodeProps {
 }
 
 function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag, onFinishDrag, isDragCommitOwner, isDragCancelled, onRequestEdit, isInlineEditing, viewportPanReady, cropOverride, shapeCornerRadiusOverride, shapeTransformOverride, blendModeSupported, soloHidden, groupHidden }: ElementNodeProps): React.JSX.Element | null {
+  // Layer styles being set up in their dialog are shown before they are recorded.
+  const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
+  const styledElement = withStylePreview(element, stylePreview)
   const updateElement = useWorkspaceStore((state) => state.updateElement)
   const execute = useWorkspaceStore((state) => state.execute)
   const scene = useWorkspaceStore((state) => state.scene)
@@ -586,7 +605,8 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
       height={height}
       rotation={displayTransform.rotation}
       opacity={element.opacity}
-      globalCompositeOperation={blendModeToCanvasOperation(resolveBlendMode(element))}
+      // A styled layer blends its content itself, so its shadow and glow keep their own modes.
+      globalCompositeOperation={styledLayer(styledElement) ? 'source-over' : blendModeToCanvasOperation(resolveBlendMode(element))}
       visible={element.visible && !groupHidden && !isInlineEditing && blendModeSupported && !soloHidden}
       draggable={!viewportPanReady && !element.locked && (element.groupId === null || element.groupId === editingGroupId) && activeTool === 'select'}
       onMouseDown={() => { dragOccurredRef.current = false }}
@@ -737,9 +757,17 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
             renderImage={renderLiveImage}
           />
         )
-        return (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
+        const masked = (element.type === 'text' || element.type === 'shape') && element.mask !== null && element.mask !== undefined
           ? <MaskedBox element={element} width={width} height={height} zoom={zoom}>{visual}</MaskedBox>
           : visual
+        // An image styles itself, from the pixels it draws; text and shapes are styled here.
+        if ((styledElement.type !== 'text' && styledElement.type !== 'shape') || !styledLayer(styledElement)) return masked
+        return (
+          <StyledLayer element={styledElement} width={width} height={height} unit={1} ratio={drawnDetail(width, height, zoom)}
+            rotation={displayTransform.rotation} blend={resolveBlendMode(element)} contentKey={element}>
+            {masked}
+          </StyledLayer>
+        )
       })()}
     </Group>
   )

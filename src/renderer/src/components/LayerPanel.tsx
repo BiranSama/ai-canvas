@@ -41,6 +41,8 @@ import { hasSelection, useSelectionStore } from '../selection/selection-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { ImeSafeInput } from './ImeSafeTextField'
 import { BlendModeOptions } from './BlendModeOptions'
+import { activeLayerStyles, describeLayerStyle, hasLayerStyles, LAYER_STYLE_LABELS, LAYER_STYLE_ORDER } from '../../../shared/layer-styles'
+import { clearLayerStyle, copyLayerStyle, hasCopiedLayerStyle, isStylable, openLayerStyle, pasteLayerStyle } from '../layer-styles/style-actions'
 
 const KIND_LABELS: Record<SceneElement['type'], string> = {
   image: '图片', text: '文字', sketch: '草图', shape: '形状', placeholder: '主体', light: '光影', mask: 'AI 区域', group: '组合', adjustment: '调整'
@@ -236,6 +238,8 @@ export function LayerPanel(): React.JSX.Element {
   // Photoshop's 新建填充或调整图层 menu, opened from the panel's foot.
   const [adjustMenu, setAdjustMenu] = useState<{ readonly x: number; readonly y: number } | null>(null)
   const adjustMenuRef = useRef<HTMLDivElement>(null)
+  const [styleMenu, setStyleMenu] = useState<{ readonly x: number; readonly y: number } | null>(null)
+  const styleMenuRef = useRef<HTMLDivElement>(null)
   const [dragged, setDragged] = useState<string | null>(null)
   const [drop, setDrop] = useState<DropTarget | null>(null)
   const [anchor, setAnchor] = useState<string | null>(null)
@@ -280,18 +284,19 @@ export function LayerPanel(): React.JSX.Element {
   }, [selectedIds])
 
   useEffect(() => {
-    if (adjustMenu === null) return
+    if (adjustMenu === null && styleMenu === null) return
     const close = (event: PointerEvent): void => {
       if (!adjustMenuRef.current?.contains(event.target as Node)) setAdjustMenu(null)
+      if (!styleMenuRef.current?.contains(event.target as Node)) setStyleMenu(null)
     }
-    const escape = (event: globalThis.KeyboardEvent): void => { if (event.key === 'Escape') setAdjustMenu(null) }
+    const escape = (event: globalThis.KeyboardEvent): void => { if (event.key === 'Escape') { setAdjustMenu(null); setStyleMenu(null) } }
     window.addEventListener('pointerdown', close, true)
     window.addEventListener('keydown', escape, true)
     return () => {
       window.removeEventListener('pointerdown', close, true)
       window.removeEventListener('keydown', escape, true)
     }
-  }, [adjustMenu])
+  }, [adjustMenu, styleMenu])
 
   useEffect(() => {
     if (menu === null) return
@@ -518,6 +523,10 @@ export function LayerPanel(): React.JSX.Element {
                   : <strong>{element.name}</strong>}
                 {meta.length > 0 && <small>{meta.join(' · ')}</small>}
               </span>
+              {isStylable(element) && hasLayerStyles(element.style) && (
+                <button type="button" className="layer-fx" aria-label={`编辑${element.name}的图层样式`} title={describeLayerStyle(element.style)}
+                  onClick={(event) => { event.stopPropagation(); openLayerStyle(element.id, activeLayerStyles(element.style)[0]) }}>fx</button>
+              )}
               {element.locked
                 ? <button type="button" className="layer-lock is-on" aria-label={`解锁${element.name}`} title="解锁" onClick={(event) => { event.stopPropagation(); act(element.id, 'lock') }}><Lock size={12} /></button>
                 : <button type="button" className="layer-lock" aria-label={`锁定${element.name}`} title="锁定" onClick={(event) => { event.stopPropagation(); act(element.id, 'lock') }}><Lock size={12} /></button>}
@@ -547,6 +556,12 @@ export function LayerPanel(): React.JSX.Element {
           <button type="button" title={selectionPresent ? '添加蒙版：只显示选区（Alt：隐藏选区）' : '添加蒙版（Alt：全部隐藏）'} aria-label="添加蒙版"
             disabled={selected.length !== 1 || !isMaskable(selected[0]) || (selected[0].mask !== null && selected[0].mask !== undefined)}
             onClick={(event) => { const element = selected[0]; if (element !== undefined) void addLayerMask(element.id, event.altKey) }}><RectangleCircle size={14} /></button>
+          <button type="button" className="layer-fx-button" title="添加图层样式" aria-label="添加图层样式" aria-haspopup="menu" aria-expanded={styleMenu !== null}
+            disabled={selected.length !== 1 || !isStylable(selected[0]) || selected[0].locked}
+            onClick={(event) => {
+              const box = event.currentTarget.getBoundingClientRect()
+              setStyleMenu((current) => current === null ? { x: box.left, y: box.top } : null)
+            }}><i>fx</i></button>
           <button type="button" title={selectionPresent ? '新建调整图层：只调整选区' : '新建调整图层'} aria-label="新建调整图层" aria-haspopup="menu" aria-expanded={adjustMenu !== null}
             onClick={(event) => {
               const box = event.currentTarget.getBoundingClientRect()
@@ -561,6 +576,14 @@ export function LayerPanel(): React.JSX.Element {
         <button type="button" className="text-action" onClick={() => void distribute('vertical')}>垂直等距分布</button>
       </div>}
 
+      {styleMenu !== null && selected.length === 1 && createPortal(
+        <div className="layer-menu" role="menu" aria-label="添加图层样式" ref={styleMenuRef} style={{ left: Math.min(styleMenu.x, window.innerWidth - 196), top: Math.max(8, styleMenu.y - 8 - LAYER_STYLE_ORDER.length * 30) }}>
+          {LAYER_STYLE_ORDER.map((kind) => (
+            <button key={kind} type="button" role="menuitem" onClick={() => { setStyleMenu(null); openLayerStyle(selected[0]!.id, kind) }}>{LAYER_STYLE_LABELS[kind]}…</button>
+          ))}
+        </div>,
+        document.body
+      )}
       {adjustMenu !== null && createPortal(
         <div className="layer-menu" role="menu" aria-label="新建调整图层" ref={adjustMenuRef} style={{ left: Math.min(adjustMenu.x, window.innerWidth - 196), top: Math.max(8, adjustMenu.y - 8 - ADJUSTMENT_LAYER_KINDS.length * 30) }}>
           {ADJUSTMENT_LAYER_KINDS.map((kind) => (
@@ -593,6 +616,13 @@ export function LayerPanel(): React.JSX.Element {
             <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-toggle')} disabled={menuElement.locked}>{menuElement.mask.enabled ? '停用蒙版' : '启用蒙版'}</button>
             {menuElement.type !== 'adjustment' && <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-apply')} disabled={menuElement.locked}>应用蒙版</button>}
             <button type="button" role="menuitem" onClick={() => act(menu.id, 'mask-delete')} disabled={menuElement.locked}>删除蒙版</button>
+          </>}
+          {isStylable(menuElement) && <>
+            <hr />
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); openLayerStyle(menuElement.id, activeLayerStyles(menuElement.style)[0]) }} disabled={menuElement.locked}>图层样式…</button>
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); copyLayerStyle(menuElement) }} disabled={!hasLayerStyles(menuElement.style)}>拷贝图层样式</button>
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); void pasteLayerStyle(selectedIds.includes(menuElement.id) ? selectedIds : [menuElement.id]) }} disabled={!hasCopiedLayerStyle()}>粘贴图层样式</button>
+            <button type="button" role="menuitem" onClick={() => { setMenu(null); void clearLayerStyle(selectedIds.includes(menuElement.id) ? selectedIds : [menuElement.id]) }} disabled={menuElement.locked || !hasLayerStyles(menuElement.style)}>清除图层样式</button>
           </>}
           {(menuElement.type === 'text' || menuElement.type === 'shape') && <button type="button" role="menuitem" onClick={() => act(menu.id, 'rasterize')} disabled={menuElement.locked}>栅格化图层</button>}
           <button type="button" role="menuitem" onClick={() => act(menu.id, 'merge')}>{menuElement.type === 'group' ? '合并组' : selected.length > 1 && selectedIds.includes(menu.id) ? '合并图层' : '向下合并'}<kbd>Ctrl+E</kbd></button>

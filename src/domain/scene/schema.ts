@@ -264,6 +264,45 @@ export const layerAdjustmentSchema = z.object({
 
 export const MAX_LAYER_ADJUSTMENTS = 24
 
+const styleHex = z.string().regex(/^#[0-9A-Fa-f]{6}$/)
+const styleOpacity = finiteNumber.min(0).max(1)
+/** Pixels at the output size, as Photoshop's layer style dialog takes them. */
+const stylePixels = finiteNumber.min(0).max(250)
+const styleAngle = finiteNumber.min(-180).max(180)
+const stylePercent = finiteNumber.min(0).max(100)
+
+/**
+ * Photoshop's layer styles a layer can carry, each one at most once, with
+ * its own switch. Angles are degrees counter-clockwise from the right, in
+ * the picture's own directions (Photoshop's global light), so a turned layer
+ * still casts its shadow the same way.
+ */
+export const layerStyleSchema = z.object({
+  dropShadow: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity,
+    angle: styleAngle, distance: finiteNumber.min(0).max(3000), spread: stylePercent, size: stylePixels
+  }).optional(),
+  innerShadow: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity,
+    angle: styleAngle, distance: finiteNumber.min(0).max(3000), choke: stylePercent, size: stylePixels
+  }).optional(),
+  outerGlow: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity, spread: stylePercent, size: stylePixels
+  }).optional(),
+  stroke: z.object({
+    enabled: z.boolean(), size: finiteNumber.min(1).max(250), position: z.enum(['outside', 'inside', 'center']), color: styleHex, opacity: styleOpacity
+  }).optional(),
+  colorOverlay: z.object({ enabled: z.boolean(), blendMode: blendModeSchema, color: styleHex, opacity: styleOpacity }).optional(),
+  gradientOverlay: z.object({
+    enabled: z.boolean(), blendMode: blendModeSchema, opacity: styleOpacity,
+    style: z.enum(['linear', 'radial']), angle: styleAngle, scale: finiteNumber.min(10).max(150), reverse: z.boolean(),
+    /** Colour stops along the gradient, 0 at its start and 1 at its end. */
+    stops: z.array(z.object({ offset: finiteNumber.min(0).max(1), color: styleHex })).min(2).max(8)
+  }).optional()
+}).strict()
+
+export const LAYER_STYLE_KINDS = ['dropShadow', 'innerShadow', 'outerGlow', 'stroke', 'colorOverlay', 'gradientOverlay'] as const
+
 export const imageElementSchema = z.object({
   ...elementBaseShape,
   type: z.literal('image'),
@@ -284,7 +323,8 @@ export const imageElementSchema = z.object({
   transparencyLocked: z.boolean().optional(),
   mask: layerMaskSchema.nullable().optional(),
   /** Adjustments of the layer's own colours, applied in order after its paint and colour match. */
-  adjustments: z.array(layerAdjustmentSchema).max(MAX_LAYER_ADJUSTMENTS).optional()
+  adjustments: z.array(layerAdjustmentSchema).max(MAX_LAYER_ADJUSTMENTS).optional(),
+  style: layerStyleSchema.optional()
 })
 
 export const textElementSchema = z.object({
@@ -309,7 +349,8 @@ export const textElementSchema = z.object({
   styleDescription: z.string().max(4000),
   renderStrategy: z.enum(['standard', 'ai-material', 'ai-complete', 'editable-overlay']),
   resultAssetId: idSchema.nullable(),
-  mask: layerMaskSchema.nullable().optional()
+  mask: layerMaskSchema.nullable().optional(),
+  style: layerStyleSchema.optional()
 })
 
 export const sketchStrokeSchema = z.object({
@@ -339,7 +380,8 @@ export const shapeElementSchema = z.object({
   strokeWidth: finiteNumber.min(0).max(1),
   cornerRadius: finiteNumber.min(0).max(0.5).default(0),
   role: z.enum(['final', 'placeholder']),
-  mask: layerMaskSchema.nullable().optional()
+  mask: layerMaskSchema.nullable().optional(),
+  style: layerStyleSchema.optional()
 })
 
 export const placeholderElementSchema = z.object({
@@ -556,6 +598,8 @@ export type AdjustmentKind = AdjustmentSettings['kind']
 export type FilterSettings = z.infer<typeof filterSettingsSchema>
 export type FilterKind = FilterSettings['kind']
 export type LayerSettings = z.infer<typeof layerSettingsSchema>
+export type LayerStyle = z.infer<typeof layerStyleSchema>
+export type LayerStyleKind = (typeof LAYER_STYLE_KINDS)[number]
 export type LayerAdjustment = z.infer<typeof layerAdjustmentSchema>
 export type LevelsChannel = z.infer<typeof levelsChannelSchema>
 export type CurvePoints = z.infer<typeof curvePointsSchema>

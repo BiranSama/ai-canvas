@@ -3,6 +3,8 @@ import { useLayoutEffect, useRef } from 'react'
 import { Group, Image as KonvaImage, Layer, Rect, Stage } from 'react-konva'
 import type { SceneElement } from '../../../domain'
 import { resolveBlendMode } from '../../../shared/blend-mode'
+import { hasLayerStyles } from '../../../shared/layer-styles'
+import { StyledLayer } from './styled-layer'
 import { ElementVisual } from './element-visual'
 import { AdjustmentBackdrop, type AdjustmentCoverage } from './adjustment-layer'
 import { drawRect, renderImageEffects, type AdjustmentClips, type LaterMask } from './image-effects'
@@ -77,9 +79,18 @@ function ArtworkLayer({ draw, outputScale }: { readonly draw: LayerDraw; readonl
       renderImage={(element, width, height) => <ArtworkImage element={element} source={draw.image!} clips={draw.adjustmentClips} laterMask={draw.laterMask} scale={outputScale} width={width} height={height} />}
     />
   )
+  const masked = draw.maskAlpha === null ? visual : <ArtworkMaskedBox alpha={draw.maskAlpha} width={draw.width} height={draw.height}>{visual}</ArtworkMaskedBox>
+  const element = draw.element
+  const styled = !draw.maskOnly && (element.type === 'image' || element.type === 'text' || element.type === 'shape') && hasLayerStyles(element.style)
   return (
-    <Group x={draw.x} y={draw.y} width={draw.width} height={draw.height} rotation={draw.element.transform.rotation} opacity={draw.opacity} globalCompositeOperation={draw.operation}>
-      {draw.maskAlpha === null ? visual : <ArtworkMaskedBox alpha={draw.maskAlpha} width={draw.width} height={draw.height}>{visual}</ArtworkMaskedBox>}
+    // A styled layer blends its content itself, so its shadow and glow keep their own modes.
+    <Group x={draw.x} y={draw.y} width={draw.width} height={draw.height} rotation={element.transform.rotation} opacity={draw.opacity} globalCompositeOperation={styled ? 'source-over' : draw.operation}>
+      {!styled ? masked : (
+        <StyledLayer element={element as Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>} width={draw.width} height={draw.height} unit={outputScale} ratio={1}
+          rotation={element.transform.rotation} blend={draw.operation === 'source-over' ? 'normal' : resolveBlendMode(element)} contentKey={draw}>
+          {masked}
+        </StyledLayer>
+      )}
     </Group>
   )
 }

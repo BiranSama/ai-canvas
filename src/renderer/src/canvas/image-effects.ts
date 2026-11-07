@@ -1,5 +1,5 @@
 import type { SceneElement } from '../../../domain'
-import { activeAdjustments, adjustLayerPixels, hasSpatialFilters } from '../../../shared/adjustments'
+import { activeAdjustments, adjustLayerPixels, coverageInBox, hasSpatialFilters } from '../../../shared/adjustments'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../../shared/layer-effects'
 import { imageDrawRect } from '../../../shared/layer-space'
 
@@ -35,21 +35,9 @@ export function hasDrawnEffects(element: ImageElement): boolean {
   return hasVisibleEffects(element.effects) || activeAdjustments(element.adjustments).length > 0
 }
 
-/** A clip drawn into the box the way the image is: its coverage at the box's size. */
-function clipCoverage(clip: Uint8Array, size: { readonly width: number; readonly height: number }, element: ImageElement, w: number, h: number): Uint8Array | null {
-  const source = canvas(size.width, size.height)
-  const target = canvas(w, h)
-  if (source === null || target === null) return null
-  const gray = source.context.createImageData(size.width, size.height)
-  for (let index = 0; index < clip.length; index += 1) gray.data.set([clip[index]!, 0, 0, 255], index * 4)
-  source.context.putImageData(gray, 0, 0)
-  const { crop, draw } = drawRect(size, element, w, h)
-  target.context.drawImage(source.canvas, crop.x, crop.y, crop.width, crop.height, draw.x, draw.y, draw.width, draw.height)
-  const drawn = target.context.getImageData(0, 0, w, h).data
-  const coverage = new Uint8Array(w * h)
-  // Outside the drawn picture nothing was selected; alpha carries that at the edges.
-  for (let index = 0; index < coverage.length; index += 1) coverage[index] = Math.round(drawn[index * 4]! * drawn[index * 4 + 3]! / 255)
-  return coverage
+/** A clip drawn into the box the way the image is: its coverage at the box's size, read as Main reads it. */
+function clipCoverage(clip: Uint8Array, size: { readonly width: number; readonly height: number }, element: ImageElement, w: number, h: number): Uint8Array {
+  return coverageInBox({ width: size.width, height: size.height, data: clip }, element, w, h)
 }
 
 /** Applies the colour match and feather in place and gives the shadow the result casts, or null without one. */

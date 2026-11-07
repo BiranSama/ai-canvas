@@ -1,5 +1,6 @@
 import { FILTER_KINDS, type AdjustmentKind, type AdjustmentSettings, type BlendMode, type CurvePoints, type FilterSettings, type LayerAdjustment, type LayerSettings, type LevelsChannel } from '../domain'
 import { blendInPlace } from './blend-mode'
+import { imageDrawRect } from './layer-space'
 import { applyFilter, describeFilter, FILTER_LABELS, isNeutralFilter, isSpatialFilter } from './filters'
 
 /*
@@ -381,7 +382,8 @@ export function adjustPixels(data: Pixels, settings: AdjustmentSettings, options
   const coverage = options.coverage ?? null
   if (amount <= 0 || isNeutralAdjustment(settings)) return
   if (options.blend !== undefined && options.blend !== 'normal') {
-    const adjusted = data.slice()
+    // A copy, not a view: Buffer's slice shares its memory.
+    const adjusted = new Uint8ClampedArray(data)
     adjustPixels(adjusted, settings)
     blendInPlace(data, adjusted, options.blend, { coverage, amount })
     return
@@ -611,6 +613,32 @@ export function adjustLayerPixels(data: Pixels, adjustments: readonly LayerAdjus
     if (isFilterSettings(settings)) applyFilter(data, layout.width, layout.height, settings, { scale: layout.scale, coverage })
     else adjustPixels(data, settings, { coverage })
   }
+}
+
+/**
+ * A grayscale picture in an image layer's own pixels (a selection an
+ * adjustment was made in, or its mask) cropped and fitted into its box as
+ * the image is, sampled bilinearly at pixel centres, so the canvas, the
+ * export and Main read it alike. Past the picture, where a contained image
+ * leaves the box empty, there is nothing.
+ */
+export function coverageInBox(
+  gray: { readonly width: number; readonly height: number; readonly data: Uint8Array | Uint8ClampedArray },
+  element: { readonly crop: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }; readonly fit: 'cover' | 'contain' | 'fill' },
+  width: number,
+  height: number
+): Uint8Array<ArrayBuffer> {
+  const { crop, draw } = imageDrawRect(gray, element, width, height)
+  const scaleX = crop.width / Math.max(1e-9, draw.width)
+  const scaleY = crop.height / Math.max(1e-9, draw.height)
+  const coverage = sampleCoverage(gray, width, height, { scaleX, scaleY, offsetX: crop.x - draw.x * scaleX, offsetY: crop.y - draw.y * scaleY })
+  if (element.fit === 'contain') {
+    for (let y = 0; y < height; y += 1) {
+      const inside = y + 0.5 >= draw.y && y + 0.5 <= draw.y + draw.height
+      for (let x = 0; x < width; x += 1) if (!inside || x + 0.5 < draw.x || x + 0.5 > draw.x + draw.width) coverage[y * width + x] = 0
+    }
+  }
+  return coverage
 }
 
 /**

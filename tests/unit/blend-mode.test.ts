@@ -79,6 +79,10 @@ describe('blend modes', () => {
     expect(luminosity[0]! - luminosity[1]!).toBeCloseTo(120, -0.5)
     expect(luminosity[1]! - luminosity[2]!).toBeCloseTo(20, -0.5)
     expect(Math.abs(normal[0]! - normal[1]! - 120)).toBeGreaterThan(5)
+    // Main hands in a Buffer, whose slice is a view: the result must be the same.
+    const buffer = Buffer.from([180, 60, 40, 255])
+    adjustPixels(buffer, brighten, { blend: 'luminosity' })
+    expect([...buffer]).toEqual([...luminosity])
     // At half opacity it is halfway.
     const half = pixel()
     adjustPixels(half, brighten, { blend: 'luminosity', amount: 0.5 })

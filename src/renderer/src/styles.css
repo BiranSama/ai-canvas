@@ -3607,6 +3607,18 @@ button.knowledge-copy { cursor: pointer; }
 .adjustment-dialog { width: min(340px, calc(100vw - 56px)); max-height: calc(100vh - 110px); overflow: auto; pointer-events: auto; background: var(--solid-surface); }
 .adjustment-dialog footer { align-items: center; }
 .adjustment-dialog .adjustment-preview-toggle { margin: 0 auto 0 0; }
+.layer-style-dialog { width: min(520px, calc(100vw - 56px)); }
+.layer-style-body { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 12px; }
+.layer-style-list { display: grid; align-content: start; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.layer-style-list li { display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 7px; }
+.layer-style-list li.is-current { background: var(--field); }
+.layer-style-list button { flex: 1; min-width: 0; padding: 4px 0; border: 0; color: var(--graphite); background: none; font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.layer-style-settings { min-width: 0; }
+.gradient-preview { height: 14px; border: 1px solid var(--hairline); border-radius: 6px; }
+.gradient-stop { display: grid; grid-template-columns: 28px minmax(0, 1fr) 24px; align-items: center; gap: 6px; }
+.gradient-stop input[type="color"], .layer-style-dialog .adjust-row input[type="color"] { width: 28px; height: 22px; padding: 0; border: 1px solid var(--hairline); border-radius: 6px; background: none; }
+.layer-fx { flex: none; margin-left: 4px; padding: 0 3px; border: 0; color: var(--quiet-blue); background: none; font: italic 600 10px/1 Georgia, serif; cursor: pointer; }
+.layer-fx-button i { font: italic 700 12px/1 Georgia, serif; }
 .adjust-controls { display: grid; gap: 6px; }
 .adjust-row { display: grid; min-height: 28px; grid-template-columns: 72px minmax(0, 1fr) 58px; align-items: center; gap: 8px; color: var(--muted-slate); font-size: 11px; }
 .adjust-row.is-select { grid-template-columns: 72px minmax(0, 1fr); }
