@@ -257,9 +257,11 @@ function ImageVisual({ element, width, height, plain = false }: {
   }
   // Through its free-transform corners first; its styles go on what that shows.
   const styled = (picture: React.JSX.Element): React.JSX.Element => {
-    const warped = <CornersLayer corners={element.corners} width={width} height={height} ratio={warpDraft ? detail / 2 : detail}>{picture}</CornersLayer>
+    // Its shadow lies past its box, and goes through the corners with it.
+    const margin = drawnMargin(shownElement, width, height)
+    const warped = <CornersLayer corners={element.corners} width={width} height={height} margin={margin} ratio={warpDraft ? detail / 2 : detail}>{picture}</CornersLayer>
     return plain || !styledLayer(styledElement) ? warped : (
-      <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(element.corners, width, height)} unit={1} ratio={detail}
+      <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(element.corners, width, height, margin)} unit={1} ratio={detail}
         rotation={element.transform.rotation} blend={resolveBlendMode(element)} contentKey={styleContentKey}>
         {warped}
       </StyledLayer>

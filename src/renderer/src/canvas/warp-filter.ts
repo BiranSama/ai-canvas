@@ -1,5 +1,6 @@
 import type { FilterFunction } from 'konva/lib/Node'
 import { boxWarpMatrix, cornersAreIdentity, invertMatrix, multiplyMatrices, scaleMatrix, type Corners, type SceneElement } from '../../../domain'
+import { effectsReach } from '../../../shared/layer-effects'
 import { warpedBounds, warpPixels } from '../../../shared/warp'
 
 /** What a warped group's filter needs: the corners, the box and the area its picture covers, in the group's units. */
@@ -37,10 +38,14 @@ export function warpedExtent(corners: Corners | null | undefined, width: number,
 
 /**
  * How far a layer is drawn past its box, in the box's units: half a shape's
- * stroke, which is centred on its outline, and a pixel for its soft edge (as
- * ElementVisual draws it). Nothing for other layers.
+ * stroke, which is centred on its outline, or an image's shadow, and a pixel
+ * for the soft edge (as ElementVisual draws them). Nothing for other layers.
  */
 export function drawnMargin(element: SceneElement, width: number, height: number): number {
+  if (element.type === 'image') {
+    const reach = effectsReach(element.effects, width, height)
+    return reach > 0 ? Math.ceil(reach) + 1 : 0
+  }
   if (element.type !== 'shape') return 0
   const stroke = element.strokeWidth * Math.min(width, height)
   const drawn = element.shape === 'line' ? Math.max(1, stroke) : element.stroke === null ? 0 : stroke

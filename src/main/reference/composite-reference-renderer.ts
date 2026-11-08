@@ -1,7 +1,7 @@
 import sharp from 'sharp'
 import { affineOf, boxWarpMatrix, clipStacks, cornersAreIdentity, cornersDrawnAsMatrix, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Corners, type Scene, type SceneElement } from '../../domain'
 import { warpedBounds, warpLayout, warpPixels, warpSourceMatrix } from '../../shared/warp'
-import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
+import { applyImageEffects, effectsReach, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, coverageInBox, hasSpatialFilters, sampleCoverage } from '../../shared/adjustments'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
 import { applyLayerStyles, hasLayerStyles, styledLayerReach } from '../../shared/layer-styles'
@@ -153,6 +153,11 @@ function shapeStrokeWidth(element: Extract<SceneElement, { type: 'shape' }>, wid
 
 /** How far a layer is drawn past its box, in whole pixels: half a shape's stroke, centred on its outline, and a pixel for its soft edge. */
 function drawnMargin(element: SceneElement, width: number, height: number, box: { readonly w: number; readonly h: number }): number {
+  // An image's shadow lies past its box, and goes through the corners with it.
+  if (element.type === 'image') {
+    const reach = effectsReach(element.effects, box.w, box.h)
+    return reach > 0 ? Math.ceil(reach) + 1 : 0
+  }
   if (element.type !== 'shape') return 0
   const stroke = shapeStrokeWidth(element, width, height, box)
   return stroke > 0 ? Math.ceil(stroke / 2) + 1 : 0

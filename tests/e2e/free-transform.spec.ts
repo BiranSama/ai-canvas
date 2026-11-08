@@ -87,7 +87,12 @@ test('flipped, skewed, distorted and perspective layers draw the same in the exp
         style: { stroke: { enabled: true, size: 6, position: 'outside', color: '#FFFFFF', opacity: 1 }, dropShadow: { enabled: true, blendMode: 'multiply', color: '#000000', opacity: 0.6, angle: 120, distance: 10, spread: 0, size: 8 } }
       }),
       // A 20-pixel stroke centred on the outline: its outer half lies past the box.
-      pathShape('斜切描边', box(330, 340, 200, 200), { corners: [[0.2, 0], [1.2, 0], [1, 1], [0, 1]] })
+      pathShape('斜切描边', box(330, 340, 200, 200), { corners: [[0.2, 0], [1.2, 0], [1, 1], [0, 1]] }),
+      // A shadow 21 pixels below the picture: what shows of it lies past the box.
+      image('斜切投影', ramp, box(850, 620, 140, 140), {
+        corners: [[0.2, 0], [1.2, 0], [1, 1], [0, 1]],
+        effects: { colorMatch: null, feather: 0, shadow: { color: '#000000', opacity: 0.9, blur: 0.02, offsetX: 0, offsetY: 0.15 } }
+      })
     ])
     const exported = await rawPixels(await exportThroughPanel(page))
     const current = await currentScene(page)
@@ -113,6 +118,11 @@ test('flipped, skewed, distorted and perspective layers draw the same in the exp
         const at = (y * WIDTH + x) * 4
         expect([...picture.subarray(at, at + 3)].map((value) => value > 200 ? 'hi' : value < 60 ? 'lo' : 'mid'), `${name} stroke at ${x},${y}`).toEqual(['lo', 'hi', 'lo'])
       }
+    }
+    // The skewed picture keeps its shadow below its box, in both: darker there than the background further down.
+    for (const [name, picture] of [['export', exported], ['main', reference]] as const) {
+      const level = (x: number, y: number): number => [...picture.subarray((y * WIDTH + x) * 4, (y * WIDTH + x) * 4 + 3)].reduce((sum, value) => sum + value, 0) / 3
+      expect(level(920, 830) - level(920, 770), `${name} shadow below the skewed picture`).toBeGreaterThan(40)
     }
     // The flip did mirror: the dark frame is on the right now.
     const pixel = (x: number, y: number): number[] => [...exported.subarray((y * WIDTH + x) * 4, (y * WIDTH + x) * 4 + 3)]

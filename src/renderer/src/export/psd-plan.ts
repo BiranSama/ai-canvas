@@ -1,7 +1,7 @@
 import { cornersAreIdentity, type Scene, type SceneElement } from '../../../domain'
 import { MAX_EXPORT_EDGE } from '../../../shared/artwork-export'
 import { warpedBounds } from '../../../shared/warp'
-import { hasVisibleEffects, shadowGeometry } from '../../../shared/layer-effects'
+import { effectsReach } from '../../../shared/layer-effects'
 import { isFinalContent } from '../canvas/layer-drawing'
 
 /*
@@ -77,17 +77,14 @@ function sameArea(a: Area, b: Area): boolean {
  */
 export function layerArea(element: SceneElement, width: number, height: number): Area {
   const box = { x: element.transform.x * width, y: element.transform.y * height, w: element.transform.width * width, h: element.transform.height * height }
-  // Drawn past the box before its free-transform corners take it (a stroke, a text's shadow), and after (the soft edge, an image's shadow).
+  // Drawn past the box before its free-transform corners take it (a stroke, a text's or an image's shadow), and after (the soft edge).
   let before = 0
   let margin = 2
   if (element.type === 'text') before += element.strokeWidth + element.shadowBlur * 2
   if (element.type === 'shape' && element.stroke !== null) before += element.strokeWidth * Math.min(box.w, box.h)
   // Sketch strokes run to the box's edges with round caps, and their curves can bow a little past them.
   if (element.type === 'sketch') before += Math.max(1, ...element.strokes.map((stroke) => stroke.width * Math.min(box.w, box.h))) + 0.1 * Math.max(box.w, box.h)
-  if (element.type === 'image' && hasVisibleEffects(element.effects) && element.effects?.shadow != null) {
-    const shadow = shadowGeometry(element.effects.shadow, box.w, box.h)
-    margin += shadow.padding + Math.max(Math.abs(shadow.offsetX), Math.abs(shadow.offsetY))
-  }
+  if (element.type === 'image') before += effectsReach(element.effects, box.w, box.h)
   // The box grown by what is drawn past it and, after a free transform, where its corners take that: a skew
   // or a perspective stretches a stroke as it stretches the box. Both are turned about the box's top-left corner.
   const warped = 'corners' in element && !cornersAreIdentity(element.corners) ? element.corners! : null
