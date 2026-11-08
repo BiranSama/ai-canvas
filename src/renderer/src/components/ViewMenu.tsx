@@ -46,7 +46,8 @@ export function ViewMenu(): React.JSX.Element {
 
   const toggleOpen = (): void => {
     const rect = button.current?.getBoundingClientRect()
-    if (rect !== undefined) setPlace({ x: Math.max(12, rect.right - 248), y: Math.max(12, rect.top - 8) })
+    // Below the button, in the options bar at the top of the canvas.
+    if (rect !== undefined) setPlace({ x: Math.max(12, Math.min(window.innerWidth - 248, rect.left)), y: rect.bottom + 8 })
     setOpen((value) => !value)
   }
 
@@ -61,7 +62,7 @@ export function ViewMenu(): React.JSX.Element {
     <>
       <button ref={button} type="button" className="view-menu-button" aria-label="视图" aria-expanded={open} title="视图：标尺、参考线、网格、对齐" onClick={toggleOpen}><Ruler size={14} /></button>
       {open && place !== null && createPortal(
-        <div ref={panel} className="view-menu glass-surface" role="dialog" aria-label="视图设置" style={{ left: place.x, bottom: window.innerHeight - place.y }}>
+        <div ref={panel} className="view-menu glass-surface" role="dialog" aria-label="视图设置" style={{ left: place.x, top: place.y }}>
           {SWITCHES.map(({ key, label, keys }) => (
             <label key={key} className="view-menu-switch">
               <input type="checkbox" checked={view[key]} onChange={() => view.toggle(key)} />

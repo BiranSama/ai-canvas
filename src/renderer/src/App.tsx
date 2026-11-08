@@ -649,6 +649,7 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
         </section>
           <div ref={canvasSizeRef} className={`canvas-size-float glass-surface${isPaintTool(activeTool) || isSelectionTool(activeTool) || activeTool === 'crop' || freeTransforming ? ' is-painting' : ''}`} style={canvasUtilityStyles?.size}>
             <CanvasSizeControl />
+            <ViewMenu />
             {/* The painting tools' options sit beside the canvas size, Photoshop's options bar, and move with it out of the panels' way. */}
             {isPaintTool(activeTool) && <PaintOptionsBar tool={activeTool} />}
             {isSelectionTool(activeTool) && <SelectionOptionsBar tool={activeTool} />}
@@ -680,7 +681,6 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
               <i aria-hidden="true" />{runtime.ready ? '本地' : '本地未就绪'}
             </span>
             <button type="button" className="focus-mode-toggle" aria-pressed={focusMode} onClick={() => setFocusMode((current) => !current)}>{focusMode ? '退出专注' : '进入专注'}</button>
-            <ViewMenu />
             <button type="button" className="reset-islands-button" title="还原工具布局" aria-label="还原工具布局" onClick={resetAllGlassIslands}><LayoutDashboard size={14} /></button>
             </div>
           </div>

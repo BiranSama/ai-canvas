@@ -33,7 +33,7 @@ test('AC-R1-02 applies a free canvas ratio with three explicit atomic resize str
     expect(original.ratio).toEqual([4, 5])
 
     const results: Record<string, unknown> = {}
-    for (const strategy of ['保持位置', '适应内容', '保持中心']) {
+    for (const strategy of ['保持位置', '适应内容', '扩展或裁切画布']) {
       await window.getByRole('button', { name: '画布尺寸' }).evaluate((button) => button.click())
       const dialog = window.getByRole('dialog', { name: '画布尺寸设置' })
       await dialog.getByLabel('自由画布比例').fill('3:2')
@@ -48,7 +48,7 @@ test('AC-R1-02 applies a free canvas ratio with three explicit atomic resize str
     }
 
     expect(results['适应内容']).not.toEqual(results['保持位置'])
-    expect(results['保持中心']).not.toEqual(results['保持位置'])
+    expect(results['扩展或裁切画布']).not.toEqual(results['保持位置'])
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
