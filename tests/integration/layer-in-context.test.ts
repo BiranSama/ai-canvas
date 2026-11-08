@@ -100,3 +100,31 @@ it('redraws a placeholder within the picture beneath it and places a blended cut
     await runtime.close()
   }
 }, 30_000)
+
+it('places an in-context redraw of a flipped picture square to the canvas, without the old picture\'s corners', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'ai-canvas-layer-flipped-'))
+  roots.push(root)
+  const runtime = await GenerationRuntime.create(root)
+  try {
+    const projectId = runtime.getWorkspaceBootstrap().projectId
+    const rgba = new Uint8Array(64 * 64 * 4).fill(200)
+    const picture = await runtime.importPixels({ projectId, name: '图片', width: 64, height: 64, rgba })
+    const fixture = { ...createNightVeilScene(), projectId, elements: [], relations: [] }
+    const flipped: SceneElement = {
+      ...BASE, id: '31000000-0000-4000-8000-000000000001', type: 'image', name: '翻转的图', zIndex: 0, transform: { x: 0.3, y: 0.3, width: 0.4, height: 0.4, rotation: 0 },
+      assetId: picture.id, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general', corners: [[1, 0], [0, 0], [0, 1], [1, 1]]
+    }
+    const scene = await commitSceneFixture(runtime, sceneSchema.parse({ ...fixture, elements: [flipped] }))
+    const submitted = await runtime.editFromCanvas({
+      scene, targetElementId: flipped.id, prompt: '一只玻璃鹿', negativePrompt: '', providerId: 'mock', model: 'mock-balanced',
+      count: 1, sourceMessageId: null, parentResultId: null, mode: 'in-context'
+    })
+    const job = await terminal(runtime, submitted.jobId)
+    expect(job.status).toBe('completed')
+    await runtime.placeGenerationResult({ resultId: job.results[0]!.id, placementId: '31000000-0000-4000-8000-000000000010', origin: 'agent' })
+    const placed = runtime.getWorkspaceBootstrap().scene.elements.find((candidate) => candidate.id === flipped.id)!
+    expect(placed.type === 'image' ? placed.corners ?? null : 'not an image').toBeNull()
+  } finally {
+    await runtime.close()
+  }
+}, 30_000)

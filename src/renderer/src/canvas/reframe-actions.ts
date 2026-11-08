@@ -60,7 +60,9 @@ export async function reframeCanvas(frame: CanvasFrame, label: string, options: 
     const pixels: GrayMask = { width, height, data: remapGrayMask(coverage, gray.width, gray.height, maskFrame(remap, gray.width, gray.height), width, height) }
     const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: `${element.name}蒙版.png`, width, height, gray: new Uint8Array(pixels.data) })
     rememberGrayAsset(asset.id, pixels)
-    masks.push({ kind: 'element.update', elementId: element.id, changes: { mask: { assetId: asset.id, enabled: mask.enabled } } })
+    const update: SceneCommand = { kind: 'element.update', elementId: element.id, changes: { mask: { assetId: asset.id, enabled: mask.enabled } } }
+    // A locked layer keeps its lock, unlocked for the change and locked again in the same step.
+    masks.push(...(element.locked ? [{ kind: 'element.update', elementId: element.id, changes: { locked: false } } as SceneCommand, update, { kind: 'element.update', elementId: element.id, changes: { locked: true } } as SceneCommand] : [update]))
   }
   const current = useWorkspaceStore.getState()
   if (current.scene.revision !== scene.revision) {

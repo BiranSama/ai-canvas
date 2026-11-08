@@ -6,7 +6,7 @@ import type { Canvas, Guide, Scene, SceneElement } from './schema'
  * Photoshop's crop and 画布大小: the canvas gets a new frame over the
  * picture and every layer stays where it is in pixels. Layers that fall
  * outside are kept, off the canvas (Photoshop's crop without 删除裁剪的像素);
- * guides and the outlines of edit masks move with the picture. An
+ * guides move with the picture, and locked layers stay locked. An
  * adjustment layer always covers the whole canvas and its mask is in the
  * canvas's pixels, so the mask has to be cut or grown to the new frame: the
  * caller makes those assets and adds their updates (see maskRemaps).
@@ -116,17 +116,14 @@ export function reframeScene(scene: Scene, frame: CanvasFrame): Reframe {
       }
       continue
     }
-    const changes: Record<string, unknown> = { transform: moved(element, scene.canvas, size, exact) }
-    if (element.type === 'mask') {
-      changes.paths = element.paths.map((path) => ({
-        ...path,
-        points: path.points.map((point) => ({
-          x: round((point.x * scene.canvas.outputWidth - exact.left) / size.width),
-          y: round((point.y * scene.canvas.outputHeight - exact.top) / size.height)
-        }))
-      }))
+    // A mask's outline is in its own box, which moves with it.
+    const update: SceneCommand = { kind: 'element.update', elementId: element.id, changes: { transform: moved(element, scene.canvas, size, exact) } }
+    // A locked layer keeps its lock: unlocked for the move and locked again, in the same step.
+    if (element.locked) {
+      commands.push({ kind: 'element.update', elementId: element.id, changes: { locked: false } }, update, { kind: 'element.update', elementId: element.id, changes: { locked: true } })
+    } else {
+      commands.push(update)
     }
-    commands.push({ kind: 'element.update', elementId: element.id, changes })
   }
   return { canvas, commands, maskRemaps }
 }

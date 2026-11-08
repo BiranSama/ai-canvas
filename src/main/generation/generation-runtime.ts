@@ -2350,7 +2350,8 @@ export class GenerationRuntime {
           // The cut-out covers the element's box and the band it fades across.
           ...(layerTransform === null ? [] : [{
             kind: 'element.update' as const, elementId: target.id,
-            changes: { transform: layerTransform, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill' }
+            // The cut-out is in the canvas's own directions, so any free-transform corners of the old picture go.
+            changes: { transform: layerTransform, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', corners: null }
           }])
         ]
       }

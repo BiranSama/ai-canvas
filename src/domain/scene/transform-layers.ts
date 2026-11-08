@@ -39,6 +39,17 @@ function reachOf(element: SceneElement): TransformReach {
   return 'box'
 }
 
+/** A text's type scaled by a factor, or null when that takes a size past what text can have. */
+function textScaled(text: Extract<SceneElement, { type: 'text' }>, factor: number): Record<string, number> | null {
+  const round = (value: number): number => Math.round(value * 1000) / 1000
+  const fontSize = round(text.fontSize * factor)
+  const letterSpacing = round(text.letterSpacing * factor)
+  const strokeWidth = round(text.strokeWidth * factor)
+  const shadowBlur = round(text.shadowBlur * factor)
+  if (fontSize < 8 || fontSize > 512 || Math.abs(letterSpacing) > 100 || strokeWidth > 32 || shadowBlur > 128) return null
+  return { fontSize, letterSpacing, strokeWidth, shadowBlur }
+}
+
 function canvasSize(scene: Scene): { readonly width: number; readonly height: number } {
   return { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }
 }
@@ -114,11 +125,23 @@ export function transformLayers(scene: Scene, layers: readonly SceneElement[], m
     const before = layerCornerPoints(layer.transform, 'corners' in layer ? layer.corners : null, canvas)
     const after = before.map(map) as unknown as Quad
     const reach = reachOf(layer)
-    const placed = placeFromCornerPoints(after, layer.transform, canvas, reach !== 'full')
+    let placed = placeFromCornerPoints(after, layer.transform, canvas, reach !== 'full')
     if (placed === null) return { ok: false, reason: `「${layer.name}」是文字，只能翻转和斜切；扭曲、透视要先栅格化。` }
+    const change: Record<string, unknown> = {}
+    // Text scaled keeps its lines: the type grows with the box, as Photoshop scales it, or, scaled unevenly,
+    // stays laid out in its box and is stretched through its corners.
+    if (layer.type === 'text') {
+      const sx = placed.transform.width / layer.transform.width
+      const sy = placed.transform.height / layer.transform.height
+      if (Math.abs(sx - 1) > 1e-6 || Math.abs(sy - 1) > 1e-6) {
+        const scaled = Math.abs(sx - sy) <= 1e-3 * Math.max(sx, sy) ? textScaled(layer, (sx + sy) / 2) : null
+        if (scaled === null) placed = placeFromCornerPoints(after, layer.transform, canvas, true, true)!
+        else Object.assign(change, scaled)
+      }
+    }
     if (reach === 'box' && placed.corners !== null) return { ok: false, reason: `「${layer.name}」只能移动、缩放和旋转，不能翻转或变形。` }
     if (placed.corners !== null && !cornersAreDrawable(placed.corners)) return { ok: false, reason: `「${layer.name}」会被翻折或压扁，换个形状再试。` }
-    const change: Record<string, unknown> = { transform: placed.transform }
+    change.transform = placed.transform
     if (reach !== 'box') change.corners = placed.corners
     changes.set(layer.id, change)
     transforms.set(layer.id, placed.transform)

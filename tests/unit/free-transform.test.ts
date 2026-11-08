@@ -77,7 +77,8 @@ describe('free transform corners', () => {
   })
 
   it('splits an affine map the way Konva sets a node, mirror included', () => {
-    for (const corners of [[[0.25, 0], [1.25, 0], [1, 1], [0, 1]], MIRRORED_CORNERS, [[0, 1], [1, 1], [1, 0], [0, 0]]] as Corners[]) {
+    // A skew, a mirror, a vertical flip, and a mirror skewed (the sign of the skew kept through the mirror).
+    for (const corners of [[[0.25, 0], [1.25, 0], [1, 1], [0, 1]], MIRRORED_CORNERS, [[0, 1], [1, 1], [1, 0], [0, 0]], [[1, 0], [0, 0], [0.25, 1], [1.25, 1]]] as Corners[]) {
       const affine = affineOf(boxWarpMatrix(corners, 300, 200))
       const parts = decomposeAffine(affine)
       const angle = parts.rotation * Math.PI / 180
@@ -173,7 +174,7 @@ describe('reframe', () => {
     return sceneSchema.parse({ ...scene, canvas: { ...scene.canvas, guides: [{ axis: 'x', position: 100 }, { axis: 'y', position: 50 }] }, elements: [...scene.elements, adjustment] })
   }
 
-  it('keeps every layer where it is in pixels, moves guides and mask outlines, and leaves adjustment layers on the whole canvas', () => {
+  it('keeps every layer where it is in pixels, moves guides, and leaves adjustment layers on the whole canvas', () => {
     const scene = sceneWithAdjustment()
     const { outputWidth, outputHeight } = scene.canvas
     const frame = { left: -200, top: 100, width: outputWidth + 400, height: outputHeight - 100 }
@@ -193,10 +194,20 @@ describe('reframe', () => {
     }
     const mask = after.elements.find((element) => element.id === IDS.mask)
     const before = scene.elements.find((element) => element.id === IDS.mask)
-    if (mask?.type === 'mask' && before?.type === 'mask') {
-      expect(mask.paths[0]!.points[0]!.x * frame.width + frame.left).toBeCloseTo(before.paths[0]!.points[0]!.x * outputWidth, 3)
-    }
+    // A mask's outline is in its own box, which moved with it.
+    expect(mask?.type === 'mask' && before?.type === 'mask' ? mask.paths : null).toEqual(before?.type === 'mask' ? before.paths : undefined)
     expect(reframe.maskRemaps).toEqual([{ elementId: '00000000-0000-4000-8000-0000000000a1', assetId: '00000000-0000-4000-8000-0000000000a2', canvasWidth: outputWidth, canvasHeight: outputHeight, frame: { ...frame } }])
+  })
+
+  it('moves a locked layer too, and leaves it locked', () => {
+    const scene = sceneWithAdjustment()
+    const locked = sceneSchema.parse({ ...scene, elements: scene.elements.map((element) => element.id === IDS.image ? { ...element, locked: true } : element) })
+    const frame = { left: -100, top: -50, width: locked.canvas.outputWidth + 200, height: locked.canvas.outputHeight + 100 }
+    const after = applyCommands(locked, reframeScene(locked, frame).commands)
+    const image = after.elements.find((element) => element.id === IDS.image)!
+    const before = locked.elements.find((element) => element.id === IDS.image)!
+    expect(image.locked).toBe(true)
+    expect(image.transform.x * frame.width + frame.left).toBeCloseTo(before.transform.x * locked.canvas.outputWidth, 3)
   })
 
   it('keeps layers far off a small crop', () => {
@@ -254,6 +265,22 @@ describe('transform box handles', () => {
     points.forEach((point, index) => close(point, narrowed[index]!, 4))
     const textOutcome = transformLayersByQuads(scene, [text], transformQuad(scene, [text])!, perspectiveQuad(transformQuad(scene, [text])!, 0, [20, 0]))
     expect(textOutcome).toEqual({ ok: false, reason: '「主标题」是文字，只能翻转和斜切；扭曲、透视要先栅格化。' })
+  })
+
+  it('scales text by its type when kept in proportion, and stretches it in its box when not', () => {
+    const scene = makeAllElementTypesScene()
+    const text = scene.elements.find((element) => element.id === IDS.text)!
+    const from = transformQuad(scene, [text])!
+    const fixed = from[0]
+    const doubled = transformLayersByQuads(scene, [text], from, from.map(([x, y]) => [fixed[0] + (x - fixed[0]) * 2, fixed[1] + (y - fixed[1]) * 2]) as unknown as Quad)
+    const grown = applyCommands(scene, doubled.ok ? doubled.commands : []).elements.find((element) => element.id === IDS.text)!
+    expect(grown.type === 'text' ? [grown.fontSize, grown.letterSpacing, grown.corners ?? null] : null).toEqual([168, 36, null])
+    expect(grown.transform.width).toBeCloseTo(text.transform.width * 2, 4)
+    const widened = transformLayersByQuads(scene, [text], from, from.map(([x, y]) => [fixed[0] + (x - fixed[0]) * 1.5, y]) as unknown as Quad)
+    const stretched = applyCommands(scene, widened.ok ? widened.commands : []).elements.find((element) => element.id === IDS.text)!
+    expect(stretched.transform).toEqual(text.transform)
+    expect(stretched.type === 'text' ? stretched.fontSize : null).toBe(84)
+    close((stretched.type === 'text' ? stretched.corners ?? [] : []).flat(), [0, 0, 1.5, 0, 1.5, 1, 0, 1], 4)
   })
 })
 

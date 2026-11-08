@@ -179,9 +179,11 @@ export function decomposeAffine(affine: readonly [number, number, number, number
   const [a, b, c, d, e, f] = affine
   const scaleX = Math.hypot(a, b)
   const determinant = a * d - b * c
+  // Kept away from zero with its sign: a mirror's determinant is negative.
+  const safe = Math.abs(determinant) < EPSILON ? (determinant < 0 ? -EPSILON : EPSILON) : determinant
   const rotation = Math.atan2(b, a)
   const scaleY = determinant / Math.max(EPSILON, scaleX)
-  const skewX = (a * c + b * d) / Math.max(EPSILON, determinant)
+  const skewX = (a * c + b * d) / safe
   return { x: e, y: f, rotation: rotation * 180 / Math.PI, scaleX, scaleY, skewX }
 }
 
@@ -226,7 +228,7 @@ export interface PlacedLayer {
  * it. Text takes only the first two (Photoshop distorts type only once it
  * is rasterized): null when a projective shape is asked of it.
  */
-export function placeFromCornerPoints(points: readonly [Point, Point, Point, Point], box: NormalizedTransform, canvas: { readonly width: number; readonly height: number }, affineOnly = false): PlacedLayer | null {
+export function placeFromCornerPoints(points: readonly [Point, Point, Point, Point], box: NormalizedTransform, canvas: { readonly width: number; readonly height: number }, affineOnly = false, keepBox = false): PlacedLayer | null {
   const [p0, p1, p2, p3] = points
   const edge = (from: Point, to: Point): Point => [to[0] - from[0], to[1] - from[1]]
   const top = edge(p0, p1)
@@ -234,7 +236,7 @@ export function placeFromCornerPoints(points: readonly [Point, Point, Point, Poi
   const length = (vector: Point): number => Math.hypot(vector[0], vector[1])
   const parallelogram = Math.abs(p0[0] + p2[0] - p1[0] - p3[0]) < 1e-6 * Math.max(1, canvas.width) && Math.abs(p0[1] + p2[1] - p1[1] - p3[1]) < 1e-6 * Math.max(1, canvas.height)
   const square = parallelogram && Math.abs(top[0] * left[0] + top[1] * left[1]) <= 1e-6 * Math.max(1, length(top) * length(left))
-  if (square && length(top) > EPSILON && length(left) > EPSILON) {
+  if (square && !keepBox && length(top) > EPSILON && length(left) > EPSILON) {
     const cross = top[0] * left[1] - top[1] * left[0]
     // The right way round: the box's top-left is where the content's is.
     const [origin, across, down] = cross > 0 ? [p0, top, left] : [p1, edge(p1, p0), edge(p1, p2)]
