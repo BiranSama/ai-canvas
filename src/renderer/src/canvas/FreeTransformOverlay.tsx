@@ -1,4 +1,3 @@
-import { Check, FlipHorizontal2, FlipVertical2, RotateCcw, RotateCw, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import {
   distortQuad,
@@ -14,11 +13,12 @@ import {
   type Point,
   type Quad
 } from '../../../domain'
-import { useFreeTransform, type FreeTransformMode } from './free-transform-store'
+import { FREE_TRANSFORM_MODES as MODES, useFreeTransform } from './free-transform-store'
 
 /*
  * The free transform's box over the stage: eight handles, the reference
- * point in the middle, and the bar of modes, flips and turns. Dragging a
+ * point in the middle, and a menu on right-click (the modes, flips and turns
+ * are also in the options bar, FreeTransformBar). Dragging a
  * handle scales (a corner keeps proportions unless Shift is held; Alt from
  * the middle); with Ctrl a corner distorts and a side skews; with
  * Ctrl+Alt+Shift a corner pulls into perspective; inside moves, outside
@@ -26,12 +26,6 @@ import { useFreeTransform, type FreeTransformMode } from './free-transform-store
  * it back.
  */
 
-const MODES: readonly { readonly mode: FreeTransformMode; readonly label: string }[] = [
-  { mode: 'scale', label: '缩放' },
-  { mode: 'skew', label: '斜切' },
-  { mode: 'distort', label: '扭曲' },
-  { mode: 'perspective', label: '透视' }
-]
 
 const HANDLE_CURSORS = ['nwse-resize', 'nesw-resize', 'nwse-resize', 'nesw-resize', 'ns-resize', 'ew-resize', 'ns-resize', 'ew-resize'] as const
 
@@ -61,7 +55,7 @@ export function FreeTransformOverlay({ originX, originY, zoom, width, height, st
   readonly stageContent: () => HTMLElement | null
 }): React.JSX.Element | null {
   const session = useFreeTransform((state) => state.session)
-  const { setTarget, setMode, flip, rotate, apply, cancel } = useFreeTransform.getState()
+  const { setTarget, setMode, flip, rotate, apply } = useFreeTransform.getState()
   const drag = useRef<Drag | null>(null)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   if (session === null) return null
@@ -130,16 +124,6 @@ export function FreeTransformOverlay({ originX, originY, zoom, width, height, st
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
 
-  const actions = (
-    <>
-      <button type="button" aria-label="水平翻转" title="水平翻转" onClick={() => { flip('horizontal'); setMenu(null) }} disabled={session.reach === 'box'}><FlipHorizontal2 size={14} /></button>
-      <button type="button" aria-label="垂直翻转" title="垂直翻转" onClick={() => { flip('vertical'); setMenu(null) }} disabled={session.reach === 'box'}><FlipVertical2 size={14} /></button>
-      <button type="button" aria-label="旋转 180 度" title="旋转 180°" onClick={() => { rotate(180); setMenu(null) }}>180°</button>
-      <button type="button" aria-label="顺时针旋转 90 度" title="顺时针旋转 90°" onClick={() => { rotate(90); setMenu(null) }}><RotateCw size={14} /></button>
-      <button type="button" aria-label="逆时针旋转 90 度" title="逆时针旋转 90°" onClick={() => { rotate(-90); setMenu(null) }}><RotateCcw size={14} /></button>
-    </>
-  )
-
   return (
     <>
       <svg
@@ -165,20 +149,6 @@ export function FreeTransformOverlay({ originX, originY, zoom, width, height, st
           <rect key={index} data-handle={index} x={x - 5} y={y - 5} width={10} height={10} className="free-transform-handle" style={{ cursor: HANDLE_CURSORS[index] }} />
         ))}
       </svg>
-      <div className="free-transform-bar glass-surface" role="toolbar" aria-label="自由变换" data-testid="free-transform-bar" onPointerDown={(event) => event.stopPropagation()}>
-        <div className="free-transform-modes" role="radiogroup" aria-label="变换方式">
-          {MODES.map(({ mode, label }) => (
-            <button key={mode} type="button" role="radio" aria-checked={session.mode === mode} className={session.mode === mode ? 'is-active' : ''}
-              disabled={(mode === 'distort' || mode === 'perspective') ? session.reach !== 'full' : mode === 'skew' ? session.reach === 'box' : false}
-              onClick={() => setMode(mode)}>{label}</button>
-          ))}
-        </div>
-        <span className="free-transform-divider" aria-hidden="true" />
-        {actions}
-        <span className="free-transform-hint">Ctrl 拖角扭曲 · Ctrl 拖边斜切 · Ctrl+Alt+Shift 拖角透视</span>
-        <button type="button" aria-label="取消变换" title="取消（Esc）" onClick={cancel}><X size={14} /></button>
-        <button type="button" className="is-primary" aria-label="应用变换" title="应用（Enter）" onClick={() => { void apply() }}><Check size={14} /></button>
-      </div>
       {menu !== null && (
         <div className="free-transform-menu glass-surface" role="menu" aria-label="变换菜单" style={{ left: menu.x, top: menu.y }} onPointerDown={(event) => event.stopPropagation()}>
           {MODES.map(({ mode, label }) => (

@@ -23,7 +23,7 @@ import { defaultProjectWorkContext, type ProjectWorkContext } from '../../../sha
 import { beginProjectHydration, endProjectHydration, projectGeneration } from './project-context-lifecycle'
 
 export type WorkspaceView = 'conversation' | 'canvas' | 'generate'
-export type CanvasTool = 'select' | 'hand' | 'image' | 'text' | 'sketch' | 'shape' | 'placeholder' | 'light' | 'mask' | 'eyedropper' | 'brush' | 'eraser' | 'bucket' | 'gradient'
+export type CanvasTool = 'select' | 'hand' | 'crop' | 'image' | 'text' | 'sketch' | 'shape' | 'placeholder' | 'light' | 'mask' | 'eyedropper' | 'brush' | 'eraser' | 'bucket' | 'gradient'
   | 'marquee-rect' | 'marquee-ellipse' | 'lasso' | 'lasso-polygon' | 'object-select' | 'magic-wand'
 
 export type PaintTool = 'brush' | 'eraser' | 'bucket' | 'gradient'

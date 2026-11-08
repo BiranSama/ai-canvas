@@ -26,6 +26,13 @@ import { useWorkspaceStore } from '../store/workspace-store'
 
 export type FreeTransformMode = 'scale' | 'skew' | 'distort' | 'perspective'
 
+export const FREE_TRANSFORM_MODES: readonly { readonly mode: FreeTransformMode; readonly label: string }[] = [
+  { mode: 'scale', label: '缩放' },
+  { mode: 'skew', label: '斜切' },
+  { mode: 'distort', label: '扭曲' },
+  { mode: 'perspective', label: '透视' }
+]
+
 export interface FreeTransformSession {
   /** The layers it moves (groups opened up), and the scene they were taken from. */
   readonly ids: readonly string[]

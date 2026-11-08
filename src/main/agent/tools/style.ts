@@ -67,7 +67,7 @@ export const styleTool = defineTool({
   title: '图层样式',
   description: '像 Photoshop 的图层样式，加在图片、文字、形状图层上，可撤销。每种一层一个，已有时只改给的值。kind 与 values：drop_shadow 投影、inner_shadow 内阴影：color、opacity、blend、angle（光的方向，120 为左上）、distance、spread 或 choke（0~100）、size；outer_glow：color、opacity、blend、spread、size；stroke：color、size、position（outside/inside/center）、opacity；color_overlay：color、opacity、blend；gradient_overlay：colors（2~8 色）、angle、style（linear/radial）、scale、reverse、opacity、blend。off 关掉（保留设置），remove 去掉。像素按输出尺寸。',
   parameters: z.object({
-    targets: z.array(z.string().min(1).max(120)).min(1).max(50),
+    targets: z.array(z.string()).min(1),
     kind: z.enum(Object.keys(KINDS) as [keyof typeof KINDS, ...(keyof typeof KINDS)[]]),
     values: z.record(z.string(), z.unknown()).optional(),
     off: z.boolean().optional(),

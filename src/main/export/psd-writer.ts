@@ -171,7 +171,11 @@ export async function buildPsd(document: PsdDocument, fonts: PsdFontLookup): Pro
     bitsPerChannel: 8,
     colorMode: 3,
     // 72 pixels an inch, so a font size in pixels is the same number of points in Photoshop.
-    imageResources: { resolutionInfo: { horizontalResolution: 72, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: 72, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' } },
+    imageResources: {
+      resolutionInfo: { horizontalResolution: 72, horizontalResolutionUnit: 'PPI', widthUnit: 'Inches', verticalResolution: 72, verticalResolutionUnit: 'PPI', heightUnit: 'Inches' },
+      // Photoshop's vertical guides sit at an x, its horizontal ones at a y.
+      ...(document.guides === undefined || document.guides.length === 0 ? {} : { gridAndGuidesInformation: { guides: document.guides.map((guide) => ({ location: guide.position, direction: guide.axis === 'x' ? 'vertical' as const : 'horizontal' as const })) } })
+    },
     children,
     imageData: pixelData(document.width, document.height, document.composite)
   }

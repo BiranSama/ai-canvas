@@ -19,14 +19,26 @@ import {
   remapGrayMask,
   sceneSchema,
   type SceneCommand,
+  distortQuad,
+  flipQuad,
+  perspectiveQuad,
+  quadCentre,
+  quadIsDrawable,
+  rotateQuad,
+  scaleQuad,
+  skewQuad,
+  transformLayersByQuads,
+  transformQuad,
   type Corners,
   type Point,
+  type Quad,
   type Scene,
   type SceneElement
 } from '../../src/domain'
 import { produce } from 'immer'
 import { applySceneCommand } from '../../src/domain/commands/apply-command'
 import { warpLayerPixels, warpLayout } from '../../src/shared/warp'
+import { expandBand, expandMask } from '../../src/renderer/src/selection/generative-fill'
 import { IDS, makeAllElementTypesScene } from '../fixtures/scene-fixtures'
 
 const canvas = { width: 1000, height: 800 }
@@ -200,5 +212,63 @@ describe('reframe', () => {
     const mask = Uint8Array.from([0, 255, 10, 20])
     expect([...remapGrayMask(mask, 2, 2, { left: -1, top: 0, width: 4, height: 2 }, 4, 2)]).toEqual([0, 0, 255, 255, 10, 10, 20, 20])
     expect(aspectNear(1234, 567)).toEqual({ width: 37, height: 17 })
+  })
+})
+
+describe('transform box handles', () => {
+  const box: Quad = [[100, 100], [300, 100], [300, 200], [100, 200]]
+  const rounded = (quad: Quad): number[][] => quad.map(([x, y]) => [Math.round(x * 1000) / 1000, Math.round(y * 1000) / 1000])
+
+  it('scales from the opposite handle, keeping proportions at a corner unless Shift is held, or from the middle with Alt', () => {
+    expect(rounded(scaleQuad(box, 2, [500, 300], { free: false, fromCentre: false }))).toEqual([[100, 100], [500, 100], [500, 300], [100, 300]])
+    expect(rounded(scaleQuad(box, 2, [500, 200], { free: false, fromCentre: false }))).toEqual([[100, 100], [400, 100], [400, 250], [100, 250]])
+    expect(rounded(scaleQuad(box, 2, [500, 200], { free: true, fromCentre: false }))).toEqual([[100, 100], [500, 100], [500, 200], [100, 200]])
+    // The right side scales across only; with Alt the left side moves the other way.
+    expect(rounded(scaleQuad(box, 5, [400, 150], { free: true, fromCentre: true }))).toEqual([[0, 100], [400, 100], [400, 200], [0, 200]])
+  })
+
+  it('skews along a side, distorts a corner, pulls a perspective, turns and flips', () => {
+    expect(rounded(skewQuad(box, 4, [50, 30], { along: true, symmetric: false }))).toEqual([[150, 100], [350, 100], [300, 200], [100, 200]])
+    expect(rounded(skewQuad(box, 4, [50, 30], { along: false, symmetric: true }))).toEqual([[150, 130], [350, 130], [250, 170], [50, 170]])
+    expect(rounded(distortQuad(box, 1, [20, -10]))).toEqual([[100, 100], [320, 90], [300, 200], [100, 200]])
+    // Dragging the top-left corner in narrows the top from both sides.
+    expect(rounded(perspectiveQuad(box, 0, [40, 5]))).toEqual([[140, 100], [260, 100], [300, 200], [100, 200]])
+    expect(rounded(perspectiveQuad(box, 0, [3, 30]))).toEqual([[100, 130], [300, 100], [300, 200], [100, 170]])
+    expect(rounded(rotateQuad(box, quadCentre(box), 90))).toEqual([[250, 50], [250, 250], [150, 250], [150, 50]])
+    expect(rounded(flipQuad(box, quadCentre(box), 'horizontal'))).toEqual([[300, 100], [100, 100], [100, 200], [300, 200]])
+    expect(quadIsDrawable(distortQuad(box, 0, [300, 200]))).toBe(false)
+  })
+
+  it('moves every layer through the box, groups fitted around them, text refused a perspective', () => {
+    const scene = makeAllElementTypesScene()
+    const image = scene.elements.find((element) => element.id === IDS.image)!
+    const text = scene.elements.find((element) => element.id === IDS.text)!
+    const canvas = { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }
+    const from = transformQuad(scene, [image])!
+    const narrowed = perspectiveQuad(from, 0, [20, 0])
+    const outcome = transformLayersByQuads(scene, [image], from, narrowed)
+    expect(outcome.ok).toBe(true)
+    const after = applyCommands(scene, outcome.ok ? outcome.commands : [])
+    const moved = after.elements.find((element) => element.id === IDS.image)!
+    const points = layerCornerPoints(moved.transform, moved.type === 'image' ? moved.corners : null, canvas)
+    points.forEach((point, index) => close(point, narrowed[index]!, 4))
+    const textOutcome = transformLayersByQuads(scene, [text], transformQuad(scene, [text])!, perspectiveQuad(transformQuad(scene, [text])!, 0, [20, 0]))
+    expect(textOutcome).toEqual({ ok: false, reason: '「主标题」是文字，只能翻转和斜切；扭曲、透视要先栅格化。' })
+  })
+})
+
+describe('generative expand', () => {
+  it('covers what the canvas added and fades into the old picture across a band, only on its open sides', () => {
+    const mask = expandMask(200, 100, { left: 50, top: 0, width: 100, height: 100 })!
+    const at = (x: number, y: number): number => mask.data[y * 200 + x]!
+    expect(expandBand(200, 100)).toBe(8)
+    expect(at(10, 50)).toBe(255)
+    expect(at(190, 50)).toBe(255)
+    // Inside the old picture: fading in from the left side, nothing in the middle, and no fade along the closed top.
+    expect(at(50, 50)).toBeGreaterThan(200)
+    expect(at(53, 50)).toBeGreaterThan(at(56, 50))
+    expect(at(58, 50)).toBe(0)
+    expect(at(100, 0)).toBe(0)
+    expect(expandMask(200, 100, { left: 0, top: 0, width: 200, height: 100 })).toBeNull()
   })
 })

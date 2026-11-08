@@ -726,20 +726,66 @@ select:focus-visible {
 .generative-fill-form .is-primary { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; color: #FFFFFF; background: var(--quiet-blue); font-size: 12px; cursor: pointer; }
 .generative-fill-close { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 6px; color: var(--muted-slate); background: transparent; cursor: pointer; }
 .selection-ants { position: absolute; top: 0; left: 0; z-index: 2; pointer-events: none; }
+/* The 视图 menu in the status bar. */
+.view-menu-button { display: grid; width: 26px; height: 26px; padding: 0; place-items: center; border: 0; border-radius: 7px; color: var(--muted-slate); background: transparent; cursor: pointer; }
+.view-menu-button:hover, .view-menu-button[aria-expanded="true"] { color: var(--graphite); background: var(--quiet-blue-soft); }
+.view-menu { position: fixed; z-index: 40; display: grid; width: 236px; gap: 8px; padding: 12px; border-radius: 14px; color: var(--graphite); box-shadow: var(--shadow-float); font-size: 12px; }
+.view-menu-switch { display: grid; grid-template-columns: 16px 1fr auto; gap: 6px; align-items: center; cursor: pointer; }
+.view-menu-switch kbd { color: var(--muted-slate); font-family: inherit; font-size: 10px; }
+.view-menu-row { display: flex; gap: 6px; align-items: end; }
+.view-menu-row label { display: grid; flex: 1; gap: 3px; color: var(--muted-slate); font-size: 11px; }
+.view-menu-row input, .view-menu-row select { min-width: 0; height: 26px; padding: 0 6px; border: 1px solid var(--hairline); border-radius: 7px; color: var(--graphite); background: var(--field); font-size: 12px; }
+.view-menu-row input { flex: 1; width: 100%; }
+.view-menu-row button, .view-menu-clear { height: 26px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--graphite); background: var(--quiet-blue-soft); font-size: 12px; cursor: pointer; }
+.view-menu-row button:disabled, .view-menu-clear:disabled { opacity: .45; cursor: default; }
+/* Rulers, guides and grid over the stage. */
+.view-overlay { position: absolute; top: 0; left: 0; z-index: 4; overflow: hidden; pointer-events: none; }
+.view-grid { position: absolute; top: 0; left: 0; }
+.view-guide { position: absolute; pointer-events: none; }
+.view-guide.is-x { width: 7px; }
+.view-guide.is-y { height: 7px; }
+.view-guide span { position: absolute; display: block; }
+.view-guide.is-x span { top: 0; bottom: 0; left: 3px; width: 1px; }
+.view-guide.is-y span { top: 3px; right: 0; left: 0; height: 1px; }
+.view-guide.is-preview span { opacity: .8; }
+.view-overlay.is-interactive .view-guide:not(.is-preview) { pointer-events: auto; }
+.view-overlay.is-interactive .view-guide.is-x { cursor: ew-resize; }
+.view-overlay.is-interactive .view-guide.is-y { cursor: ns-resize; }
+.view-ruler { position: absolute; top: 0; left: 0; pointer-events: auto; }
+.view-ruler.is-top { cursor: s-resize; box-shadow: 0 1px 0 rgba(52,62,78,.25); }
+.view-ruler.is-left { cursor: e-resize; box-shadow: 1px 0 0 rgba(52,62,78,.25); }
+.view-ruler-corner { position: absolute; top: 0; left: 0; width: 18px; height: 18px; background: rgba(246,247,249,.98); pointer-events: auto; }
+.view-guide-readout { position: absolute; padding: 2px 6px; border-radius: 6px; color: #FFFFFF; background: rgba(23,32,51,.8); font-size: 11px; white-space: nowrap; }
+/* The crop tool: the frame over the stage, dark outside, checked where it adds to the canvas. */
+.crop-overlay { position: absolute; top: 0; left: 0; z-index: 5; cursor: crosshair; touch-action: none; }
+.crop-veil { fill: rgba(12, 16, 24, .48); pointer-events: none; }
+.crop-new-area { pointer-events: none; }
+.crop-frame { fill: rgba(0,0,0,0); stroke: #F7F9FD; stroke-width: 1.5; cursor: move; }
+.crop-thirds line { stroke: rgba(247,249,253,.55); stroke-width: 1; pointer-events: none; }
+.crop-handle { fill: #F7F9FD; stroke: #3B4A60; stroke-width: 1; }
+.crop-size { fill: #F7F9FD; font-size: 11px; paint-order: stroke; stroke: rgba(12,16,24,.7); stroke-width: 3px; pointer-events: none; }
 /* Free transform (Ctrl+T): the box, its handles, and the bar of modes over the stage. */
 .free-transform-overlay { position: absolute; top: 0; left: 0; z-index: 5; cursor: crosshair; touch-action: none; }
 .free-transform-box { fill: rgba(0,0,0,0); stroke: #73A7E5; stroke-width: 1.2; cursor: move; }
 .free-transform-handle { fill: #FCFDFE; stroke: #5E91D0; stroke-width: 1.2; }
 .free-transform-centre { fill: rgba(252,253,254,.7); stroke: #5E91D0; stroke-width: 1.2; pointer-events: none; }
-.free-transform-bar { position: absolute; top: 12px; left: 50%; z-index: 7; display: flex; max-width: calc(100% - 24px); height: 40px; align-items: center; gap: 2px; padding: 0 6px; border-radius: 12px; box-shadow: var(--shadow-float); transform: translateX(-50%); }
-.free-transform-bar button, .free-transform-menu button { display: grid; min-width: 28px; height: 28px; padding: 0 8px; place-items: center; border: 0; border-radius: 8px; color: var(--graphite); background: transparent; font-size: 12px; white-space: nowrap; cursor: pointer; }
-.free-transform-bar button:hover:not(:disabled), .free-transform-menu button:hover:not(:disabled) { background: var(--quiet-blue-soft); }
-.free-transform-bar button:disabled, .free-transform-menu button:disabled { opacity: .4; cursor: default; }
-.free-transform-bar button.is-active { color: #FFFFFF; background: var(--quiet-blue); }
-.free-transform-bar button.is-primary { color: #FFFFFF; background: var(--quiet-blue); }
+.free-transform-options button, .free-transform-menu button { display: grid; min-width: 28px; height: 28px; padding: 0 8px; place-items: center; border: 0; border-radius: 8px; color: var(--graphite); background: transparent; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.free-transform-options button:hover:not(:disabled), .free-transform-menu button:hover:not(:disabled) { background: var(--quiet-blue-soft); }
+.free-transform-options button:disabled, .free-transform-menu button:disabled { opacity: .4; cursor: default; }
+.free-transform-options button[aria-checked="true"] { color: #FFFFFF; background: var(--quiet-blue); }
+.free-transform-options { display: flex; align-items: center; gap: 2px; }
+.free-transform-options button.is-primary { color: #FFFFFF; background: var(--quiet-blue); }
 .free-transform-modes { display: flex; gap: 2px; }
-.free-transform-divider { width: 1px; height: 18px; margin: 0 4px; background: var(--hairline); }
-.free-transform-hint { overflow: hidden; margin: 0 6px; color: var(--muted-slate); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.free-transform-options button { min-width: 24px; height: 24px; padding: 0 6px; font-size: 11px; }
+.crop-options { display: flex; align-items: center; gap: 3px; }
+.crop-options select, .crop-options input { height: 24px; padding: 0 5px; border: 1px solid var(--hairline); border-radius: 7px; color: var(--graphite); background: color-mix(in srgb, var(--pearl) 70%, transparent); font-size: 11px; }
+.crop-options input[type="number"] { width: 58px; }
+.crop-options .crop-prompt { width: 150px; }
+.crop-times { color: var(--muted-slate); font-size: 11px; }
+.crop-options button { display: grid; min-width: 24px; height: 24px; padding: 0 5px; place-items: center; border: 0; border-radius: 7px; color: var(--graphite); background: transparent; cursor: pointer; }
+.crop-options button:hover:not(:disabled) { background: var(--quiet-blue-soft); }
+.crop-options button:disabled { opacity: .4; cursor: default; }
+.crop-options button.is-primary { color: #FFFFFF; background: var(--quiet-blue); }
 .free-transform-menu { position: absolute; z-index: 8; display: flex; min-width: 140px; flex-direction: column; padding: 4px; border-radius: 10px; box-shadow: var(--shadow-float); }
 .free-transform-menu button { display: block; width: 100%; text-align: left; }
 .free-transform-menu hr { width: 100%; margin: 3px 0; border: 0; border-top: 1px solid var(--hairline); }
@@ -1048,6 +1094,12 @@ select:focus-visible {
 .size-output-grid label { display: grid; gap: 5px; }
 .size-output-grid input { width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--hairline); border-radius: 10px; color: var(--graphite); background: var(--field); font: inherit; font-variant-numeric: tabular-nums; }
 .resize-strategies { display: grid; gap: 4px; margin: 0; padding: 0; border: 0; }
+.canvas-anchor-section { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start; }
+.canvas-anchor-grid { display: grid; grid-template-columns: repeat(3, 22px); gap: 3px; }
+.canvas-anchor-grid button { width: 22px; height: 22px; padding: 0; border: 1px solid var(--hairline); border-radius: 5px; background: var(--field); cursor: pointer; }
+.canvas-anchor-grid button.is-active { border-color: var(--quiet-blue); background: var(--quiet-blue); }
+.canvas-anchor-expand { display: grid; gap: 6px; }
+.canvas-anchor-expand input:not([type]) { height: 28px; padding: 0 8px; border: 1px solid var(--hairline); border-radius: 8px; color: var(--graphite); background: var(--field); font-size: 12px; }
 .resize-strategies legend { margin-bottom: 7px; color: var(--muted-slate); font-size: 11px; }
 .resize-strategies > button { display: grid; min-height: 44px; grid-template-columns: 18px 1fr; gap: 7px; align-items: center; padding: 6px 8px; border: 1px solid transparent; border-radius: 10px; color: var(--graphite); background: transparent; text-align: left; cursor: pointer; }
 .resize-strategies > button:hover { background: rgba(87,101,117,.055); }

@@ -1,4 +1,5 @@
 import type { Canvas, Scene, SceneCommand, SceneElement } from '..'
+import { reframeScene } from './reframe'
 
 export interface AspectRatioValue {
   readonly width: number
@@ -98,21 +99,10 @@ export function createCanvasResizeCommands(
   if (content.length === 0) return commands
 
   if (strategy === 'keep-center') {
-    for (const element of scene.elements) {
-      if (isFullCanvasBackground(element)) continue
-      const pixels = normalizedToPixels(element.transform, scene.canvas)
-      const oldCenter = { x: scene.canvas.outputWidth / 2, y: scene.canvas.outputHeight / 2 }
-      const nextCenter = { x: nextCanvas.outputWidth / 2, y: nextCanvas.outputHeight / 2 }
-      const nextPixels = {
-        ...pixels,
-        x: nextCenter.x + pixels.x - oldCenter.x,
-        y: nextCenter.y + pixels.y - oldCenter.y
-      }
-      commands.push({ kind: 'element.update', elementId: element.id, changes: { transform: pixelsToNormalized(nextPixels, nextCanvas) } })
-    }
-    return commands
+    // Every layer where it is in pixels, the canvas about its middle; adjustment layers stay over the whole canvas.
+    // Their masks are not cut to the new frame here: the canvas's own 画布大小 does that (see reframeScene).
+    return reframeScene(scene, { left: Math.round((scene.canvas.outputWidth - nextCanvas.outputWidth) / 2), top: Math.round((scene.canvas.outputHeight - nextCanvas.outputHeight) / 2), width: nextCanvas.outputWidth, height: nextCanvas.outputHeight }).commands
   }
-
   const pixelTransforms = content.map((element) => normalizedToPixels(element.transform, scene.canvas))
   const left = Math.min(...pixelTransforms.map((transform) => transform.x))
   const top = Math.min(...pixelTransforms.map((transform) => transform.y))

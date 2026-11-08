@@ -240,10 +240,10 @@ export function placeFromCornerPoints(points: readonly [Point, Point, Point, Poi
     const [origin, across, down] = cross > 0 ? [p0, top, left] : [p1, edge(p1, p0), edge(p1, p2)]
     return {
       transform: {
-        x: origin[0] / canvas.width,
-        y: origin[1] / canvas.height,
-        width: length(across) / canvas.width,
-        height: length(down) / canvas.height,
+        x: round(origin[0] / canvas.width),
+        y: round(origin[1] / canvas.height),
+        width: round(length(across) / canvas.width),
+        height: round(length(down) / canvas.height),
         rotation: normalizeAngle(Math.atan2(across[1], across[0]) * 180 / Math.PI)
       },
       corners: cross > 0 ? null : MIRRORED_CORNERS

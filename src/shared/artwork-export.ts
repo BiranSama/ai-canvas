@@ -160,7 +160,9 @@ export const psdDocumentSchema = z.object({
   /** Bottom first. */
   children: z.array(z.union([psdLayerSchema, psdGroupSchema, psdAdjustmentSchema])).max(10_000),
   /** The flattened picture, for viewers that do not read layers. */
-  composite: rgbaSchema
+  composite: rgbaSchema,
+  /** Guides: a vertical line at x or a horizontal one at y, in document pixels, on the document. */
+  guides: z.array(z.object({ axis: z.enum(['x', 'y']), position: finite.min(0) }).strict()).max(200).optional()
 }).strict().superRefine((value, context) => checkPixels({ width: value.width, height: value.height, pixels: value.composite }, 4, context, ['composite']))
 export type PsdDocument = z.infer<typeof psdDocumentSchema>
 

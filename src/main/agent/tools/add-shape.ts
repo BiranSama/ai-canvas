@@ -12,7 +12,7 @@ const TRANSPARENT = '#00000000'
 export const addShapeTool = defineTool({
   name: 'add_shape',
   title: '添加形状',
-  description: '添加矩形、椭圆、线或自由形状，用于色块、分隔线、底板，以及叶子、波浪、徽章、对话框、简单图标这类轮廓。path 用 SVG 路径语法，坐标是 box 里的 0–100（0,0 左上，100,100 右下），支持 M L H V C S Q T A Z。以 Z 闭合的路径会填色；没闭合的只描边。',
+  description: '添加矩形、椭圆、线或自由形状，用于色块、分隔线、底板，以及叶子、徽章、对话框、图标这类轮廓。path 用 SVG 路径语法，坐标是 box 里的 0–100（0,0 左上，100,100 右下），支持 M L H V C S Q T A Z。以 Z 闭合的路径会填色；没闭合的只描边。',
   parameters: z.object({
     shape: z.enum(['rectangle', 'ellipse', 'line', 'path']),
     box: percentBoxSchema,

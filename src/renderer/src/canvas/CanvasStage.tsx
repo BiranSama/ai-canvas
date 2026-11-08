@@ -43,6 +43,9 @@ import { groupBoundsForChildTransforms, isPaintTool, isSelectionTool, useWorkspa
 import { cancelSelectionGesture, polygonLassoActive, selectionKeyDown, selectionPointerDown, selectionPointerMove, selectionPointerUp } from '../selection/selection-gestures'
 import { SelectionOverlay } from '../selection/SelectionOverlay'
 import { FreeTransformOverlay } from './FreeTransformOverlay'
+import { CropOverlay } from './CropOverlay'
+import { RulersAndGuides } from './RulersAndGuides'
+import { snapGuideRects, useView } from './view-store'
 import { useFreeTransform, withFreeTransformPreview } from './free-transform-store'
 import { warmMagicTouch } from '../selection/magic-touch'
 import { GenerativeFillBar } from '../selection/GenerativeFillBar'
@@ -725,8 +728,8 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
       }}
       onDragMove={(event) => {
         const node = event.target
-        // Ctrl suspends snapping while it is held, as in Photoshop.
-        if (event.evt.ctrlKey || event.evt.metaKey) {
+        // Ctrl suspends snapping while it is held, as in Photoshop; 视图 > 对齐 (Ctrl+Shift+;) turns it off.
+        if (event.evt.ctrlKey || event.evt.metaKey || !useView.getState().snap) {
           onGuides([])
           return
         }
@@ -753,7 +756,7 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         )
         const snap = snapRect(
           movingBounds,
-          [localArtboard, ...peers.map((peer) => rotatedElementBounds(peer, localArtboard))],
+          [localArtboard, ...peers.map((peer) => rotatedElementBounds(peer, localArtboard)), ...snapGuideRects(movingBounds)],
           7 / Math.max(zoom, 0.01)
         )
         const finalDelta = { x: delta.x + snap.dx, y: delta.y + snap.dy }
@@ -1414,7 +1417,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
     const transformer = transformerRef.current
     if (stage === null || transformer === null) return
     // Photoshop shows transform handles with the move tool only; painting and selecting reach through to the canvas.
-    if (preview || freeTransform !== null || inlineTextId !== null || cropSession !== null || shapeEditElement?.shape === 'line' || selectedIds.length === 0 || isPaintTool(activeTool) || isSelectionTool(activeTool)) {
+    if (preview || freeTransform !== null || activeTool === 'crop' || inlineTextId !== null || cropSession !== null || shapeEditElement?.shape === 'line' || selectedIds.length === 0 || isPaintTool(activeTool) || isSelectionTool(activeTool)) {
       transformer.nodes([])
     } else {
       const nodes = selectedIds.flatMap((id) => {
@@ -1764,7 +1767,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
       isDragCancelled={() => dragCancelledRef.current}
       onRequestEdit={requestElementEdit}
       isInlineEditing={inlineTextId === element.id}
-      viewportPanReady={spacePressed || activeTool === 'hand' || freeTransform !== null}
+      viewportPanReady={spacePressed || activeTool === 'hand' || activeTool === 'crop' || freeTransform !== null}
       cropOverride={cropSession?.elementId === element.id ? cropSession.draft : undefined}
       shapeCornerRadiusOverride={shapeRadiusDraft?.elementId === element.id ? shapeRadiusDraft.value : undefined}
       shapeTransformOverride={shapeLineDraft?.elementId === element.id ? shapeLineDraft.transform : undefined}
@@ -2630,6 +2633,8 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
         </Layer>
       </Stage>
       {!preview && <SelectionOverlay originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} />}
+      {!preview && <RulersAndGuides originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} interactive={activeTool === 'select' && freeTransform === null && !spacePressed} />}
+      {!preview && activeTool === 'crop' && <CropOverlay originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} stageContent={() => stageRef.current?.content ?? null} />}
       {!preview && <FreeTransformOverlay originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} width={size.width} height={size.height} stageContent={() => stageRef.current?.content ?? null} />}
       {!preview && (activeTool === 'select' || isSelectionTool(activeTool)) && <GenerativeFillBar originX={displayedArtboard.x} originY={displayedArtboard.y} zoom={zoom} stageWidth={size.width} stageHeight={size.height} />}
       {/* The brush's real size on the canvas, light over dark so it reads on any picture. */}

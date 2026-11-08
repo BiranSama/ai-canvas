@@ -24,7 +24,7 @@ type ImageElement = Extract<SceneElement, { type: 'image' }>
 export const fillTool = defineTool({
   name: 'fill',
   title: '填充',
-  description: '在图片图层上铺颜色，像 Photoshop 的填充和渐变工具；不花钱、可撤销。只给 color 是整层纯色；再给 to_color 是渐变，direction 定方向（radial 从中心向外）。keep_transparency 为 true 时只给已有像素上色、透明处不变（锁定透明像素），适合给抠图主体或栅格化的文字换色。不给 target 时新建一个画布大小的图层来填，放在最上面，常用来做纯色或渐变背景（再用 reorder 放到底下）。文字和形状改颜色用 update；要在它们的像素上填色先用 merge_layers 栅格化。',
+  description: '在图片图层上铺颜色（填充、渐变），可撤销。只给 color 是纯色；加 to_color 是渐变，direction 定方向（radial 从中心向外）。keep_transparency 只给已有像素上色（锁定透明像素），适合给抠图主体或栅格化的文字换色。不给 target 时新建画布大小的图层放最上面，常做纯色或渐变背景（reorder 放到底）。文字和形状改色用 update；要填它们的像素先用 merge_layers 栅格化。',
   parameters: z.object({
     target: z.string().min(1).max(120).optional().describe('图片图层编号；不给则新建图层'),
     color: colorSchema.describe('颜色 #RRGGBB；渐变时是起点颜色'),

@@ -123,7 +123,10 @@ export async function createProjectFromPsd(file: File): Promise<OpenedProject | 
   if (created.cancelled || created.bootstrap === null) return null
   const bootstrap = created.bootstrap
   const projectId = bootstrap.projectId
-  const commands: SceneCommand[] = [{ kind: 'scene.set-canvas', canvas: canvasFor(bootstrap.scene.canvas, document.width, document.height, !document.opaqueBackground) }]
+  const canvas = canvasFor(bootstrap.scene.canvas, document.width, document.height, !document.opaqueBackground)
+  // Photoshop's guides, at the canvas's size.
+  const guides = (document.guides ?? []).map((guide) => ({ axis: guide.axis, position: Math.round(guide.position * (guide.axis === 'x' ? canvas.outputWidth / document.width : canvas.outputHeight / document.height) * 1000) / 1000 }))
+  const commands: SceneCommand[] = [{ kind: 'scene.set-canvas', canvas: guides.length === 0 ? canvas : { ...canvas, guides } }]
   const groupMembers = document.groups.map((): string[] => [])
   const place = (layer: { left: number, top: number, width: number, height: number }): SceneElement['transform'] => ({
     x: layer.left / document.width,

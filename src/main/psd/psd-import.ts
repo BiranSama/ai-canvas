@@ -277,5 +277,10 @@ export async function readPsdForImport(bytes: Uint8Array, limits: PsdImportLimit
     if (flattened !== undefined && flattened.width === psd.width && flattened.height === psd.height) composite = await png(new Uint8Array(toBytes(flattened)), psd.width, psd.height)
   }
   if (layers.length === 0 && composite === null) throw new PsdImportError('这个 PSD 里没有能导入的图层。')
-  return { width: psd.width, height: psd.height, layers, groups, composite, approximations, keptAsPictures, opaqueBackground: bottomOpaque === true }
+  // A vertical guide sits at an x, a horizontal one at a y; any far past the document is a stray.
+  const guides = (psd.imageResources?.gridAndGuidesInformation?.guides ?? [])
+    .filter((guide) => Number.isFinite(guide.location) && guide.location <= 65_536)
+    .slice(0, 200)
+    .map((guide) => ({ axis: guide.direction === 'vertical' ? 'x' as const : 'y' as const, position: guide.location }))
+  return { width: psd.width, height: psd.height, layers, groups, composite, approximations, keptAsPictures, opaqueBackground: bottomOpaque === true, ...(guides.length === 0 ? {} : { guides }) }
 }

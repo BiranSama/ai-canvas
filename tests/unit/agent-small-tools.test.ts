@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CommandBus, createScene, type Scene, type SceneCommand } from '../../src/domain'
+import { CommandBus, createScene, type Scene, type SceneCommand, type SceneElement } from '../../src/domain'
 import { agentToolPlanSchema, type AgentToolPlan } from '../../src/shared/agent'
 import { compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../../src/main/agent/atomic-scene-tools'
 import {
@@ -70,8 +70,8 @@ class Harness {
 describe('small agent tools', () => {
   it('keeps the whole catalogue small, uniquely named and valid for every protocol', () => {
     const definitions = llmToolDefinitions(AGENT_TOOLS as never)
-    expect(definitions).toHaveLength(28)
-    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(28)
+    expect(definitions).toHaveLength(29)
+    expect(new Set(definitions.map((definition) => definition.name)).size).toBe(29)
     for (const definition of definitions) expect(definition.name).toMatch(/^[a-z_]{1,64}$/)
     expect(JSON.stringify(definitions).length).toBeLessThan(20_000)
   })
@@ -106,6 +106,48 @@ describe('small agent tools', () => {
     expect([title.transform.x, title.transform.y, title.transform.width, title.transform.height].map((value) => Math.round(value * 1_000) / 1_000))
       .toEqual([0.18, 0.12, 0.64, 0.16])
     expect(result.details?.[0]).toBe('E1「标题·晨雾」：位置 [10, 10, 80, 20] → [18, 12, 64, 16]；字号 77 → 61.6')
+  })
+
+  it('flips, skews and sets the corners of layers, one kind at a time, and puts them back', async () => {
+    const harness = new Harness()
+    await harness.call('add_shape', { shape: 'rectangle', box: [10, 10, 40, 20] })
+    await harness.call('add_text', { content: '晨雾', role: 'title', box: [10, 50, 40, 10] })
+    const shape = (): SceneElement => harness.scene.elements[0]!
+    const text = (): SceneElement => harness.scene.elements[1]!
+    const flipped = await harness.call('transform', { targets: ['E1'], flip: 'horizontal' })
+    expect(flipped.result).toMatchObject({ ok: true })
+    expect(shape()).toMatchObject({ corners: [[1, 0], [0, 0], [0, 1], [1, 1]], transform: { x: 0.1, y: 0.1 } })
+    // A skew on text stays a parallelogram; a perspective on text is refused.
+    expect((await harness.call('transform', { targets: ['E2'], skew: [20, 0] })).result).toMatchObject({ ok: true })
+    const corners = text().type === 'text' ? (text() as Extract<SceneElement, { type: 'text' }>).corners : null
+    expect(corners).not.toBeNull()
+    expect((await harness.call('transform', { targets: ['E2'], corners: [20, 0, 80, 0, 100, 100, 0, 100] })).result).toMatchObject({ ok: false, summary: '文字只能翻转和斜切（平行四边形）；透视、扭曲要先栅格化。' })
+    expect((await harness.call('transform', { targets: ['E1'], corners: [20, 0, 80, 0, 100, 100, 0, 100] })).result).toMatchObject({ ok: true })
+    expect(shape()).toMatchObject({ corners: [[0.2, 0], [0.8, 0], [1, 1], [0, 1]] })
+    expect((await harness.call('transform', { targets: ['E1'], corners: [0, 0, 100, 100, 100, 0, 0, 100] })).result.summary).toBe('四角要按左上、右上、右下、左下的顺序围成凸四边形。')
+    expect((await harness.call('transform', { targets: ['E1'], flip: 'vertical', rotate: 90 })).result.summary).toBe('flip、rotate、skew、corners、reset 每次只给一种。')
+    expect((await harness.call('inspect', { targets: ['E1'] })).result.details?.join('')).toContain('透视或扭曲，四角（框的百分比）20,0 80,0 100,100 0,100')
+    expect((await harness.call('transform', { targets: ['E1', 'E2'], reset: true })).result).toMatchObject({ ok: true })
+    expect([shape(), text()].map((element) => 'corners' in element ? element.corners ?? null : null)).toEqual([null, null])
+    // Turned a quarter: a plain box again, about the middle.
+    await harness.call('transform', { targets: ['E1'], rotate: 90 })
+    expect(shape().transform.rotation).toBe(90)
+    const turned = shape()
+    expect(turned.type === 'shape' ? turned.corners ?? null : 'not a shape').toBeNull()
+  })
+
+  it('extends or trims the canvas with every layer kept where it is', async () => {
+    const harness = new Harness()
+    await harness.call('add_shape', { shape: 'rectangle', box: [10, 10, 40, 20] })
+    const { outputWidth: width, outputHeight: height } = harness.scene.canvas
+    const before = harness.scene.elements[0]!.transform
+    expect((await harness.call('set_canvas', { extend: [100, 50, 0, -20] })).result).toMatchObject({ ok: true })
+    expect(harness.scene.canvas).toMatchObject({ outputWidth: width + 100, outputHeight: height + 30 })
+    const after = harness.scene.elements[0]!.transform
+    expect(after.x * (width + 100) - 100).toBeCloseTo(before.x * width, 4)
+    expect(after.y * (height + 30) - 50).toBeCloseTo(before.y * height, 4)
+    expect((await harness.call('set_canvas', { extend: [-5000, 0, 0, 0] })).result.summary).toMatch(/要在 64~16384 像素之间/)
+    expect((await harness.call('set_canvas', { extend: [10, 0, 0, 0], ratio: '1:1' })).result.summary).toBe('ratio 和 extend 只用一个。')
   })
 
   it('returns mistakes to the model instead of failing the turn', async () => {

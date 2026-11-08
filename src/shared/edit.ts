@@ -24,7 +24,9 @@ export const canvasEditInputSchema = z.object({
    */
   mode: z.enum(['mask', 'in-context', 'selection']).default('mask'),
   /** For a fill: the selection as a grayscale asset the canvas's size. */
-  selectionMaskAssetId: z.string().uuid().nullable().default(null)
+  selectionMaskAssetId: z.string().uuid().nullable().default(null),
+  /** A fill of what a larger canvas added around the picture: Photoshop's 生成式扩展. */
+  expand: z.boolean().default(false)
 }).refine((input) => input.mode === 'selection' ? input.selectionMaskAssetId !== null : input.targetElementId !== null,
   'A fill needs the selection; any other edit needs its target.')
 

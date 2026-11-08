@@ -1,9 +1,7 @@
 import { Sparkles, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { maskBounds } from '../../../shared/mask-raster'
-import { showAppNotice } from '../components/app-notice'
-import { preferredImageProvider } from '../generation/preferred-provider'
-import { useWorkspaceStore } from '../store/workspace-store'
+import { submitGenerativeFill } from './generative-fill'
 import { useSelectionStore } from './selection-store'
 
 /*
@@ -43,32 +41,12 @@ export function GenerativeFillBar({ originX, originY, zoom, stageWidth, stageHei
     if (busy) return
     setBusy(true)
     try {
-      const { scene, setActiveView } = useWorkspaceStore.getState()
       const selection = useSelectionStore.getState().mask
       if (selection === null) return
-      const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: '生成式填充选区.png', width: selection.width, height: selection.height, gray: new Uint8Array(selection.data) })
-      const provider = await preferredImageProvider('edit')
-      if (provider.note !== null) showAppNotice(provider.note)
-      await window.desktop.editFromCanvas({
-        scene,
-        targetElementId: null,
-        mode: 'selection',
-        selectionMaskAssetId: asset.id,
-        prompt: prompt.trim() || '按周围的画面自然补全选区',
-        negativePrompt: '',
-        providerId: provider.providerId,
-        model: provider.model,
-        count: 1,
-        profileId: provider.profileId,
-        confirmed: provider.confirmed,
-        sourceMessageId: null,
-        parentResultId: null
-      })
-      setOpen(false)
-      setPrompt('')
-      setActiveView('generate')
-    } catch (error) {
-      showAppNotice(`生成式填充没有开始：${error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, '') : String(error)}`, 'problem')
+      if (await submitGenerativeFill(selection, prompt)) {
+        setOpen(false)
+        setPrompt('')
+      }
     } finally {
       setBusy(false)
     }

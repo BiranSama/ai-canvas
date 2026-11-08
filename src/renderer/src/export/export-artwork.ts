@@ -396,7 +396,9 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
     progress({ label: '正在写入 PSD', done, total })
     // Cancelled while the composite was drawn: nothing has been written yet, so nothing is.
     checkAborted(signal)
-    const result = await window.desktop.writeExportPsd({ target: choice.target, document: { width, height, children, composite } })
+    // Guides on the document go with it; Photoshop keeps none past its edges.
+    const guides = (scene.canvas.guides ?? []).filter((guide) => guide.position >= 0 && guide.position <= (guide.axis === 'x' ? width : height))
+    const result = await window.desktop.writeExportPsd({ target: choice.target, document: { width, height, children, composite, ...(guides.length === 0 ? {} : { guides }) } })
     progress({ label: '已保存', done: total, total })
     return { paths: [result.path], notes }
   } finally {
