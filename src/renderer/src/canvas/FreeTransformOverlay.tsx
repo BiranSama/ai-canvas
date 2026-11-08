@@ -77,6 +77,7 @@ export function FreeTransformOverlay({ originX, originY, zoom, width, height, st
     const point = toCanvas(event.clientX, event.clientY, svg)
     const handleAttribute = (event.target as Element).getAttribute('data-handle')
     svg.setPointerCapture(event.pointerId)
+    useFreeTransform.getState().setDragging(true)
     if (handleAttribute !== null) {
       drag.current = { kind: 'handle', handle: Number(handleAttribute) as HandleIndex, start: target, from: point }
     } else if (inside(point, target)) {
@@ -121,6 +122,7 @@ export function FreeTransformOverlay({ originX, originY, zoom, width, height, st
 
   const end = (event: React.PointerEvent<SVGSVGElement>): void => {
     drag.current = null
+    useFreeTransform.getState().setDragging(false)
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
   }
 

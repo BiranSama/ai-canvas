@@ -198,3 +198,72 @@ test('Ctrl+T distorts, skews and turns a layer, applied in one step with Enter a
     await rm(out, { recursive: true, force: true })
   }
 })
+
+async function startFrames(page: Page): Promise<void> {
+  await page.evaluate(`(() => {
+    const state = { gaps: [], last: performance.now(), on: true }
+    globalThis.__warpFrames = state
+    const tick = (now) => { state.gaps.push(now - state.last); state.last = now; if (state.on) requestAnimationFrame(tick) }
+    requestAnimationFrame(tick)
+  })()`)
+}
+
+async function stopFrames(page: Page): Promise<{ readonly frames: number; readonly median: number; readonly p95: number; readonly worst: number }> {
+  const gaps = await page.evaluate('(() => { const state = globalThis.__warpFrames; state.on = false; return state.gaps })()') as number[]
+  const sorted = [...gaps].sort((left, right) => left - right)
+  const at = (share: number): number => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * share))]! * 10) / 10
+  return { frames: gaps.length, median: at(0.5), p95: at(0.95), worst: at(1) }
+}
+
+test('a 4000-pixel picture keeps up while a perspective corner is dragged', async () => {
+  test.setTimeout(180_000)
+  const out = await mkdtemp(join(tmpdir(), 'ai-canvas-warp-perf-out-'))
+  const { app, page, userData } = await openCoffeePoster(out, 'ai-canvas-warp-perf-')
+  try {
+    const result = await page.evaluate(async ({ version }) => {
+      const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
+      const current = (await api.getWorkspaceBootstrap()).scene
+      const side = 4000
+      const rgba = new Uint8Array(side * side * 4)
+      for (let y = 0; y < side; y += 1) for (let x = 0; x < side; x += 1) rgba.set([x * 255 / side, y * 255 / side, (x + y) % 256, 255], (y * side + x) * 4)
+      const picture = await api.importPixels({ projectId: current.projectId, name: '大图', width: side, height: side, rgba })
+      return api.executeSceneCommands({ projectId: current.projectId, expectedSceneRevision: current.revision, batch: { id: crypto.randomUUID(), origin: 'user', summary: '加图', commands: [
+        { kind: 'scene.set-canvas', canvas: { ...current.canvas, aspectWidth: 1, aspectHeight: 1, outputWidth: side, outputHeight: side } },
+        { kind: 'element.add', element: { id: crypto.randomUUID(), version, type: 'image', name: '大图', description: '', zIndex: 0, opacity: 1, visible: true, locked: false, groupId: null, semanticRole: 'content', referencePolicy: 'include', assetId: picture.id, transform: { x: 0.1, y: 0.1, width: 0.8, height: 0.8, rotation: 0 }, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general' } }
+      ] as never } })
+    }, { version: ELEMENT_SCHEMA_VERSION })
+    expect(result.ok).toBe(true)
+    await openEditor(page)
+    // As in the other canvas performance tests: without a graphics card the glass panels blur again in software whenever the canvas changes.
+    await page.addStyleTag({ content: '* { backdrop-filter: none !important; }' })
+    await page.getByRole('tab', { name: '图层' }).click()
+    await page.getByRole('listbox', { name: '图层' }).locator('.layer-row', { hasText: '大图' }).click()
+    await page.keyboard.press('Control+0')
+    await page.waitForTimeout(800)
+    await page.keyboard.press('Control+t')
+    await page.getByTestId('free-transform-bar').getByRole('radio', { name: '透视' }).click()
+    const from = await page.evaluate(`(() => {
+      const root = document.querySelector('[data-testid="canvas-stage"]')
+      const surface = root.querySelector('.konvajs-content').getBoundingClientRect()
+      return { x: surface.left + Number(root.dataset.artboardX) + 0.1 * Number(root.dataset.artboardWidth), y: surface.top + Number(root.dataset.artboardY) + 0.1 * Number(root.dataset.artboardHeight) }
+    })()`) as { x: number; y: number }
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await startFrames(page)
+    for (let step = 1; step <= 60; step += 1) {
+      await page.mouse.move(from.x + step * 2, from.y)
+      await page.waitForTimeout(16)
+    }
+    const dragging = await stopFrames(page)
+    await page.mouse.up()
+    await page.keyboard.press('Enter')
+    await expect.poll(async () => { const image = layer((await currentScene(page)).elements, '大图'); return image.type === 'image' ? image.corners ?? null : null }).not.toBeNull()
+    console.log(`PERF-WARP-4000 perspective-drag=${JSON.stringify(dragging)}`)
+    expect(dragging.frames).toBeGreaterThan(20)
+    expect(dragging.p95).toBeLessThan(100)
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true })
+    await rm(out, { recursive: true, force: true })
+  }
+})

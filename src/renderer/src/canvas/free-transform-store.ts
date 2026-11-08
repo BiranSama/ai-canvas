@@ -48,6 +48,9 @@ export interface FreeTransformSession {
 
 interface FreeTransformState {
   readonly session: FreeTransformSession | null
+  /** A handle is being dragged: warped layers preview at half the detail, so they keep up. */
+  readonly dragging: boolean
+  setDragging(dragging: boolean): void
   start(): boolean
   /** Moves the box's corners; refused (false) when the layers cannot take that shape. */
   setTarget(target: Quad): boolean
@@ -67,6 +70,8 @@ function previewFor(ids: readonly string[], source: Quad, target: Quad): Readonl
 
 export const useFreeTransform = create<FreeTransformState>((set, get) => ({
   session: null,
+  dragging: false,
+  setDragging: (dragging) => { if (get().dragging !== dragging) set({ dragging }) },
   start: () => {
     const { scene, selectedIds } = useWorkspaceStore.getState()
     const layers = transformableLayers(scene, selectedIds)
@@ -120,7 +125,7 @@ export const useFreeTransform = create<FreeTransformState>((set, get) => ({
   apply: async () => {
     const session = get().session
     if (session === null) return false
-    set({ session: null })
+    set({ session: null, dragging: false })
     const { scene, execute } = useWorkspaceStore.getState()
     if (scene.revision !== session.revision) {
       showAppNotice('画布在变换时改动过，这次变换没有应用。')
@@ -135,7 +140,7 @@ export const useFreeTransform = create<FreeTransformState>((set, get) => ({
     }
     return execute(layers.length === 1 ? `自由变换“${layers[0]!.name}”` : `自由变换 ${layers.length} 个图层`, outcome.commands)
   },
-  cancel: () => set({ session: null })
+  cancel: () => set({ session: null, dragging: false })
 }))
 
 /** The layers as the free transform shows them, or as they are. */
@@ -189,3 +194,8 @@ useWorkspaceStore.subscribe((state, previous) => {
   if (state.scene.projectId !== previous.scene.projectId) transform.cancel()
   else if (state.activeTool !== previous.activeTool) void transform.apply()
 })
+
+/** Whether this layer is being reshaped by a handle right now, for the draft preview. */
+export function useWarpDraft(elementId: string): boolean {
+  return useFreeTransform((state) => state.dragging && state.session !== null && state.session.ids.includes(elementId))
+}

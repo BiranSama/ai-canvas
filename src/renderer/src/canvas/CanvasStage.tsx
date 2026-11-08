@@ -46,7 +46,7 @@ import { FreeTransformOverlay } from './FreeTransformOverlay'
 import { CropOverlay } from './CropOverlay'
 import { RulersAndGuides } from './RulersAndGuides'
 import { snapGuideRects, useView } from './view-store'
-import { useFreeTransform, withFreeTransformPreview } from './free-transform-store'
+import { useFreeTransform, useWarpDraft, withFreeTransformPreview } from './free-transform-store'
 import { warmMagicTouch } from '../selection/magic-touch'
 import { GenerativeFillBar } from '../selection/GenerativeFillBar'
 import { ImeSafeTextarea } from '../components/ImeSafeTextField'
@@ -234,6 +234,8 @@ function ImageVisual({ element, width, height, plain = false }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- redrawn only when what it draws changes, not on every element identity
     [source, paintVersion, element.crop, element.fit, shownElement.effects, shownElement.adjustments, adjustmentClips, shownWidth, shownHeight, maskLater]
   )
+  // While a free-transform handle is dragged, the warp is worked out at half the detail.
+  const warpDraft = useWarpDraft(element.id)
   const styleContentKey = useMemo(() => ({ drawn: effected?.drawn ?? source }), [effected?.drawn, source, element.corners]) // eslint-disable-line react-hooks/exhaustive-deps -- new corners change what the styles see
   if (image === null || source === null || adjustmentClips === 'pending') {
     const missing = isRuntimeAssetMissing(element.assetId)
@@ -255,7 +257,7 @@ function ImageVisual({ element, width, height, plain = false }: {
   }
   // Through its free-transform corners first; its styles go on what that shows.
   const styled = (picture: React.JSX.Element): React.JSX.Element => {
-    const warped = <CornersLayer corners={element.corners} width={width} height={height} ratio={detail}>{picture}</CornersLayer>
+    const warped = <CornersLayer corners={element.corners} width={width} height={height} ratio={warpDraft ? detail / 2 : detail}>{picture}</CornersLayer>
     return plain || !styledLayer(styledElement) ? warped : (
       <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(element.corners, width, height)} unit={1} ratio={detail}
         rotation={element.transform.rotation} blend={resolveBlendMode(element)} contentKey={styleContentKey}>
@@ -510,6 +512,7 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
   // Layer styles being set up in their dialog are shown before they are recorded.
   const stylePreview = useStylePreview((state) => state.preview?.elementId === element.id ? state.preview : null)
   const styledElement = withStylePreview(element, stylePreview)
+  const warpDraft = useWarpDraft(element.id)
   const updateElement = useWorkspaceStore((state) => state.updateElement)
   const execute = useWorkspaceStore((state) => state.execute)
   const scene = useWorkspaceStore((state) => state.scene)
@@ -862,7 +865,7 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         // An image warps and styles itself, from the pixels it draws; text and shapes are warped and styled here.
         if (styledElement.type !== 'text' && styledElement.type !== 'shape') return maskedBox
         const corners = styledElement.corners
-        const masked = <CornersLayer corners={corners} text={styledElement.type === 'text'} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
+        const masked = <CornersLayer corners={corners} text={styledElement.type === 'text'} width={width} height={height} ratio={drawnDetail(width, height, zoom) / (warpDraft ? 2 : 1)}>{maskedBox}</CornersLayer>
         if (!styledLayer(styledElement)) return masked
         return (
           <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(corners, width, height)} unit={1} ratio={drawnDetail(width, height, zoom)}

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { useFreeTransform } from '../../src/renderer/src/canvas/free-transform-store'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../src/renderer/src/App'
 import { createNightVeilScene, NIGHT_VEIL_IDS } from '../../src/renderer/src/fixtures/night-veil'
@@ -88,8 +89,14 @@ describe('Photoshop shortcuts on the canvas', () => {
     press({ key: 'i', code: 'KeyI' })
     expect(useWorkspaceStore.getState().activeTool).toBe('eyedropper')
     expect(screen.getByRole('button', { name: '吸管' })).toHaveAttribute('aria-pressed', 'true')
+    // Ctrl+T: the move tool and free transform around the new shape, which waits for Enter or Esc.
     press({ key: 't', code: 'KeyT', ctrlKey: true })
     expect(useWorkspaceStore.getState().activeTool).toBe('select')
+    expect(useFreeTransform.getState().session?.ids).toEqual([useWorkspaceStore.getState().scene.elements.at(-1)?.id])
+    press({ key: 'f', code: 'KeyF' })
+    expect(document.querySelector('.canvas-workspace')).not.toHaveClass('is-focus-mode')
+    press({ key: 'Escape', code: 'Escape' })
+    expect(useFreeTransform.getState().session).toBeNull()
 
     press({ key: 'f', code: 'KeyF' })
     expect(document.querySelector('.canvas-workspace')).toHaveClass('is-focus-mode')
