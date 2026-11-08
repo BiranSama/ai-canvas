@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ELEMENT_SCHEMA_VERSION,
   IDENTITY_CORNERS,
   MIRRORED_CORNERS,
   affineOf,
@@ -313,6 +314,35 @@ describe('transform box handles', () => {
     const filling = resized(1.5, 1, { ...image, fit: 'fill' } as SceneElement)
     expect(filling.transform.width).toBeCloseTo(image.transform.width * 1.5, 4)
     expect(filling.type === 'image' ? filling.corners ?? null : 'not an image').toBeNull()
+  })
+
+  it('fits a group around what its layers cover, corners and turns included', () => {
+    const scene = makeAllElementTypesScene()
+    const canvas = { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }
+    const groupId = '00000000-0000-4000-8000-0000000000c1'
+    const group = {
+      id: groupId, version: ELEMENT_SCHEMA_VERSION, type: 'group', name: '组合', description: '', transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, zIndex: 0,
+      opacity: 1, blendMode: 'normal', visible: true, locked: false, groupId: null, semanticRole: 'composition', referencePolicy: 'include', childIds: [IDS.image, IDS.shape]
+    } as unknown as Extract<SceneElement, { type: 'group' }>
+    const grouped = applyCommands(scene, [{ kind: 'element.group', group, elementIds: [IDS.image, IDS.shape] }])
+    const image = grouped.elements.find((element) => element.id === IDS.image)!
+    const from = transformQuad(grouped, [image])!
+    // The bottom pulled a whole box to the right: the picture now reaches past its box, and the group follows it.
+    const width = from[1][0] - from[0][0]
+    const outcome = transformLayersByQuads(grouped, [image], from, [from[0], from[1], [from[2][0] + width, from[2][1]], [from[3][0] + width, from[3][1]]] as unknown as Quad)
+    expect(outcome.ok).toBe(true)
+    const after = applyCommands(grouped, outcome.ok ? outcome.commands : [])
+    const skewed = after.elements.find((element) => element.id === IDS.image)!
+    const reach = Math.max(...layerCornerPoints(skewed.transform, skewed.type === 'image' ? skewed.corners : null, canvas).map(([x]) => x)) / canvas.width
+    const fitted = after.elements.find((element) => element.id === groupId)!.transform
+    expect(reach).toBeGreaterThan(skewed.transform.x + skewed.transform.width)
+    expect(fitted.x + fitted.width).toBeCloseTo(Math.max(reach, ...after.elements.filter((element) => element.groupId === groupId).map((element) => element.transform.x + element.transform.width)), 6)
+    // Grouping a turned layer takes in where it is turned to.
+    const turned = sceneSchema.parse({ ...scene, elements: scene.elements.map((element) => element.id === IDS.shape ? { ...element, transform: { ...element.transform, rotation: 90 } } : element) })
+    const shape = turned.elements.find((element) => element.id === IDS.shape)!
+    const around = applyCommands(turned, [{ kind: 'element.group', group: { ...group, childIds: [IDS.shape] }, elementIds: [IDS.shape] }]).elements.find((element) => element.id === groupId)!.transform
+    const bounds = layerCanvasBounds(shape.transform, null, canvas)
+    close([around.x, around.y, around.width, around.height], [bounds.x / canvas.width, bounds.y / canvas.height, bounds.width / canvas.width, bounds.height / canvas.height], 6)
   })
 
   it('scales text by its type when kept in proportion, and stretches it in its box when not', () => {

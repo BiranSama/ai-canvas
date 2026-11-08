@@ -214,6 +214,31 @@ export function layerCanvasBounds(transform: NormalizedTransform, corners: Corne
   return { x: left, y: top, width: Math.max(...xs) - left, height: Math.max(...ys) - top }
 }
 
+/**
+ * The box a group takes around its layers, square to the canvas: what each
+ * layer covers, through its turn and its free-transform corners. A layer
+ * neither turned nor reshaped counts as its box exactly.
+ */
+export function boxAroundLayers(layers: readonly { readonly transform: NormalizedTransform; readonly corners?: Corners | null | undefined }[], canvas: { readonly width: number; readonly height: number }): NormalizedTransform {
+  let left = Number.POSITIVE_INFINITY
+  let top = Number.POSITIVE_INFINITY
+  let right = Number.NEGATIVE_INFINITY
+  let bottom = Number.NEGATIVE_INFINITY
+  for (const { transform, corners } of layers) {
+    const box = transform.rotation === 0 && cornersAreIdentity(corners)
+      ? transform
+      : (() => {
+          const bounds = layerCanvasBounds(transform, corners, canvas)
+          return { x: bounds.x / canvas.width, y: bounds.y / canvas.height, width: bounds.width / canvas.width, height: bounds.height / canvas.height }
+        })()
+    left = Math.min(left, box.x)
+    top = Math.min(top, box.y)
+    right = Math.max(right, box.x + box.width)
+    bottom = Math.max(bottom, box.y + box.height)
+  }
+  return { x: left, y: top, width: right - left, height: bottom - top, rotation: 0 }
+}
+
 export interface PlacedLayer {
   readonly transform: NormalizedTransform
   /** Null when the layer is a plain box again. */

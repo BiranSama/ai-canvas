@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import {
+  boxAroundLayers,
   ELEMENT_SCHEMA_VERSION,
   type CommandBatchInput,
   type Scene,
@@ -320,12 +321,11 @@ export function groupBoundsForChildTransforms(
   if (all.length === 0) return null
   // An adjustment layer covers the whole canvas and has no box of its own, so it does not widen the group's.
   const children = all.some((element) => element.type !== 'adjustment') ? all.filter((element) => element.type !== 'adjustment') : all
-  const transforms = children.map((element) => transformOverrides.get(element.id) ?? element.transform)
-  const left = Math.min(...transforms.map((transform) => transform.x))
-  const top = Math.min(...transforms.map((transform) => transform.y))
-  const right = Math.max(...transforms.map((transform) => transform.x + transform.width))
-  const bottom = Math.max(...transforms.map((transform) => transform.y + transform.height))
-  return { x: left, y: top, width: right - left, height: bottom - top, rotation: 0 }
+  // Around what each layer covers, through its turn and its free-transform corners.
+  return boxAroundLayers(
+    children.map((element) => ({ transform: transformOverrides.get(element.id) ?? element.transform, corners: 'corners' in element ? element.corners : null })),
+    { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }
+  )
 }
 
 function groupBoundsAfterChildTransform(

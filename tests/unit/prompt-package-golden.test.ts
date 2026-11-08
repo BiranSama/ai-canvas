@@ -33,7 +33,7 @@ describe('Prompt Package deterministic golden', () => {
     })
     const first = compile()
     expect(compile()).toEqual(first)
-    expect(hash(first)).toBe('a7b600a0687717313efd8d75f93cd0ad2847c88eae62005c68209f21501bbaf1')
+    expect(hash(first)).toBe('1d523d8c9c567197cec8f70eb45759cc84fc303f4d01dbac55fe29f92e29af88')
     // The brief names its mood again as its style; the image model reads each once.
     expect(created.scene.creativeContext?.brief.mood.length).toBeGreaterThan(0)
     expect(new Set(first.styleBible).size).toBe(first.styleBible.length)

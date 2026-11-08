@@ -1,6 +1,7 @@
 import type { SceneCommand } from '../commands/schema'
 import {
   applyMatrix,
+  boxAroundLayers,
   cornersAreDrawable,
   homographyFromCorners,
   invertMatrix,
@@ -173,12 +174,12 @@ export function transformLayers(scene: Scene, layers: readonly SceneElement[], m
     if (group?.type !== 'group') continue
     const children = group.childIds.map((id) => byId.get(id)).filter((child): child is SceneElement => child !== undefined && child.type !== 'adjustment')
     if (children.length === 0) continue
-    const boxes = children.map((child) => transforms.get(child.id) ?? child.transform)
-    const left = Math.min(...boxes.map((box) => box.x))
-    const top = Math.min(...boxes.map((box) => box.y))
-    const right = Math.max(...boxes.map((box) => box.x + box.width))
-    const bottom = Math.max(...boxes.map((box) => box.y + box.height))
-    const transform = { x: left, y: top, width: right - left, height: bottom - top, rotation: 0 }
+    // Around what each layer now covers, its new corners included, so a part reshaped past its box is in the group's.
+    const transform = boxAroundLayers(children.map((child) => {
+      const change = changes.get(child.id)
+      const corners = change !== undefined && 'corners' in change ? change.corners as Corners | null : 'corners' in child ? child.corners : null
+      return { transform: transforms.get(child.id) ?? child.transform, corners }
+    }), canvas)
     transforms.set(groupId, transform)
     commands.push({ kind: 'element.update', elementId: groupId, changes: { transform } })
   }
