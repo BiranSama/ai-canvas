@@ -14,6 +14,7 @@ import {
   type Quad
 } from '../../../domain'
 import { FREE_TRANSFORM_MODES as MODES, useFreeTransform } from './free-transform-store'
+import { snapValue } from './view-store'
 
 /*
  * The free transform's box over the stage: eight handles, the reference
@@ -33,6 +34,22 @@ type Drag =
   | { readonly kind: 'handle'; readonly handle: HandleIndex; readonly start: Quad; readonly from: Point }
   | { readonly kind: 'move'; readonly start: Quad; readonly from: Point }
   | { readonly kind: 'rotate'; readonly start: Quad; readonly centre: Point; readonly angle: number }
+
+/** How far to shift values (the box's corners along one axis) so its nearest edge or its middle lands on a snap line. */
+function snapShift(values: readonly number[], axis: 'x' | 'y', threshold: number): number {
+  const low = Math.min(...values)
+  const high = Math.max(...values)
+  let best = 0
+  let distance = Number.POSITIVE_INFINITY
+  for (const value of [low, (low + high) / 2, high]) {
+    const shift = snapValue(value, axis, threshold) - value
+    if (shift !== 0 && Math.abs(shift) < distance) {
+      distance = Math.abs(shift)
+      best = shift
+    }
+  }
+  return best
+}
 
 function inside(point: Point, quad: Quad): boolean {
   let hit = false
@@ -91,14 +108,19 @@ export function FreeTransformOverlay({ originX, originY, zoom, width, height, st
   const follow = (event: React.PointerEvent<SVGSVGElement>): void => {
     const current = drag.current
     if (current === null) return
-    const point = toCanvas(event.clientX, event.clientY, event.currentTarget)
+    const raw = toCanvas(event.clientX, event.clientY, event.currentTarget)
     const ctrl = event.ctrlKey || event.metaKey
+    const threshold = 8 / zoom
     if (current.kind === 'move') {
-      let delta: Point = [point[0] - current.from[0], point[1] - current.from[1]]
+      let delta: Point = [raw[0] - current.from[0], raw[1] - current.from[1]]
       if (event.shiftKey) delta = Math.abs(delta[0]) >= Math.abs(delta[1]) ? [delta[0], 0] : [0, delta[1]]
+      // The box's edges or middle onto the nearest guide, grid line or canvas edge; Ctrl holds it off, as for a move.
+      if (!ctrl) delta = [delta[0] + snapShift(current.start.map((corner) => corner[0] + delta[0]), 'x', threshold), delta[1] + snapShift(current.start.map((corner) => corner[1] + delta[1]), 'y', threshold)]
       setTarget(moveQuad(current.start, delta))
       return
     }
+    // A handle follows the pointer onto snap lines.
+    const point: Point = current.kind === 'handle' ? [snapValue(raw[0], 'x', threshold), snapValue(raw[1], 'y', threshold)] : raw
     if (current.kind === 'rotate') {
       let degrees = (Math.atan2(point[1] - current.centre[1], point[0] - current.centre[0]) - current.angle) * 180 / Math.PI
       if (event.shiftKey) degrees = Math.round(degrees / 15) * 15

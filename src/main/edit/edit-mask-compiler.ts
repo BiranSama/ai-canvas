@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import sharp from 'sharp'
-import type { NormalizedTransform, Scene, SceneElement } from '../../domain'
+import { applyMatrix, cornersAreIdentity, homographyFromCorners, invertMatrix, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 import type { AssetStore } from '../storage/asset-store'
 import type { AssetMetadata } from '../storage/project-repository'
 import { writeImage } from '../storage/image-file'
@@ -93,8 +93,12 @@ async function rasterizeMask(
     const renderedHeight = target.fit === 'fill' ? elementHeight : croppedHeight * scale
     const offsetX = (elementWidth - renderedWidth) / 2
     const offsetY = (elementHeight - renderedHeight) / 2
+    // A skewed, distorted or perspective image: back through its corners to where the point is in its own box.
+    const unwarp = cornersAreIdentity(target.corners) ? null : invertMatrix(homographyFromCorners(target.corners!))
     const points = path.points.map((point) => {
-      const local = canvasToLocal(target.transform, localToCanvas(mask.transform, point))
+      const placed = canvasToLocal(target.transform, localToCanvas(mask.transform, point))
+      const [ux, uy] = unwarp === null ? [placed.x, placed.y] : applyMatrix(unwarp, placed.x, placed.y)
+      const local = { x: ux, y: uy }
       return {
         x: target.crop.x + ((local.x * elementWidth - offsetX) / renderedWidth) * target.crop.width,
         y: target.crop.y + ((local.y * elementHeight - offsetY) / renderedHeight) * target.crop.height
