@@ -12,6 +12,9 @@ import {
   transformReach,
   type Point,
   type Quad,
+  type Scene,
+  type SceneCommand,
+  type SceneElement,
   type TransformReach
 } from '../../../domain'
 import { showAppNotice } from '../components/app-notice'
@@ -126,19 +129,25 @@ export const useFreeTransform = create<FreeTransformState>((set, get) => ({
     const session = get().session
     if (session === null) return false
     set({ session: null, dragging: false })
-    const { scene, execute } = useWorkspaceStore.getState()
-    if (scene.revision !== session.revision) {
-      showAppNotice('画布在变换时改动过，这次变换没有应用。')
-      return false
-    }
     if (session.preview.size === 0) return true
-    const layers = scene.elements.filter((element) => session.ids.includes(element.id))
-    const outcome = transformLayersByQuads(scene, layers, session.source, session.target)
-    if (!outcome.ok) {
-      showAppNotice(outcome.reason, 'problem')
-      return false
-    }
-    return execute(layers.length === 1 ? `自由变换“${layers[0]!.name}”` : `自由变换 ${layers.length} 个图层`, outcome.commands)
+    const { scene, execute } = useWorkspaceStore.getState()
+    const named = scene.elements.filter((element) => session.ids.includes(element.id))
+    const label = named.length === 1 ? `自由变换“${named[0]!.name}”` : `自由变换 ${session.ids.length} 个图层`
+    // Worked out when the batch's turn comes, behind any change still on its way, from the scene the box was drawn on.
+    const refused: { notice: Parameters<typeof showAppNotice> | null } = { notice: null }
+    const applied = await execute(label, (current) => {
+      if (current.revision !== session.revision) {
+        refused.notice = ['画布在变换时改动过，这次变换没有应用。']
+        return null
+      }
+      const layers = current.elements.filter((element) => session.ids.includes(element.id))
+      const outcome = transformLayersByQuads(current, layers, session.source, session.target)
+      if (outcome.ok) return outcome.commands
+      refused.notice = [outcome.reason, 'problem']
+      return null
+    })
+    if (refused.notice !== null) showAppNotice(...refused.notice)
+    return applied
   },
   cancel: () => set({ session: null, dragging: false })
 }))
@@ -156,11 +165,27 @@ export function withFreeTransformPreview<T extends { readonly id: string }>(elem
  */
 export async function transformSelection(action: 'flip-horizontal' | 'flip-vertical' | 'rotate-180' | 'rotate-cw' | 'rotate-ccw'): Promise<boolean> {
   const { scene, selectedIds, execute } = useWorkspaceStore.getState()
-  const layers = transformableLayers(scene, selectedIds)
-  if (layers.length === 0) {
+  const chosen = transformableLayers(scene, selectedIds)
+  if (chosen.length === 0) {
     showAppNotice(selectedIds.length === 0 ? '先选中要变换的图层。' : '选中的图层已锁定，或者不能变换。')
     return false
   }
+  const label = { 'flip-horizontal': '水平翻转', 'flip-vertical': '垂直翻转', 'rotate-180': '旋转 180°', 'rotate-cw': '顺时针旋转 90°', 'rotate-ccw': '逆时针旋转 90°' }[action]
+  // Worked out from the layers as they are when the batch's turn comes, behind any change still on its way.
+  const refused: { reason: string | null } = { reason: null }
+  const applied = await execute(chosen.length === 1 ? `${label}“${chosen[0]!.name}”` : `${label} ${chosen.length} 个图层`, (current) => {
+    const commands = selectionTransformCommands(current, transformableLayers(current, selectedIds), action)
+    if (typeof commands !== 'string') return commands
+    refused.reason = commands
+    return null
+  })
+  if (refused.reason !== null) showAppNotice(refused.reason, 'problem')
+  return applied
+}
+
+/** The commands that flip or turn these layers as a whole, or why they cannot be. */
+function selectionTransformCommands(scene: Scene, layers: readonly SceneElement[], action: 'flip-horizontal' | 'flip-vertical' | 'rotate-180' | 'rotate-cw' | 'rotate-ccw'): readonly SceneCommand[] | string {
+  if (layers.length === 0) return '选中的图层已锁定，或者不能变换。'
   // About the middle of the box around them, square to the canvas, as Photoshop flips.
   const canvas = { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight }
   const bounds = layers.map((layer) => layerCanvasBounds(layer.transform, 'corners' in layer ? layer.corners : null, canvas))
@@ -179,12 +204,7 @@ export async function transformSelection(action: 'flip-horizontal' | 'flip-verti
     : action === 'flip-vertical' ? (point: Point): Point => [point[0], 2 * centre[1] - point[1]]
       : turn(action === 'rotate-180' ? 180 : action === 'rotate-cw' ? 90 : -90)
   const outcome = transformLayers(scene, layers, map)
-  if (!outcome.ok) {
-    showAppNotice(outcome.reason, 'problem')
-    return false
-  }
-  const label = { 'flip-horizontal': '水平翻转', 'flip-vertical': '垂直翻转', 'rotate-180': '旋转 180°', 'rotate-cw': '顺时针旋转 90°', 'rotate-ccw': '逆时针旋转 90°' }[action]
-  return execute(layers.length === 1 ? `${label}“${layers[0]!.name}”` : `${label} ${layers.length} 个图层`, outcome.commands)
+  return outcome.ok ? outcome.commands : outcome.reason
 }
 
 // A tool picked or another project opened ends the transform: a new tool applies it, as Photoshop does; a project change drops it.
