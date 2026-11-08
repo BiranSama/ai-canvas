@@ -82,7 +82,7 @@ import { ElementVisual } from './element-visual'
 import { isFinalContent } from './layer-drawing'
 import { StyledLayer } from './styled-layer'
 import { CornersLayer } from './warped-layer'
-import { warpedExtent } from './warp-filter'
+import { drawnMargin, warpedExtent } from './warp-filter'
 import { IsolatedGroup } from './clip-stack'
 import { opaqueWhereCovered } from './opaque-filter'
 import { useIsolationRefresh } from './isolation-refresh'
@@ -436,9 +436,10 @@ function ClipBaseShape({ element, artboard, zoom, styled = false }: { element: S
     : visual
   // An image warps and styles itself; a text or shape is warped and styled here, as its own node is.
   const corners = shown.type === 'text' || shown.type === 'shape' ? shown.corners : null
-  const masked = <CornersLayer corners={corners} text={shown.type === 'text'} width={width} height={height} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
+  const margin = drawnMargin(shown, width, height)
+  const masked = <CornersLayer corners={corners} text={shown.type === 'text'} width={width} height={height} margin={margin} ratio={drawnDetail(width, height, zoom)}>{maskedBox}</CornersLayer>
   const content = styled && (shown.type === 'text' || shown.type === 'shape') && styledLayer(shown) ? (
-    <StyledLayer element={shown} width={width} height={height} extent={warpedExtent(corners, width, height)} unit={1} ratio={drawnDetail(width, height, zoom)} rotation={shown.transform.rotation} blend="normal" contentKey={shown}>
+    <StyledLayer element={shown} width={width} height={height} extent={warpedExtent(corners, width, height, margin)} unit={1} ratio={drawnDetail(width, height, zoom)} rotation={shown.transform.rotation} blend="normal" contentKey={shown}>
       {masked}
     </StyledLayer>
   ) : masked
@@ -865,10 +866,11 @@ function ElementNode({ element, artboard, zoom, onSelect, onGuides, onBeginDrag,
         // An image warps and styles itself, from the pixels it draws; text and shapes are warped and styled here.
         if (styledElement.type !== 'text' && styledElement.type !== 'shape') return maskedBox
         const corners = styledElement.corners
-        const masked = <CornersLayer corners={corners} text={styledElement.type === 'text'} width={width} height={height} ratio={drawnDetail(width, height, zoom) / (warpDraft ? 2 : 1)}>{maskedBox}</CornersLayer>
+        const margin = drawnMargin(styledElement, width, height)
+        const masked = <CornersLayer corners={corners} text={styledElement.type === 'text'} width={width} height={height} margin={margin} ratio={drawnDetail(width, height, zoom) / (warpDraft ? 2 : 1)}>{maskedBox}</CornersLayer>
         if (!styledLayer(styledElement)) return masked
         return (
-          <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(corners, width, height)} unit={1} ratio={drawnDetail(width, height, zoom)}
+          <StyledLayer element={styledElement} width={width} height={height} extent={warpedExtent(corners, width, height, margin)} unit={1} ratio={drawnDetail(width, height, zoom)}
             rotation={displayTransform.rotation} blend={resolveBlendMode(element)} contentKey={element}>
             {masked}
           </StyledLayer>

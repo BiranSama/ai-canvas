@@ -1,4 +1,5 @@
 import type { SceneCommand } from '../commands/schema'
+import { storedAspect } from './adapt-layout'
 import { simplifyAspectRatio } from './aspect-ratio'
 import type { Canvas, Guide, Scene, SceneElement } from './schema'
 
@@ -67,19 +68,10 @@ export function reframedCanvas(canvas: Canvas, frame: CanvasFrame): Canvas {
   }
 }
 
-/** The ratio closest to width:height with both terms at most 100, as the canvas stores it. */
+/** The ratio closest to width:height with both terms at most 100, as the canvas stores it (past 100:1 either way, 100:1 or 1:100). */
 export function aspectNear(width: number, height: number): { readonly width: number; readonly height: number } {
-  const exact = simplifyAspectRatio(width, height)
-  if (exact.width <= 100 && exact.height <= 100) return exact
-  const ratio = width / height
-  let best = { width: 1, height: 1, error: Number.POSITIVE_INFINITY }
-  for (let h = 1; h <= 100; h += 1) {
-    const w = Math.round(ratio * h)
-    if (w < 1 || w > 100) continue
-    const error = Math.abs(w / h - ratio)
-    if (error < best.error - 1e-12) best = { width: w, height: h, error }
-  }
-  return simplifyAspectRatio(best.width, best.height)
+  const stored = storedAspect(width, height)
+  return simplifyAspectRatio(stored.aspectWidth, stored.aspectHeight)
 }
 
 function round(value: number): number {

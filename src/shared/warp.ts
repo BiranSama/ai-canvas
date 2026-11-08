@@ -24,32 +24,57 @@ export interface WarpLayout {
 export const WARP_PIXELS = 36_000_000
 
 /**
- * Where a layer of this box lands after its corners, as a raster at `ratio`
- * raster pixels per box pixel, grown by a pixel each side for the soft edge.
+ * Where the box lands after its corners, in the box's pixels, grown first by
+ * `margin` box pixels on every side for what is drawn past it (the outer half
+ * of a shape's stroke).
  */
-export function warpLayout(corners: Corners, boxWidth: number, boxHeight: number, ratio: number): WarpLayout {
+export function warpedBounds(corners: Corners, boxWidth: number, boxHeight: number, margin = 0): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
   const extent = cornersExtent(corners)
+  const plain = { x: extent.x * boxWidth, y: extent.y * boxHeight, width: extent.width * boxWidth, height: extent.height * boxHeight }
+  if (!(margin > 0)) return plain
+  const matrix = boxWarpMatrix(corners, boxWidth, boxHeight)
+  const grown = [[-margin, -margin], [boxWidth + margin, -margin], [boxWidth + margin, boxHeight + margin], [-margin, boxHeight + margin]] as const
+  // A perspective whose horizon comes that close has no bounds there; the margin is left out.
+  const side = Math.sign(matrix[8])
+  if (grown.some(([x, y]) => (matrix[6] * x + matrix[7] * y + matrix[8]) * side <= 1e-6 * Math.abs(matrix[8]))) return plain
+  const points = grown.map(([x, y]) => applyMatrix(matrix, x, y))
+  const left = Math.min(...points.map((point) => point[0]))
+  const top = Math.min(...points.map((point) => point[1]))
+  return { x: left, y: top, width: Math.max(...points.map((point) => point[0])) - left, height: Math.max(...points.map((point) => point[1])) - top }
+}
+
+/**
+ * Where a layer of this box lands after its corners, as a raster at `ratio`
+ * raster pixels per box pixel, grown by a pixel each side for the soft edge,
+ * and by `margin` box pixels for what is drawn past the box.
+ */
+export function warpLayout(corners: Corners, boxWidth: number, boxHeight: number, ratio: number, margin = 0): WarpLayout {
+  const extent = warpedBounds(corners, boxWidth, boxHeight, margin)
   const pad = 1 / Math.max(1e-6, ratio)
   // On whole box pixels, so a box on whole canvas pixels is not resampled again where it is laid.
-  const x = Math.floor(extent.x * boxWidth - pad)
-  const y = Math.floor(extent.y * boxHeight - pad)
-  const width = Math.ceil((extent.x + extent.width) * boxWidth + pad) - x
-  const height = Math.ceil((extent.y + extent.height) * boxHeight + pad) - y
+  const x = Math.floor(extent.x - pad)
+  const y = Math.floor(extent.y - pad)
+  const width = Math.ceil(extent.x + extent.width + pad) - x
+  const height = Math.ceil(extent.y + extent.height + pad) - y
   const fit = Math.min(ratio, Math.sqrt(WARP_PIXELS / Math.max(1, width * height)))
   return { x, y, width, height, rasterWidth: Math.max(1, Math.ceil(width * fit)), rasterHeight: Math.max(1, Math.ceil(height * fit)) }
 }
 
 /**
  * The map from a pixel of the warped raster to the source raster that holds
- * the box's content (pixel centres at +0.5 on both sides).
+ * the box's content (pixel centres at +0.5 on both sides): the box is
+ * sourceWidth × sourceHeight source pixels, and the source starts `margin`
+ * box pixels before the box on each side.
  */
-export function warpSourceMatrix(corners: Corners, boxWidth: number, boxHeight: number, layout: WarpLayout, sourceWidth: number, sourceHeight: number): Matrix3 {
+export function warpSourceMatrix(corners: Corners, boxWidth: number, boxHeight: number, layout: WarpLayout, sourceWidth: number, sourceHeight: number, margin = 0): Matrix3 {
   // Raster pixel → box pixel.
   const toBox = scaleMatrix(layout.width / layout.rasterWidth, layout.height / layout.rasterHeight, layout.x, layout.y)
   // Box pixel (after the corners) → box pixel (before).
   const unwarp = invertMatrix(boxWarpMatrix(corners, boxWidth, boxHeight))
   // Box pixel → source raster pixel.
-  const toSource = scaleMatrix(sourceWidth / Math.max(1e-6, boxWidth), sourceHeight / Math.max(1e-6, boxHeight))
+  const sx = sourceWidth / Math.max(1e-6, boxWidth)
+  const sy = sourceHeight / Math.max(1e-6, boxHeight)
+  const toSource = scaleMatrix(sx, sy, margin * sx, margin * sy)
   return multiplyMatrices(toSource, multiplyMatrices(unwarp, toBox))
 }
 

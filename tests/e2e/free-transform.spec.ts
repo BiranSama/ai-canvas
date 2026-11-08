@@ -25,6 +25,10 @@ const image = (name: string, assetId: string, transform: Box, extra: Record<stri
   kind: 'element.add', element: { ...common, id: randomUUID(), type: 'image', name, assetId, transform, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general', ...extra }
 })
 
+const pathShape = (name: string, transform: Box, extra: Record<string, unknown> = {}): unknown => ({
+  kind: 'element.add', element: { ...common, id: randomUUID(), type: 'shape', name, transform, shape: 'path', path: 'M0 0 L100 0 L100 100 L0 100 Z', fill: '#3050A0', stroke: '#00FF00', strokeWidth: 0.1, cornerRadius: 0, role: 'final', ...extra }
+})
+
 async function importRamp(page: Page, size: number): Promise<string> {
   return page.evaluate(async ({ size }) => {
     const api = (globalThis as unknown as { desktop: DesktopApi }).desktop
@@ -81,7 +85,9 @@ test('flipped, skewed, distorted and perspective layers draw the same in the exp
       image('扭曲带样式', ramp, box(540, 700, 240, 240), {
         corners: [[0, 0.1], [1.1, 0], [0.9, 1.05], [0.05, 0.9]],
         style: { stroke: { enabled: true, size: 6, position: 'outside', color: '#FFFFFF', opacity: 1 }, dropShadow: { enabled: true, blendMode: 'multiply', color: '#000000', opacity: 0.6, angle: 120, distance: 10, spread: 0, size: 8 } }
-      })
+      }),
+      // A 20-pixel stroke centred on the outline: its outer half lies past the box.
+      pathShape('斜切描边', box(330, 340, 200, 200), { corners: [[0.2, 0], [1.2, 0], [1, 1], [0, 1]] })
     ])
     const exported = await rawPixels(await exportThroughPanel(page))
     const current = await currentScene(page)
@@ -100,6 +106,13 @@ test('flipped, skewed, distorted and perspective layers draw the same in the exp
     ] as const) {
       const worst = worstIn(exported, reference, area)
       expect(worst.value, `${name} worst at ${worst.x},${worst.y}`).toBeLessThanOrEqual(2)
+    }
+    // The skewed shape keeps the outer half of its stroke, below its box and left of its slanted side, in both.
+    for (const [name, picture] of [['export', exported], ['main', reference]] as const) {
+      for (const [x, y] of [[430, 545], [344, 440]] as const) {
+        const at = (y * WIDTH + x) * 4
+        expect([...picture.subarray(at, at + 3)].map((value) => value > 200 ? 'hi' : value < 60 ? 'lo' : 'mid'), `${name} stroke at ${x},${y}`).toEqual(['lo', 'hi', 'lo'])
+      }
     }
     // The flip did mirror: the dark frame is on the right now.
     const pixel = (x: number, y: number): number[] => [...exported.subarray((y * WIDTH + x) * 4, (y * WIDTH + x) * 4 + 3)]

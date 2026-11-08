@@ -64,12 +64,15 @@ export async function reframeCanvas(frame: CanvasFrame, label: string, options: 
     // A locked layer keeps its lock, unlocked for the change and locked again in the same step.
     masks.push(...(element.locked ? [{ kind: 'element.update', elementId: element.id, changes: { locked: false } } as SceneCommand, update, { kind: 'element.update', elementId: element.id, changes: { locked: true } } as SceneCommand] : [update]))
   }
-  const current = useWorkspaceStore.getState()
-  if (current.scene.revision !== scene.revision) {
-    showAppNotice('画布在这期间改动过，没有改尺寸，请再试一次。')
-    return false
-  }
-  if (!await current.execute(label, [...plan.commands, ...masks])) return false
+  // Worked out from the canvas as it was: checked again when the batch's turn comes, behind any change still on its way.
+  let changed = false
+  const applied = await useWorkspaceStore.getState().execute(label, (current) => {
+    if (current.revision === scene.revision) return [...plan.commands, ...masks]
+    changed = true
+    return null
+  })
+  if (changed) showAppNotice('画布在这期间改动过，没有改尺寸，请再试一次。')
+  if (!applied) return false
   deselect()
   const expand = options.expand ?? null
   if (expand !== null) {

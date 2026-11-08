@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import sharp from 'sharp'
 import { afterEach, expect, it } from 'vitest'
 import { ELEMENT_SCHEMA_VERSION, sceneSchema, type SceneElement } from '../../src/domain'
+import { layerRegion } from '../../src/main/edit/layer-in-context'
 import { GenerationRuntime } from '../../src/main/generation/generation-runtime'
 import type { GenerationJob } from '../../src/shared/generation'
 import { createNightVeilScene } from '../../src/renderer/src/fixtures/night-veil'
@@ -128,3 +129,21 @@ it('places an in-context redraw of a flipped picture square to the canvas, witho
     await runtime.close()
   }
 }, 30_000)
+
+it('takes the region a picture is drawn over, through its turn and its free-transform corners', () => {
+  const scene = sceneSchema.parse({ ...createNightVeilScene(), elements: [] })
+  const { outputWidth: width, outputHeight: height } = scene.canvas
+  const picture = {
+    ...BASE, id: '32000000-0000-4000-8000-000000000001', type: 'image', name: '斜切的图', zIndex: 0, transform: { x: 0.2, y: 0.2, width: 0.3, height: 0.3, rotation: 0 },
+    assetId: '32000000-0000-4000-8000-000000000002', crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general'
+  } as SceneElement
+  // Whole pixels around where it is drawn.
+  const pixels = (left: number, top: number, right: number, bottom: number) => ({ left: Math.floor(left), top: Math.floor(top), width: Math.ceil(right) - Math.floor(left), height: Math.ceil(bottom) - Math.floor(top) })
+  expect(layerRegion(scene, picture)!.core).toEqual(pixels(0.2 * width, 0.2 * height, 0.5 * width, 0.5 * height))
+  // Skewed one box-width to the right along the bottom: the region reaches that far.
+  const skewed = layerRegion(scene, { ...picture, corners: [[0, 0], [1, 0], [2, 1], [1, 1]] } as SceneElement)!
+  expect(skewed.core).toEqual(pixels(0.2 * width, 0.2 * height, 0.8 * width, 0.5 * height))
+  // Turned a quarter about its top-left corner, as the canvas turns it: it lies to the left of that corner.
+  const turned = layerRegion(scene, { ...picture, transform: { ...picture.transform, x: 0.6, rotation: 90 } } as SceneElement)!
+  expect(turned.core).toEqual(pixels(0.6 * width - 0.3 * height, 0.2 * height, 0.6 * width, 0.2 * height + 0.3 * width))
+})

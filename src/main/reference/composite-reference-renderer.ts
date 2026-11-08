@@ -1,6 +1,6 @@
 import sharp from 'sharp'
-import { affineOf, boxWarpMatrix, clipStacks, cornersAreIdentity, cornersDrawnAsMatrix, cornersExtent, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Corners, type Scene, type SceneElement } from '../../domain'
-import { warpLayout, warpPixels, warpSourceMatrix } from '../../shared/warp'
+import { affineOf, boxWarpMatrix, clipStacks, cornersAreIdentity, cornersDrawnAsMatrix, hiddenByGroups, pathInBox, sceneSchema, type ClipStack, type Corners, type Scene, type SceneElement } from '../../domain'
+import { warpedBounds, warpLayout, warpPixels, warpSourceMatrix } from '../../shared/warp'
 import { applyImageEffects, hasVisibleEffects, shadowGeometry, shadowSilhouette } from '../../shared/layer-effects'
 import { activeAdjustments, adjustLayerPixels, adjustmentClipIds, adjustPixels, coverageInBox, hasSpatialFilters, sampleCoverage } from '../../shared/adjustments'
 import { layerMaskCoverage, paintedImageBytes } from '../paint/painted-image'
@@ -142,12 +142,27 @@ function affineWarp(element: SceneElement, box: { readonly x: number; readonly y
   return ` matrix(${[a, b, c, d, box.x + e - a * box.x - c * box.y, box.y + f - b * box.x - d * box.y].map(precise).join(' ')})`
 }
 
-/** Where a layer's content lies after its corners, in its box's pixels. */
-function warpedExtent(element: SceneElement, w: number, h: number): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
+/** A shape's stroke as drawn here, in canvas pixels (a line is drawn in its fill when it has no stroke); 0 when it has none. */
+function shapeStrokeWidth(element: Extract<SceneElement, { type: 'shape' }>, width: number, height: number, box: { readonly w: number; readonly h: number }): number {
+  // A path's stroke is a share of its own box; the other shapes' of the canvas.
+  if (element.shape === 'path' && element.path !== undefined) return element.stroke === null ? 0 : Math.max(0, element.strokeWidth * Math.min(box.w, box.h))
+  const stroke = Math.max(0, element.strokeWidth * Math.min(width, height))
+  if (element.shape === 'line') return Math.max(1, stroke)
+  return element.stroke === null ? 0 : stroke
+}
+
+/** How far a layer is drawn past its box, in whole pixels: half a shape's stroke, centred on its outline, and a pixel for its soft edge. */
+function drawnMargin(element: SceneElement, width: number, height: number, box: { readonly w: number; readonly h: number }): number {
+  if (element.type !== 'shape') return 0
+  const stroke = shapeStrokeWidth(element, width, height, box)
+  return stroke > 0 ? Math.ceil(stroke / 2) + 1 : 0
+}
+
+/** Where a layer's content lies after its corners, in its box's pixels, with `margin` pixels drawn past the box. */
+function warpedExtent(element: SceneElement, w: number, h: number, margin: number): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
   const corners = layerCorners(element)
   if (corners === null) return { x: 0, y: 0, width: w, height: h }
-  const extent = cornersExtent(corners)
-  return { x: extent.x * w, y: extent.y * h, width: extent.width * w, height: extent.height * h }
+  return warpedBounds(corners, w, h, margin)
 }
 
 /**
@@ -159,13 +174,15 @@ async function warpedElementSvg(element: SceneElement, corners: Corners, mode: R
   const box = transform(element, width, height)
   const upright = { ...element, corners: null, opacity: 1, blendMode: 'normal', transform: { ...element.transform, rotation: 0 } } as SceneElement
   const inner = await elementSvg(upright, mode, width, height, resolveAsset, warnings)
-  const rasterWidth = Math.max(1, Math.ceil(box.w))
-  const rasterHeight = Math.max(1, Math.ceil(box.h))
-  const svg = `<svg width="${rasterWidth}" height="${rasterHeight}" viewBox="${finite(box.x)} ${finite(box.y)} ${rasterWidth} ${rasterHeight}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
+  // Drawn with what lies past the box (a stroke's outer half), so the warp keeps it.
+  const margin = drawnMargin(element, width, height, box)
+  const rasterWidth = Math.max(1, Math.ceil(box.w + 2 * margin))
+  const rasterHeight = Math.max(1, Math.ceil(box.h + 2 * margin))
+  const svg = `<svg width="${rasterWidth}" height="${rasterHeight}" viewBox="${finite(box.x - margin)} ${finite(box.y - margin)} ${rasterWidth} ${rasterHeight}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
   const pixels = await sharp(Buffer.from(svg)).ensureAlpha().raw().toBuffer()
-  const layout = warpLayout(corners, box.w, box.h, 1)
-  // The raster holds one pixel for each of the box's pixels.
-  const warped = warpPixels(pixels, rasterWidth, rasterHeight, layout.rasterWidth, layout.rasterHeight, warpSourceMatrix(corners, box.w, box.h, layout, box.w, box.h))
+  const layout = warpLayout(corners, box.w, box.h, 1, margin)
+  // The raster holds one pixel for each of the box's pixels, from `margin` before it.
+  const warped = warpPixels(pixels, rasterWidth, rasterHeight, layout.rasterWidth, layout.rasterHeight, warpSourceMatrix(corners, box.w, box.h, layout, box.w, box.h, margin))
   const png = await sharp(Buffer.from(warped.buffer), { raw: { width: layout.rasterWidth, height: layout.rasterHeight, channels: 4 } }).png().toBuffer()
   return `<g opacity="${finite(element.opacity)}" transform="${box.rotate}"${blendModeToSvgStyle(resolveBlendMode(element))}><image x="${finite(box.x + layout.x)}" y="${finite(box.y + layout.y)}" width="${finite(layout.width)}" height="${finite(layout.height)}" href="data:image/png;base64,${png.toString('base64')}" preserveAspectRatio="none"/></g>`
 }
@@ -201,7 +218,7 @@ type StyledElement = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
 async function styledElementSvg(element: StyledElement, mode: RenderMode, width: number, height: number, resolveAsset: ReferenceAssetResolver, warnings: string[]): Promise<string> {
   const box = transform(element, width, height)
   // Styled after its free transform: over where its corners took it.
-  const extent = warpedExtent(element, box.w, box.h)
+  const extent = warpedExtent(element, box.w, box.h, drawnMargin(element, width, height, box))
   const reach = styledLayerReach(element, extent.width, extent.height)
   const upright = { ...element, opacity: 1, blendMode: 'normal' as const, style: undefined, transform: { ...element.transform, rotation: 0 } } as StyledElement
   const inner = await elementSvg(upright, mode, width, height, resolveAsset, warnings)
@@ -323,13 +340,12 @@ async function elementSvg(
   if (element.type === 'shape') {
     const fill = escapeXml(element.fill)
     const stroke = element.stroke === null ? 'none' : escapeXml(element.stroke)
-    const strokeWidth = Math.max(0, element.strokeWidth * Math.min(width, height))
+    const strokeWidth = shapeStrokeWidth(element, width, height, box)
     if (element.shape === 'path' && element.path !== undefined) {
-      const ownWidth = Math.max(0, element.strokeWidth * Math.min(box.w, box.h))
-      return `${groupStart}<path d="${pathInBox(element.path, box.w, box.h, box.x, box.y)}" fill="${svgPaint(element.fill)}" stroke="${element.stroke === null ? 'none' : svgPaint(element.stroke)}" stroke-width="${finite(ownWidth)}" stroke-linejoin="round" stroke-linecap="round"/>${groupEnd}`
+      return `${groupStart}<path d="${pathInBox(element.path, box.w, box.h, box.x, box.y)}" fill="${svgPaint(element.fill)}" stroke="${element.stroke === null ? 'none' : svgPaint(element.stroke)}" stroke-width="${finite(strokeWidth)}" stroke-linejoin="round" stroke-linecap="round"/>${groupEnd}`
     }
     if (element.shape === 'ellipse') return `${groupStart}<ellipse cx="${finite(box.x + box.w / 2)}" cy="${finite(box.y + box.h / 2)}" rx="${finite(box.w / 2)}" ry="${finite(box.h / 2)}" fill="${fill}" stroke="${stroke}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`
-    if (element.shape === 'line') return `${groupStart}<line x1="${finite(box.x)}" y1="${finite(box.y + box.h / 2)}" x2="${finite(box.x + box.w)}" y2="${finite(box.y + box.h / 2)}" stroke="${stroke === 'none' ? fill : stroke}" stroke-width="${finite(Math.max(1, strokeWidth))}"/>${groupEnd}`
+    if (element.shape === 'line') return `${groupStart}<line x1="${finite(box.x)}" y1="${finite(box.y + box.h / 2)}" x2="${finite(box.x + box.w)}" y2="${finite(box.y + box.h / 2)}" stroke="${stroke === 'none' ? fill : stroke}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`
     return `${groupStart}<rect x="${finite(box.x)}" y="${finite(box.y)}" width="${finite(box.w)}" height="${finite(box.h)}" rx="${finite(Math.min(box.w, box.h) * element.cornerRadius)}" fill="${fill}" stroke="${stroke}" stroke-width="${finite(strokeWidth)}"/>${groupEnd}`
   }
 

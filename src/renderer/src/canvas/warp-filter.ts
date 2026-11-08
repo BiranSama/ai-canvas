@@ -1,6 +1,6 @@
 import type { FilterFunction } from 'konva/lib/Node'
-import { boxWarpMatrix, cornersAreIdentity, cornersExtent, invertMatrix, multiplyMatrices, scaleMatrix, type Corners } from '../../../domain'
-import { warpPixels } from '../../../shared/warp'
+import { boxWarpMatrix, cornersAreIdentity, invertMatrix, multiplyMatrices, scaleMatrix, type Corners, type SceneElement } from '../../../domain'
+import { warpedBounds, warpPixels } from '../../../shared/warp'
 
 /** What a warped group's filter needs: the corners, the box and the area its picture covers, in the group's units. */
 export interface WarpAttrs {
@@ -29,9 +29,20 @@ export const warpFilter: FilterFunction = function (this: { getAttr(name: string
   data.set(warped)
 }
 
-/** The content's extent after its corners, in the box's units, or the box itself. */
-export function warpedExtent(corners: Corners | null | undefined, width: number, height: number): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
+/** The content's extent after its corners, in the box's units, with `margin` units drawn past the box (a stroke's outer half); or the box itself. */
+export function warpedExtent(corners: Corners | null | undefined, width: number, height: number, margin = 0): { readonly x: number; readonly y: number; readonly width: number; readonly height: number } {
   if (cornersAreIdentity(corners)) return { x: 0, y: 0, width, height }
-  const extent = cornersExtent(corners!)
-  return { x: extent.x * width, y: extent.y * height, width: extent.width * width, height: extent.height * height }
+  return warpedBounds(corners!, width, height, margin)
+}
+
+/**
+ * How far a layer is drawn past its box, in the box's units: half a shape's
+ * stroke, which is centred on its outline, and a pixel for its soft edge (as
+ * ElementVisual draws it). Nothing for other layers.
+ */
+export function drawnMargin(element: SceneElement, width: number, height: number): number {
+  if (element.type !== 'shape') return 0
+  const stroke = element.strokeWidth * Math.min(width, height)
+  const drawn = element.shape === 'line' ? Math.max(1, stroke) : element.stroke === null ? 0 : stroke
+  return drawn > 0 ? Math.ceil(drawn / 2) + 1 : 0
 }

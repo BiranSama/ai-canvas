@@ -15,13 +15,15 @@ import { warpedExtent, warpFilter, type WarpAttrs } from './warp-filter'
 /** The most pixels a warped layer is drawn into on the canvas. */
 const WARP_PIXELS = 16_000_000
 
-export function CornersLayer({ corners, text = false, width, height, ratio, maxPixels = WARP_PIXELS, children }: {
+export function CornersLayer({ corners, text = false, width, height, margin = 0, ratio, maxPixels = WARP_PIXELS, children }: {
   readonly corners: Corners | null | undefined
   /** A text layer: its skew is drawn as a matrix, so the type stays crisp. */
   readonly text?: boolean
   /** The layer's box in the group's units. */
   readonly width: number
   readonly height: number
+  /** How far the content is drawn past the box, in the group's units (see drawnMargin). */
+  readonly margin?: number
   /** Raster pixels per unit, for a distort or a perspective. */
   readonly ratio: number
   readonly maxPixels?: number
@@ -33,13 +35,13 @@ export function CornersLayer({ corners, text = false, width, height, ratio, maxP
   }, [corners, text, width, height])
   if (cornersAreIdentity(corners) || width <= 0 || height <= 0) return <>{children}</>
   if (affine !== null) return <Group {...affine}>{children}</Group>
-  const extent = warpedExtent(corners, width, height)
-  // The picture covers the box, where the content is drawn, and where the corners take it, with a pixel to spare.
-  // On whole units, as Main lays its warped picture, so neither is resampled again where it lies.
+  const extent = warpedExtent(corners, width, height, margin)
+  // The picture covers the box and what is drawn past it, where the content is drawn, and where the corners take
+  // it, with a pixel to spare. On whole units, as Main lays its warped picture, so neither is resampled again where it lies.
   const pad = 1 / Math.max(1e-6, ratio)
-  const left = Math.floor(Math.min(0, extent.x) - pad)
-  const top = Math.floor(Math.min(0, extent.y) - pad)
-  const rect = { x: left, y: top, width: Math.ceil(Math.max(width, extent.x + extent.width) + pad) - left, height: Math.ceil(Math.max(height, extent.y + extent.height) + pad) - top }
+  const left = Math.floor(Math.min(-margin, extent.x) - pad)
+  const top = Math.floor(Math.min(-margin, extent.y) - pad)
+  const rect = { x: left, y: top, width: Math.ceil(Math.max(width + margin, extent.x + extent.width) + pad) - left, height: Math.ceil(Math.max(height + margin, extent.y + extent.height) + pad) - top }
   const warp: WarpAttrs = { corners: corners!, boxWidth: width, boxHeight: height, rect }
   const quad = corners!.flatMap(([u, v]) => [u * width, v * height])
   return (

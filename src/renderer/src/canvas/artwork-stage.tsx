@@ -6,7 +6,7 @@ import { resolveBlendMode } from '../../../shared/blend-mode'
 import { hasLayerStyles } from '../../../shared/layer-styles'
 import { StyledLayer } from './styled-layer'
 import { CornersLayer } from './warped-layer'
-import { warpedExtent } from './warp-filter'
+import { drawnMargin, warpedExtent } from './warp-filter'
 import { IsolatedGroup } from './clip-stack'
 import { opaqueWhereCovered } from './opaque-filter'
 import { ElementVisual } from './element-visual'
@@ -124,13 +124,15 @@ function ArtworkLayer({ draw, outputScale }: { readonly draw: LayerDraw; readonl
   const element = draw.element
   // Through its free-transform corners, mask and all, before its styles.
   const corners = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null
-  const masked = <CornersLayer corners={corners} text={element.type === 'text'} width={draw.width} height={draw.height} ratio={1} maxPixels={Math.max(WARP_EXPORT_PIXELS, draw.width * draw.height * 4)}>{maskedBox}</CornersLayer>
+  // A mask-only draw is the box in white, drawn to its edge.
+  const margin = draw.maskOnly ? 0 : drawnMargin(element, draw.width, draw.height)
+  const masked = <CornersLayer corners={corners} text={element.type === 'text'} width={draw.width} height={draw.height} margin={margin} ratio={1} maxPixels={Math.max(WARP_EXPORT_PIXELS, draw.width * draw.height * 4)}>{maskedBox}</CornersLayer>
   const styled = !draw.maskOnly && (element.type === 'image' || element.type === 'text' || element.type === 'shape') && hasLayerStyles(element.style)
   return (
     // A styled layer blends its content itself, so its shadow and glow keep their own modes.
     <Group x={draw.x} y={draw.y} width={draw.width} height={draw.height} rotation={element.transform.rotation} opacity={draw.opacity} globalCompositeOperation={styled ? 'source-over' : draw.operation}>
       {!styled ? masked : (
-        <StyledLayer element={element as Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>} width={draw.width} height={draw.height} extent={warpedExtent(corners, draw.width, draw.height)} unit={outputScale} ratio={1}
+        <StyledLayer element={element as Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>} width={draw.width} height={draw.height} extent={warpedExtent(corners, draw.width, draw.height, margin)} unit={outputScale} ratio={1}
           rotation={element.transform.rotation} blend={draw.operation === 'source-over' ? 'normal' : resolveBlendMode(element)} contentKey={draw}>
           {masked}
         </StyledLayer>

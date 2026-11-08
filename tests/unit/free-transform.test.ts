@@ -37,7 +37,7 @@ import {
 } from '../../src/domain'
 import { produce } from 'immer'
 import { applySceneCommand } from '../../src/domain/commands/apply-command'
-import { warpLayerPixels, warpLayout } from '../../src/shared/warp'
+import { warpLayerPixels, warpLayout, warpPixels, warpSourceMatrix } from '../../src/shared/warp'
 import { expandBand, expandMask } from '../../src/renderer/src/selection/generative-fill'
 import { IDS, makeAllElementTypesScene } from '../fixtures/scene-fixtures'
 
@@ -162,6 +162,26 @@ describe('warp', () => {
   })
 })
 
+describe('warp past the box', () => {
+  it('keeps what is drawn past the box, a stroke\'s outer half, through the warp', () => {
+    const corners: Corners = [[0.2, 0], [1.2, 0], [1, 1], [0, 1]]
+    const margin = 4
+    const size = 20 + 2 * margin
+    // A line three pixels left of the box, all the way down, in a source that starts `margin` before the box.
+    const source = new Uint8ClampedArray(size * size * 4)
+    for (let y = 0; y < size; y += 1) source.set([255, 255, 255, 255], (y * size + 1) * 4)
+    expect(warpLayout(corners, 20, 20, 1).x).toBeGreaterThan(-3)
+    const layout = warpLayout(corners, 20, 20, 1, margin)
+    expect(layout.x).toBeLessThanOrEqual(-margin - 1)
+    const pixels = warpPixels(source, size, size, layout.rasterWidth, layout.rasterHeight, warpSourceMatrix(corners, 20, 20, layout, 20, 20, margin))
+    const alpha = (x: number, y: number): number => pixels[((y - layout.y) * layout.rasterWidth + (x - layout.x)) * 4 + 3]!
+    // At the bottom the skew has barely moved it; at the top it went a fifth of the box to the right.
+    expect(alpha(-3, 19)).toBeGreaterThan(100)
+    expect(alpha(1, 0)).toBeGreaterThan(100)
+    expect(alpha(-3, 0)).toBe(0)
+  })
+})
+
 describe('reframe', () => {
   function sceneWithAdjustment(): Scene {
     const scene = makeAllElementTypesScene()
@@ -223,6 +243,9 @@ describe('reframe', () => {
     const mask = Uint8Array.from([0, 255, 10, 20])
     expect([...remapGrayMask(mask, 2, 2, { left: -1, top: 0, width: 4, height: 2 }, 4, 2)]).toEqual([0, 0, 255, 255, 10, 10, 20, 20])
     expect(aspectNear(1234, 567)).toEqual({ width: 37, height: 17 })
+    // Past 100:1 either way, the nearest ratio the canvas can store, still the right way round.
+    expect(aspectNear(8192, 64)).toEqual({ width: 100, height: 1 })
+    expect(aspectNear(64, 16384)).toEqual({ width: 1, height: 100 })
   })
 })
 
