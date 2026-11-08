@@ -1,5 +1,6 @@
-import { layerCornerPoints, type Scene, type SceneElement } from '../../../domain'
+import { cornersAreIdentity, type Scene, type SceneElement } from '../../../domain'
 import { MAX_EXPORT_EDGE } from '../../../shared/artwork-export'
+import { warpedBounds } from '../../../shared/warp'
 import { hasVisibleEffects, shadowGeometry } from '../../../shared/layer-effects'
 import { isFinalContent } from '../canvas/layer-drawing'
 
@@ -63,6 +64,10 @@ export interface Area {
   readonly height: number
 }
 
+function sameArea(a: Area, b: Area): boolean {
+  return a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+}
+
 /**
  * Where a layer can have pixels, in document pixels, also past the canvas
  * edge: its box turned about its top-left corner, with room for a stroke
@@ -72,18 +77,33 @@ export interface Area {
  */
 export function layerArea(element: SceneElement, width: number, height: number): Area {
   const box = { x: element.transform.x * width, y: element.transform.y * height, w: element.transform.width * width, h: element.transform.height * height }
-  // The box and, after a free transform, where its corners went: what is drawn lies within them.
-  const warped = 'corners' in element ? element.corners : null
-  const corners = [...layerCornerPoints(element.transform, null, { width, height }), ...(warped === null || warped === undefined ? [] : layerCornerPoints(element.transform, warped, { width, height }))]
-    .map(([x, y]) => ({ x, y }))
+  // Drawn past the box before its free-transform corners take it (a stroke, a text's shadow), and after (the soft edge, an image's shadow).
+  let before = 0
   let margin = 2
-  if (element.type === 'text') margin += element.strokeWidth + element.shadowBlur * 2
-  if (element.type === 'shape' && element.stroke !== null) margin += element.strokeWidth * Math.min(box.w, box.h)
+  if (element.type === 'text') before += element.strokeWidth + element.shadowBlur * 2
+  if (element.type === 'shape' && element.stroke !== null) before += element.strokeWidth * Math.min(box.w, box.h)
   // Sketch strokes run to the box's edges with round caps, and their curves can bow a little past them.
-  if (element.type === 'sketch') margin += Math.max(1, ...element.strokes.map((stroke) => stroke.width * Math.min(box.w, box.h))) + 0.1 * Math.max(box.w, box.h)
+  if (element.type === 'sketch') before += Math.max(1, ...element.strokes.map((stroke) => stroke.width * Math.min(box.w, box.h))) + 0.1 * Math.max(box.w, box.h)
   if (element.type === 'image' && hasVisibleEffects(element.effects) && element.effects?.shadow != null) {
     const shadow = shadowGeometry(element.effects.shadow, box.w, box.h)
     margin += shadow.padding + Math.max(Math.abs(shadow.offsetX), Math.abs(shadow.offsetY))
+  }
+  // The box grown by what is drawn past it and, after a free transform, where its corners take that: a skew
+  // or a perspective stretches a stroke as it stretches the box. Both are turned about the box's top-left corner.
+  const warped = 'corners' in element && !cornersAreIdentity(element.corners) ? element.corners! : null
+  const reach = (area: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }): { x: number; y: number }[] => {
+    const angle = element.transform.rotation * Math.PI / 180
+    const cos = Math.cos(angle)
+    const sin = Math.sin(angle)
+    return [[area.x, area.y], [area.x + area.width, area.y], [area.x + area.width, area.y + area.height], [area.x, area.y + area.height]]
+      .map(([x, y]) => ({ x: box.x + x! * cos - y! * sin, y: box.y + x! * sin + y! * cos }))
+  }
+  const corners = reach({ x: -before, y: -before, width: box.w + 2 * before, height: box.h + 2 * before })
+  if (warped !== null) {
+    const grown = warpedBounds(warped, box.w, box.h, before)
+    corners.push(...reach(grown))
+    // Past a perspective's horizon the grown box has no bounds and the plain one comes back: keep the room around it.
+    if (before > 0 && sameArea(grown, warpedBounds(warped, box.w, box.h))) margin += before
   }
   const left = Math.floor(Math.min(...corners.map((corner) => corner.x)) - margin)
   const top = Math.floor(Math.min(...corners.map((corner) => corner.y)) - margin)

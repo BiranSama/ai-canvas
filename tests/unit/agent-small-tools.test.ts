@@ -136,6 +136,21 @@ describe('small agent tools', () => {
     expect(turned.type === 'shape' ? turned.corners ?? null : 'not a shape').toBeNull()
   })
 
+  it('fits a group again around a layer whose corners it set or put back', async () => {
+    const harness = new Harness()
+    await harness.call('add_shape', { shape: 'rectangle', box: [10, 10, 20, 20] })
+    await harness.call('add_shape', { shape: 'ellipse', box: [40, 10, 20, 20] })
+    await harness.call('group', { targets: ['E1', 'E2'], name: '色块组' })
+    const group = (): SceneElement => harness.scene.elements.find((element) => element.type === 'group')!
+    const right = (): number => Math.round((group().transform.x + group().transform.width) * 1000) / 1000
+    expect(right()).toBe(0.6)
+    // The ellipse's right side pulled out a whole box width: the group reaches as far.
+    expect((await harness.call('transform', { targets: ['E2'], corners: [0, 0, 200, 0, 200, 100, 0, 100] })).result).toMatchObject({ ok: true })
+    expect(right()).toBe(0.8)
+    expect((await harness.call('transform', { targets: ['E2'], reset: true })).result).toMatchObject({ ok: true })
+    expect(right()).toBe(0.6)
+  })
+
   it('extends or trims the canvas with every layer kept where it is', async () => {
     const harness = new Harness()
     await harness.call('add_shape', { shape: 'rectangle', box: [10, 10, 40, 20] })

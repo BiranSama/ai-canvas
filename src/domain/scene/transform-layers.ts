@@ -121,7 +121,6 @@ export type TransformOutcome =
 export function transformLayers(scene: Scene, layers: readonly SceneElement[], map: (point: Point) => Point): TransformOutcome {
   const canvas = canvasSize(scene)
   const changes = new Map<string, Record<string, unknown>>()
-  const transforms = new Map<string, SceneElement['transform']>()
   for (const layer of layers) {
     const before = layerCornerPoints(layer.transform, 'corners' in layer ? layer.corners : null, canvas)
     const after = before.map(map) as unknown as Quad
@@ -150,14 +149,23 @@ export function transformLayers(scene: Scene, layers: readonly SceneElement[], m
     change.transform = placed.transform
     if (reach !== 'box') change.corners = placed.corners
     changes.set(layer.id, change)
-    transforms.set(layer.id, placed.transform)
   }
   const commands: SceneCommand[] = [...changes].map(([elementId, change]) => ({ kind: 'element.update', elementId, changes: change }))
-  // Groups fitted around their layers again, innermost first.
+  commands.push(...refitGroupsAround(scene, layers.map((layer) => layer.id), changes))
+  return { ok: true, commands, changes }
+}
+
+/**
+ * The groups holding these layers fitted again around what their layers now
+ * cover, innermost first: `changed` holds each changed layer's new box and,
+ * when they changed, its new corners.
+ */
+export function refitGroupsAround(scene: Scene, layerIds: readonly string[], changed: ReadonlyMap<string, Readonly<Record<string, unknown>>>): SceneCommand[] {
+  const canvas = canvasSize(scene)
   const byId = new Map(scene.elements.map((element) => [element.id, element]))
   const groups = new Set<string>()
-  for (const layer of layers) {
-    let parent = layer.groupId
+  for (const id of layerIds) {
+    let parent = byId.get(id)?.groupId ?? null
     while (parent !== null) {
       groups.add(parent)
       parent = byId.get(parent)?.groupId ?? null
@@ -169,6 +177,8 @@ export function transformLayers(scene: Scene, layers: readonly SceneElement[], m
     while (parent !== null) { count += 1; parent = byId.get(parent)?.groupId ?? null }
     return count
   }
+  const fitted = new Map<string, SceneElement['transform']>()
+  const commands: SceneCommand[] = []
   for (const groupId of [...groups].sort((a, b) => depth(b) - depth(a))) {
     const group = byId.get(groupId)
     if (group?.type !== 'group') continue
@@ -176,14 +186,14 @@ export function transformLayers(scene: Scene, layers: readonly SceneElement[], m
     if (children.length === 0) continue
     // Around what each layer now covers, its new corners included, so a part reshaped past its box is in the group's.
     const transform = boxAroundLayers(children.map((child) => {
-      const change = changes.get(child.id)
+      const change = changed.get(child.id)
       const corners = change !== undefined && 'corners' in change ? change.corners as Corners | null : 'corners' in child ? child.corners : null
-      return { transform: transforms.get(child.id) ?? child.transform, corners }
+      return { transform: fitted.get(child.id) ?? (change?.transform as SceneElement['transform'] | undefined) ?? child.transform, corners }
     }), canvas)
-    transforms.set(groupId, transform)
+    fitted.set(groupId, transform)
     commands.push({ kind: 'element.update', elementId: groupId, changes: { transform } })
   }
-  return { ok: true, commands, changes }
+  return commands
 }
 
 /** Layers moved through the homography from one quad to another. */

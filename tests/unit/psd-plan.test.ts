@@ -79,6 +79,21 @@ describe('where a PSD layer is drawn', () => {
     expect(turned.y + turned.height).toBeGreaterThanOrEqual(500 + 200 + 24)
   })
 
+  it('takes a shape\'s stroke through its corners, as a skew stretches it with the box', () => {
+    const base = named(coffee, '底部色块')
+    // A 100-pixel square with a 10-pixel stroke, its bottom pushed four boxes to the right.
+    const skewed = {
+      ...base, type: 'shape', shape: 'rectangle', stroke: '#000000', strokeWidth: 0.1, cornerRadius: 0,
+      transform: { x: 0.1, y: 0.1, width: 0.1, height: 0.1, rotation: 0 }, corners: [[0, 0], [1, 0], [5, 1], [4, 1]]
+    } as unknown as SceneElement
+    const area = layerArea(skewed, 1000, 1000)
+    // The stroke's top-left corner lands at -10 - 4 × 10 = -50 from the box, its bottom-right at 110 + 4 × 110 = 550.
+    expect(area.x).toBeLessThanOrEqual(100 - 50)
+    expect(area.x + area.width).toBeGreaterThanOrEqual(100 + 550)
+    expect(area.y).toBeLessThanOrEqual(100 - 10)
+    expect(area.y + area.height).toBeGreaterThanOrEqual(100 + 110)
+  })
+
   it('leaves room for a sketch stroke drawn to its box edges', () => {
     const base = named(coffee, '底部色块')
     const sketch = {

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { cornersAreAffine, cornersAreDrawable, layerCanvasBounds, transformableLayers, transformLayers, type Corners, type Point, type SceneCommand } from '../../../domain'
+import { cornersAreAffine, cornersAreDrawable, layerCanvasBounds, refitGroupsAround, transformableLayers, transformLayers, type Corners, type Point, type SceneCommand } from '../../../domain'
 import { batchPlan, sceneWrite } from './scene-write'
 import { defineTool, rejected, resolveTargets } from './types'
 
@@ -55,6 +55,9 @@ export const transformTool = defineTool({
         }
         if (commands.length === 0) return rejected(`${refs} 没有做过翻转、斜切或透视。`)
       }
+      // The groups around them fitted again to what the layers now cover.
+      const changed = new Map(commands.flatMap((command) => command.kind === 'element.update' ? [[command.elementId, command.changes] as const] : []))
+      commands.push(...refitGroupsAround(scene, [...changed.keys()], changed))
       const summary = args.reset === true ? `已还原 ${refs} 的四角` : `已给 ${refs} 设四角`
       return sceneWrite(batchPlan(summary, commands), context, summary, layers.map((layer) => layer.id))
     }
