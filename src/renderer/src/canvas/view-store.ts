@@ -59,6 +59,18 @@ export const useView = create<ViewState>((set, get) => ({
   }
 }))
 
+/**
+ * Changes the canvas's guides in one step. The change is worked out from the
+ * guides as they are when its turn comes, behind any change still on its
+ * way, so two quick edits both stand; null leaves them as they are.
+ */
+export function editGuides(label: string, edit: (guides: readonly Guide[]) => readonly Guide[] | null): Promise<boolean> {
+  return useWorkspaceStore.getState().execute(label, (scene) => {
+    const next = edit(scene.canvas.guides ?? [])
+    return next === null ? null : [{ kind: 'scene.set-canvas', canvas: { ...scene.canvas, guides: [...next] } }]
+  })
+}
+
 /** The lines things snap to along an axis, in canvas pixels: the canvas's edges and middle, the shown guides, and the shown grid near a value. */
 export function snapLines(axis: 'x' | 'y', near?: number): number[] {
   const { scene } = useWorkspaceStore.getState()

@@ -2,7 +2,7 @@ import { Ruler } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MAX_GUIDES, type Guide } from '../../../domain'
-import { useView } from '../canvas/view-store'
+import { editGuides, useView } from '../canvas/view-store'
 import { useWorkspaceStore } from '../store/workspace-store'
 
 /*
@@ -51,10 +51,6 @@ export function ViewMenu(): React.JSX.Element {
     setOpen((value) => !value)
   }
 
-  const setGuides = (next: readonly Guide[], label: string): void => {
-    const { scene, execute } = useWorkspaceStore.getState()
-    void execute(label, [{ kind: 'scene.set-canvas', canvas: { ...scene.canvas, guides: [...next] } }])
-  }
   const value = Number(position)
   const canAdd = position.trim() !== '' && Number.isFinite(value) && guides.length < MAX_GUIDES
 
@@ -77,7 +73,7 @@ export function ViewMenu(): React.JSX.Element {
           <form className="view-menu-row" onSubmit={(event) => {
             event.preventDefault()
             if (!canAdd) return
-            setGuides([...guides, { axis, position: Math.round(value) }], '新建参考线')
+            void editGuides('新建参考线', (current) => [...current, { axis, position: Math.round(value) }])
             if (!view.guides) view.toggle('guides')
             setPosition('')
           }}>
@@ -88,7 +84,7 @@ export function ViewMenu(): React.JSX.Element {
             <input aria-label="参考线位置" type="number" placeholder="像素" value={position} onChange={(event) => setPosition(event.currentTarget.value)} />
             <button type="submit" disabled={!canAdd}>新建</button>
           </form>
-          <button type="button" className="view-menu-clear" disabled={guides.length === 0} onClick={() => setGuides([], '清除参考线')}>清除参考线（{guides.length}）</button>
+          <button type="button" className="view-menu-clear" disabled={guides.length === 0} onClick={() => void editGuides('清除参考线', (current) => current.length === 0 ? null : [])}>清除参考线（{guides.length}）</button>
         </div>,
         document.body
       )}

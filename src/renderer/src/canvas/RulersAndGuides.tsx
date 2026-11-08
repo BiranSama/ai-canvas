@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Guide } from '../../../domain'
 import { useWorkspaceStore } from '../store/workspace-store'
-import { snapValue, useView } from './view-store'
+import { editGuides, snapValue, useView } from './view-store'
 
 /*
  * Photoshop's rulers, guides and grid over the stage. The rulers count
@@ -124,11 +124,6 @@ export function RulersAndGuides({ originX, originY, zoom, width, height, interac
     if (view.grid && grid.current !== null) drawGrid(grid.current, width, height, originX, originY, zoom, canvas.outputWidth, canvas.outputHeight, view.gridSpacing, view.gridDivisions)
   }, [view.grid, view.gridSpacing, view.gridDivisions, width, height, originX, originY, zoom, canvas.outputWidth, canvas.outputHeight])
 
-  const commit = (next: readonly Guide[], label: string): void => {
-    const { scene, execute } = useWorkspaceStore.getState()
-    void execute(label, [{ kind: 'scene.set-canvas', canvas: { ...scene.canvas, guides: [...next] } }])
-  }
-
   const begin = (event: React.PointerEvent, axis: Guide['axis'], index: number | null): void => {
     if (event.button !== 0) return
     event.preventDefault()
@@ -150,17 +145,28 @@ export function RulersAndGuides({ originX, originY, zoom, width, height, interac
       window.removeEventListener('pointerup', up)
       const final = at(pointer.clientX, pointer.clientY, pointer.ctrlKey || pointer.metaKey)
       setDrag(null)
-      const current = useWorkspaceStore.getState().scene.canvas.guides ?? []
       if (index === null) {
         if (!final.overRuler) {
-          commit([...current, { axis, position: final.position }], '新建参考线')
+          void editGuides('新建参考线', (current) => [...current, { axis, position: final.position }])
           // A guide just made is shown, as Photoshop turns them on.
           if (!useView.getState().guides) useView.getState().toggle('guides')
         }
-      } else if (final.overRuler) {
-        commit(current.filter((_, at) => at !== index), '删除参考线')
-      } else if (current[index]?.position !== final.position) {
-        commit(current.map((guide, at) => at === index ? { axis, position: final.position } : guide), '移动参考线')
+        return
+      }
+      // The guide picked up, found again by where it was when the change's turn comes.
+      const picked = (useWorkspaceStore.getState().scene.canvas.guides ?? [])[index]
+      if (picked === undefined) return
+      const find = (current: readonly Guide[]): number => current.findIndex((guide) => guide.axis === picked.axis && guide.position === picked.position)
+      if (final.overRuler) {
+        void editGuides('删除参考线', (current) => {
+          const at = find(current)
+          return at < 0 ? null : current.filter((_, other) => other !== at)
+        })
+      } else if (picked.position !== final.position) {
+        void editGuides('移动参考线', (current) => {
+          const at = find(current)
+          return at < 0 ? null : current.map((guide, other) => other === at ? { axis, position: final.position } : guide)
+        })
       }
     }
     window.addEventListener('pointermove', move)

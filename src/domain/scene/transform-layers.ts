@@ -138,6 +138,11 @@ export function transformLayers(scene: Scene, layers: readonly SceneElement[], m
         if (scaled === null) placed = placeFromCornerPoints(after, layer.transform, canvas, true, true)!
         else Object.assign(change, scaled)
       }
+    } else if (layer.type === 'image' && layer.fit !== 'fill') {
+      // A picture fitted into its box (contain, cover) would be fitted again to a box of another shape, not
+      // stretched: it keeps its box, and what was done to it goes into its corners.
+      const shape = (box: SceneElement['transform']): number => (box.width * canvas.width) / Math.max(1e-9, box.height * canvas.height)
+      if (Math.abs(shape(placed.transform) / shape(layer.transform) - 1) > 1e-6) placed = placeFromCornerPoints(after, layer.transform, canvas, false, true) ?? placed
     }
     if (reach === 'box' && placed.corners !== null) return { ok: false, reason: `「${layer.name}」只能移动、缩放和旋转，不能翻转或变形。` }
     if (placed.corners !== null && !cornersAreDrawable(placed.corners)) return { ok: false, reason: `「${layer.name}」会被翻折或压扁，换个形状再试。` }

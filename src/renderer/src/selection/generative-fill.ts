@@ -11,13 +11,14 @@ import { useWorkspaceStore } from '../store/workspace-store'
  */
 
 export async function submitGenerativeFill(mask: GrayMask, prompt: string, options: { readonly expand?: boolean } = {}): Promise<boolean> {
+  // The scene the mask was drawn on: sent with it, so Main turns the request down if the canvas changes meanwhile.
   const { scene, setActiveView } = useWorkspaceStore.getState()
   try {
     const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: options.expand === true ? '生成式扩展区域.png' : '生成式填充选区.png', width: mask.width, height: mask.height, gray: new Uint8Array(mask.data) })
     const provider = await preferredImageProvider('edit')
     if (provider.note !== null) showAppNotice(provider.note)
     await window.desktop.editFromCanvas({
-      scene: useWorkspaceStore.getState().scene,
+      scene,
       targetElementId: null,
       mode: 'selection',
       selectionMaskAssetId: asset.id,

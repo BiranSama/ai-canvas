@@ -290,6 +290,31 @@ describe('transform box handles', () => {
     expect(textOutcome).toEqual({ ok: false, reason: '「主标题」是文字，只能翻转和斜切；扭曲、透视要先栅格化。' })
   })
 
+  it('stretches a picture fitted into its box through its corners, and scales it as a box when kept in proportion', () => {
+    const scene = makeAllElementTypesScene()
+    const image = scene.elements.find((element) => element.id === IDS.image)!
+    expect(image.type === 'image' ? image.fit : null).toBe('contain')
+    const from = transformQuad(scene, [image])!
+    const fixed = from[0]
+    const resized = (factorX: number, factorY: number, picture: SceneElement): SceneElement => {
+      const outcome = transformLayersByQuads(sceneSchema.parse({ ...scene, elements: scene.elements.map((element) => element.id === picture.id ? picture : element) }), [picture], from, from.map(([x, y]) => [fixed[0] + (x - fixed[0]) * factorX, fixed[1] + (y - fixed[1]) * factorY]) as unknown as Quad)
+      expect(outcome.ok).toBe(true)
+      return applyCommands(scene, outcome.ok ? outcome.commands : []).elements.find((element) => element.id === picture.id)!
+    }
+    // Widened: the box stays, so it is not fitted again; the stretch is in its corners.
+    const widened = resized(1.5, 1, image)
+    expect(widened.transform).toEqual(image.transform)
+    close((widened.type === 'image' ? widened.corners ?? [] : []).flat(), [0, 0, 1.5, 0, 1.5, 1, 0, 1], 4)
+    // Doubled: the same shape of box, so it is simply larger.
+    const doubled = resized(2, 2, image)
+    expect(doubled.transform.width).toBeCloseTo(image.transform.width * 2, 4)
+    expect(doubled.type === 'image' ? doubled.corners ?? null : 'not an image').toBeNull()
+    // A picture filling its box stretches with the box.
+    const filling = resized(1.5, 1, { ...image, fit: 'fill' } as SceneElement)
+    expect(filling.transform.width).toBeCloseTo(image.transform.width * 1.5, 4)
+    expect(filling.type === 'image' ? filling.corners ?? null : 'not an image').toBeNull()
+  })
+
   it('scales text by its type when kept in proportion, and stretches it in its box when not', () => {
     const scene = makeAllElementTypesScene()
     const text = scene.elements.find((element) => element.id === IDS.text)!
