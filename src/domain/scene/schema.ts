@@ -7,9 +7,11 @@ export const SCENE_SCHEMA_VERSION = 1 as const
 export const ELEMENT_SCHEMA_VERSION = 1 as const
 
 const finiteNumber = z.number().finite()
-/** Shares of the canvas; wide enough that cropping to a small part keeps every layer, as Photoshop keeps them off the canvas. */
-const normalizedPosition = finiteNumber.min(-256).max(256)
-const normalizedSize = finiteNumber.positive().max(256)
+/** How far from the canvas, and how large, a layer can be, in shares of the canvas: wide enough that cropping to a small part keeps every layer, as Photoshop keeps them off the canvas. */
+export const MAX_NORMALIZED_POSITION = 256
+export const MAX_NORMALIZED_SIZE = 256
+const normalizedPosition = finiteNumber.min(-MAX_NORMALIZED_POSITION).max(MAX_NORMALIZED_POSITION)
+const normalizedSize = finiteNumber.positive().max(MAX_NORMALIZED_SIZE)
 const colorSchema = z.string().min(1).max(64)
 const idSchema = z.string().uuid()
 

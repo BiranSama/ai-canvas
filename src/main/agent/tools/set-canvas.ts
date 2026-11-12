@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { calculateOutputSize, createCanvasResizeCommands, parseAspectRatio, reframeScene, type Canvas } from '../../../domain'
+import { calculateOutputSize, createCanvasResizeCommands, MAX_NORMALIZED_SIZE, parseAspectRatio, reframeScene, type Canvas } from '../../../domain'
 import { colorSchema } from './geometry'
 import { batchPlan, sceneWrite } from './scene-write'
 import { defineTool, rejected } from './types'
@@ -34,6 +34,7 @@ export const setCanvasTool = defineTool({
       const frame = { left: -left, top: -top, width: current.outputWidth + left + right, height: current.outputHeight + top + bottom }
       if (frame.width < 64 || frame.height < 64 || frame.width > 16384 || frame.height > 16384) return rejected(`画布会变成 ${frame.width}×${frame.height}，要在 64~16384 像素之间。`)
       const plan = reframeScene(context.scene, frame)
+      if (plan.outOfRange.length > 0) return rejected(`${plan.outOfRange.slice(0, 3).map((name) => `「${name}」`).join('')} 在新画布上会比画布大或远出 ${MAX_NORMALIZED_SIZE} 倍，存不下。`, '先缩小、移近或删掉这些图层，或者少裁一些。')
       // An adjustment layer's mask is in the canvas's pixels and has to be cut to the new frame, which only the canvas can do.
       if (plan.maskRemaps.length > 0) return rejected('画布上有带蒙版的调整图层，它们的蒙版要跟着裁切，请用户在画布上用裁剪工具（C）或画布大小（Ctrl+Alt+C）调整。')
       const extras = {

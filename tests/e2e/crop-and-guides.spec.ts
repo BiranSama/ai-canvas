@@ -94,7 +94,12 @@ test('the crop tool trims and extends the canvas in one step each, layers, guide
     const bar = page.getByTestId('crop-bar')
     await expect(bar).toBeVisible()
     // A frame 200 pixels narrower and 100 shorter about the middle, from the bar; Enter applies it.
-    await bar.getByRole('spinbutton', { name: '裁剪宽度' }).fill(String(width - 200))
+    // The width typed digit by digit, as a person types it: nothing is limited until the field is left.
+    const widthField = bar.getByRole('spinbutton', { name: '裁剪宽度' })
+    await widthField.click()
+    await widthField.press('Control+a')
+    await widthField.pressSequentially(String(width - 200))
+    await expect(widthField).toHaveValue(String(width - 200))
     await bar.getByRole('spinbutton', { name: '裁剪高度' }).fill(String(height - 100))
     await page.keyboard.press('Enter')
     await expect.poll(async () => (await scene(page)).canvas.outputWidth).toBe(width - 200)

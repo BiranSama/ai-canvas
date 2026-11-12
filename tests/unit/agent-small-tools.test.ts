@@ -136,6 +136,23 @@ describe('small agent tools', () => {
     expect(turned.type === 'shape' ? turned.corners ?? null : 'not a shape').toBeNull()
   })
 
+  it('will not trim the canvas so far that a layer would be too large to keep', async () => {
+    const harness = new Harness()
+    await harness.call('add_shape', { shape: 'rectangle', box: [0, 0, 100, 100] })
+    harness.scene = sceneSchema.parse({
+      ...harness.scene,
+      canvas: { ...harness.scene.canvas, outputWidth: 8192, outputHeight: 8192, aspectWidth: 1, aspectHeight: 1 },
+      elements: harness.scene.elements.map((element) => ({ ...element, transform: { x: -1.5, y: -1.5, width: 4, height: 4, rotation: 0 } }))
+    })
+    const { outputWidth, outputHeight } = harness.scene.canvas
+    // From 8192 down to 64 pixels square: four canvases become 512.
+    const trim = [-(outputWidth - 64) / 2, -(outputHeight - 64) / 2, -(outputWidth - 64) / 2, -(outputHeight - 64) / 2].map(Math.round)
+    const { result } = await harness.call('set_canvas', { extend: trim })
+    expect(result.ok).toBe(false)
+    expect(result.summary).toContain('存不下')
+    expect(harness.scene.canvas.outputWidth).toBe(outputWidth)
+  })
+
   it('fits a group again around a layer whose corners it set or put back', async () => {
     const harness = new Harness()
     await harness.call('add_shape', { shape: 'rectangle', box: [10, 10, 20, 20] })

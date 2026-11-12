@@ -1,4 +1,4 @@
-import { maskFrame, reframeScene, remapGrayMask, type CanvasFrame, type SceneCommand } from '../../../domain'
+import { MAX_NORMALIZED_SIZE, maskFrame, reframeScene, remapGrayMask, type CanvasFrame, type SceneCommand } from '../../../domain'
 import type { GrayMask } from '../../../shared/mask-raster'
 import { maskCoverage, paintClipIds } from '../../../shared/paint-ops'
 import { showAppNotice } from '../components/app-notice'
@@ -42,6 +42,10 @@ export interface ReframeOptions {
 export async function reframeCanvas(frame: CanvasFrame, label: string, options: ReframeOptions = {}): Promise<boolean> {
   const { scene } = useWorkspaceStore.getState()
   const plan = reframeScene(scene, frame)
+  if (plan.outOfRange.length > 0) {
+    showAppNotice(`「${plan.outOfRange.slice(0, 3).join('」「')}」${plan.outOfRange.length > 3 ? '等图层' : ''}在新画布上会比画布大或远出 ${MAX_NORMALIZED_SIZE} 倍，存不下；先把它们缩小、移近或删掉，再改画布。`, 'problem')
+    return false
+  }
   const masks: SceneCommand[] = []
   for (const remap of plan.maskRemaps) {
     const element = scene.elements.find((candidate) => candidate.id === remap.elementId)

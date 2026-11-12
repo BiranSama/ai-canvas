@@ -1,7 +1,7 @@
 import type { SceneCommand } from '../commands/schema'
 import { storedAspect } from './adapt-layout'
 import { simplifyAspectRatio } from './aspect-ratio'
-import type { Canvas, Guide, Scene, SceneElement } from './schema'
+import { MAX_NORMALIZED_POSITION, MAX_NORMALIZED_SIZE, type Canvas, type Guide, type Scene, type SceneElement } from './schema'
 
 /*
  * Photoshop's crop and 画布大小: the canvas gets a new frame over the
@@ -43,6 +43,8 @@ export interface Reframe {
   readonly canvas: Canvas
   readonly commands: readonly SceneCommand[]
   readonly maskRemaps: readonly MaskRemap[]
+  /** The layers this frame would take further or larger than a scene can hold (see MAX_NORMALIZED_SIZE): the frame cannot be given. */
+  readonly outOfRange: readonly string[]
 }
 
 const MIN_SIDE = 64
@@ -100,6 +102,7 @@ export function reframeScene(scene: Scene, frame: CanvasFrame): Reframe {
   const exact: CanvasFrame = { left: frame.left, top: frame.top, width: size.width, height: size.height }
   const commands: SceneCommand[] = [{ kind: 'scene.set-canvas', canvas }]
   const maskRemaps: MaskRemap[] = []
+  const outOfRange: string[] = []
   for (const element of scene.elements) {
     if (element.type === 'adjustment') {
       const mask = element.mask
@@ -109,7 +112,9 @@ export function reframeScene(scene: Scene, frame: CanvasFrame): Reframe {
       continue
     }
     // A mask's outline is in its own box, which moves with it.
-    const update: SceneCommand = { kind: 'element.update', elementId: element.id, changes: { transform: moved(element, scene.canvas, size, exact) } }
+    const transform = moved(element, scene.canvas, size, exact)
+    if (Math.abs(transform.x) > MAX_NORMALIZED_POSITION || Math.abs(transform.y) > MAX_NORMALIZED_POSITION || transform.width > MAX_NORMALIZED_SIZE || transform.height > MAX_NORMALIZED_SIZE) outOfRange.push(element.name)
+    const update: SceneCommand = { kind: 'element.update', elementId: element.id, changes: { transform } }
     // A locked layer keeps its lock: unlocked for the move and locked again, in the same step.
     if (element.locked) {
       commands.push({ kind: 'element.update', elementId: element.id, changes: { locked: false } }, update, { kind: 'element.update', elementId: element.id, changes: { locked: true } })
@@ -117,7 +122,7 @@ export function reframeScene(scene: Scene, frame: CanvasFrame): Reframe {
       commands.push(update)
     }
   }
-  return { canvas, commands, maskRemaps }
+  return { canvas, commands, maskRemaps, outOfRange }
 }
 
 /** Where an anchor puts the old canvas in a new one of this size: Photoshop's 画布大小 定位. */

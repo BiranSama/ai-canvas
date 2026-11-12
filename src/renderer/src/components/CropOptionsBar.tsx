@@ -1,4 +1,5 @@
 import { ArrowLeftRight, Check, X } from 'lucide-react'
+import { useState } from 'react'
 import { CROP_RATIOS, cropAspect, frameExtends, useCrop, type CropRatio } from '../canvas/crop-store'
 
 /*
@@ -13,6 +14,47 @@ const MAX_SIDE = 16384
 
 function clampSide(value: number): number {
   return Math.max(MIN_SIDE, Math.min(MAX_SIDE, value))
+}
+
+/**
+ * A side of the frame in pixels. What is typed stays as it is typed, so a
+ * number can be typed digit by digit: the frame follows while it is a size
+ * a canvas can be, and anything else (the 8 of 800) is limited only once
+ * the field is left or Enter is pressed.
+ */
+function SideField({ label, title, value, onSet, onEnter }: {
+  readonly label: string
+  readonly title: string
+  readonly value: number
+  readonly onSet: (value: number) => void
+  readonly onEnter: () => void
+}): React.JSX.Element {
+  const [draft, setDraft] = useState<string | null>(null)
+  const settle = (): void => {
+    if (draft === null) return
+    const typed = Number(draft)
+    if (draft.trim() !== '' && Number.isFinite(typed) && typed > 0) onSet(typed)
+    setDraft(null)
+  }
+  return (
+    <input aria-label={label} title={title} type="number" min={MIN_SIDE} max={MAX_SIDE}
+      value={draft ?? String(Math.round(value))}
+      onChange={(event) => {
+        const typed = event.currentTarget.value
+        setDraft(typed)
+        const size = Number(typed)
+        if (typed.trim() !== '' && Number.isFinite(size) && size >= MIN_SIDE && size <= MAX_SIDE) onSet(size)
+      }}
+      onBlur={settle}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+        event.preventDefault()
+        settle()
+        // Out of the field, so Ctrl+Z and the tool keys reach the canvas again.
+        event.currentTarget.blur()
+        onEnter()
+      }} />
+  )
 }
 
 export function CropOptionsBar(): React.JSX.Element | null {
@@ -46,9 +88,9 @@ export function CropOptionsBar(): React.JSX.Element | null {
         {CROP_RATIOS.map(({ key, label }) => <option key={key} value={key}>{label}</option>)}
       </select>
       <button type="button" aria-label="横竖互换" title="横竖互换" disabled={ratio === 'free'} onClick={() => setRatio(ratio, !portrait)}><ArrowLeftRight size={12} /></button>
-      <input aria-label="裁剪宽度" title="宽（像素）" type="number" min={MIN_SIDE} max={MAX_SIDE} value={Math.round(frame.width)} onChange={(event) => setSize('width', Number(event.currentTarget.value))} onKeyDown={applyOnEnter} />
+      <SideField label="裁剪宽度" title="宽（像素）" value={frame.width} onSet={(value) => setSize('width', value)} onEnter={() => { void commit() }} />
       <span className="crop-times" aria-hidden="true">×</span>
-      <input aria-label="裁剪高度" title="高（像素）" type="number" min={MIN_SIDE} max={MAX_SIDE} value={Math.round(frame.height)} onChange={(event) => setSize('height', Number(event.currentTarget.value))} onKeyDown={applyOnEnter} />
+      <SideField label="裁剪高度" title="高（像素）" value={frame.height} onSet={(value) => setSize('height', value)} onEnter={() => { void commit() }} />
       <select aria-label="扩出部分填充" title="画布扩出的部分怎么填" value={fill} onChange={(event) => setFill(event.currentTarget.value as 'background' | 'generative')}>
         <option value="background">扩出：背景色</option>
         <option value="generative">扩出：生成式扩展</option>

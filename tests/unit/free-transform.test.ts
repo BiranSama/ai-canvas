@@ -232,6 +232,15 @@ describe('reframe', () => {
     expect(image.transform.x * frame.width + frame.left).toBeCloseTo(before.transform.x * locked.canvas.outputWidth, 3)
   })
 
+  it('names the layers a frame would take further or larger than a scene can hold', () => {
+    const base = sceneWithAdjustment()
+    const big = sceneSchema.parse({ ...base, canvas: { ...base.canvas, outputWidth: 8192, outputHeight: 8192, aspectWidth: 1, aspectHeight: 1 }, elements: base.elements.map((element) => element.id === IDS.image ? { ...element, transform: { x: -1.5, y: -1.5, width: 4, height: 4, rotation: 0 } } : element) })
+    const image = big.elements.find((element) => element.id === IDS.image)!
+    // Four canvases wide on an 8192-pixel canvas is 512 times a 64-pixel one.
+    expect(reframeScene(big, { left: 4064, top: 4064, width: 64, height: 64 }).outOfRange).toEqual([image.name])
+    expect(reframeScene(big, { left: 0, top: 0, width: 4096, height: 4096 }).outOfRange).toEqual([])
+  })
+
   it('keeps layers far off a small crop', () => {
     const scene = sceneWithAdjustment()
     const after = applyCommands(scene, reframeScene(scene, { left: 10, top: 10, width: 64, height: 64 }).commands)

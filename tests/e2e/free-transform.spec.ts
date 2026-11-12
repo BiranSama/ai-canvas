@@ -267,6 +267,34 @@ test('rasterizing a skewed picture that reaches past the canvas keeps what lies 
   }
 })
 
+test('a layer clipped to a skewed base shows on the canvas wherever the base reaches', async () => {
+  test.setTimeout(180_000)
+  const out = await mkdtemp(join(tmpdir(), 'ai-canvas-warp-clip-out-'))
+  const { app, page, userData } = await openCoffeePoster(out, 'ai-canvas-warp-clip-')
+  try {
+    const ramp = await importRamp(page, 240)
+    // A blue square whose bottom is pushed two widths right (to x 500–700), and a ramp clipped to it.
+    await addLayers(page, [
+      pathShape('斜切底层', box(100, 400, 200, 200), { fill: '#0000FF', stroke: null, strokeWidth: 0, corners: [[0, 0], [1, 0], [3, 1], [2, 1]] }),
+      image('剪贴成员', ramp, box(60, 380, 700, 260), { clipped: true })
+    ])
+    await openEditor(page)
+    await page.keyboard.press('Escape')
+    await page.mouse.move(0, 0)
+    // Well inside the skewed base, past its box and half a box more: the ramp shows there, not the base's blue.
+    const at = await screenPoint(page, 650, 590)
+    await expect.poll(async () => {
+      const shot = await page.screenshot({ clip: { x: Math.round(at.x) - 1, y: Math.round(at.y) - 1, width: 3, height: 3 } })
+      const { data } = await sharp(shot).raw().toBuffer({ resolveWithObject: true })
+      return data[4 * 4]!
+    }, { timeout: 15_000 }).toBeGreaterThan(120)
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true })
+    await rm(out, { recursive: true, force: true })
+  }
+})
+
 test('a 4000-pixel picture keeps up while a perspective corner is dragged', async () => {
   test.setTimeout(180_000)
   const out = await mkdtemp(join(tmpdir(), 'ai-canvas-warp-perf-out-'))

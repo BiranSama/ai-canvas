@@ -25,7 +25,7 @@ import {
   Text,
   Transformer
 } from 'react-konva'
-import { ELEMENT_SCHEMA_VERSION, hiddenByGroups, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
+import { ELEMENT_SCHEMA_VERSION, hiddenByGroups, type Corners, type Scene, type SceneCommand, type SceneElement } from '../../../domain'
 import type { EphemeralAnnotationRegion } from '../../../shared/agent'
 import { blendModeLabel, blendModeToCanvasOperation, resolveBlendMode } from '../../../shared/blend-mode'
 import {
@@ -454,17 +454,23 @@ function ClipBaseShape({ element, artboard, zoom, styled = false }: { element: S
 
 /**
  * A clipped layer can be clicked only about its base's box, since it shows
- * nowhere else: the box, grown by half its size for a stroke or shadow that
- * reaches past it, as the base's copy inside the clipped layer's group
- * lies, so it follows the base while it is dragged.
+ * nowhere else: the box and where its free-transform corners take it, grown
+ * by half its size for a stroke or shadow that reaches past it, as the
+ * base's copy inside the clipped layer's group lies, so it follows the base
+ * while it is dragged.
  */
-function clipToBase(baseId: string, width: number, height: number): (context: Konva.Context, group: Konva.Group) => void {
-  const pad = Math.max(width, height) / 2
+function clipToBase(baseId: string, width: number, height: number, corners: Corners | null | undefined): (context: Konva.Context, group: Konva.Group) => void {
+  const extent = warpedExtent(corners, width, height)
+  const left = Math.min(0, extent.x)
+  const top = Math.min(0, extent.y)
+  const right = Math.max(width, extent.x + extent.width)
+  const bottom = Math.max(height, extent.y + extent.height)
+  const pad = Math.max(right - left, bottom - top) / 2
   return (context, group) => {
     const copy = group.findOne(`.clip-base-${baseId}`)
     if (copy === undefined) return
     const transform = copy.getTransform()
-    const corners = [{ x: -pad, y: -pad }, { x: width + pad, y: -pad }, { x: width + pad, y: height + pad }, { x: -pad, y: height + pad }].map((point) => transform.point(point))
+    const corners = [{ x: left - pad, y: top - pad }, { x: right + pad, y: top - pad }, { x: right + pad, y: bottom + pad }, { x: left - pad, y: bottom + pad }].map((point) => transform.point(point))
     context.moveTo(corners[0]!.x, corners[0]!.y)
     for (const corner of corners.slice(1)) context.lineTo(corner.x, corner.y)
     context.closePath()
@@ -2469,7 +2475,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
                     </IsolatedGroup>
                     {stack.memberIds.flatMap((id) => sortedById.get(id) ?? []).map((member) => member.type === 'adjustment' ? renderLayer(member, member) : (
                       <IsolatedGroup key={member.id} operation={blendModeToCanvasOperation(resolveBlendMode(member))} pixelRatio={ratio}
-                        clipFunc={clipToBase(element.id, element.transform.width * baseArtboard.width, element.transform.height * baseArtboard.height)}>
+                        clipFunc={clipToBase(element.id, element.transform.width * baseArtboard.width, element.transform.height * baseArtboard.height, 'corners' in element ? element.corners : null)}>
                         {renderLayer(member, { ...member, blendMode: 'normal' } as SceneElement)}
                         {/* Shown wherever the base's own content is at all, not on its shadow or stroke; how much is the final cut's. */}
                         <IsolatedGroup operation="destination-in" coverParent filters={[opaqueWhereCovered]} pixelRatio={ratio}>
