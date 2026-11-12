@@ -1,9 +1,12 @@
 import { canBeClipBase, canBeClipped, clipBases, clipStacks, cornersBendPaint, type NormalizedTransform, type PaintOp, type SceneCommand, type SceneElement } from '../../../domain'
+import { MAX_EXPORT_EDGE } from '../../../shared/artwork-export'
 import { imageLayerSpace } from '../../../shared/layer-space'
+import { layerStyleReach } from '../../../shared/layer-styles'
 import type { GrayMask } from '../../../shared/mask-raster'
 import { showAppNotice } from '../components/app-notice'
 import { selectionClip, type SelectionClip } from '../selection/selection-clip'
 import { currentSelection } from '../selection/selection-store'
+import { layerArea } from '../export/psd-plan'
 import { layerSourceImage } from './pixel-layers'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { createElementForTool } from './element-factory'
@@ -51,7 +54,11 @@ async function drawnAsset(ids: readonly string[], summary: string, options: Laye
     }
   }
   const area = opaqueBounds(drawn) ?? { x: 0, y: 0, width: drawn.width, height: drawn.height }
-  const transform = { x: area.x / drawn.width, y: area.y / drawn.height, width: area.width / drawn.width, height: area.height / drawn.height, rotation: 0 }
+  // The picture may cover more than the canvas (options.area): placed by where it starts.
+  const { outputWidth, outputHeight } = scene.canvas
+  const left = Math.round(options.area?.x ?? 0)
+  const top = Math.round(options.area?.y ?? 0)
+  const transform = { x: (left + area.x) / outputWidth, y: (top + area.y) / outputHeight, width: area.width / outputWidth, height: area.height / outputHeight, rotation: 0 }
   // Main encodes the PNG: a page canvas's own encoder waits for the page to go idle, which a busy canvas may not do for seconds.
   const pixels = drawn.getContext('2d')?.getImageData(area.x, area.y, area.width, area.height)
   if (pixels === undefined) return null
@@ -274,6 +281,24 @@ export async function toggleClippingMask(ids?: readonly string[]): Promise<boole
   return useWorkspaceStore.getState().execute('创建剪贴蒙版', commands)
 }
 
+/**
+ * What rasterizing a layer draws, in canvas pixels: the canvas, and the
+ * layer's own area past it (through its turn and corners, with its stroke,
+ * shadow and styles), as a PSD keeps it. The canvas alone when that would be
+ * too large to draw.
+ */
+function rasterArea(element: Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>): { x: number; y: number; width: number; height: number } {
+  const { outputWidth, outputHeight } = useWorkspaceStore.getState().scene.canvas
+  const own = layerArea(element, outputWidth, outputHeight)
+  const reach = layerStyleReach(element.style)
+  const left = Math.min(0, Math.floor(own.x - reach))
+  const top = Math.min(0, Math.floor(own.y - reach))
+  const right = Math.max(outputWidth, Math.ceil(own.x + own.width + reach))
+  const bottom = Math.max(outputHeight, Math.ceil(own.y + own.height + reach))
+  if (right - left > MAX_EXPORT_EDGE || bottom - top > MAX_EXPORT_EDGE) return { x: 0, y: 0, width: outputWidth, height: outputHeight }
+  return { x: left, y: top, width: right - left, height: bottom - top }
+}
+
 /** Photoshop's 栅格化图层: a text or shape layer becomes pixels as it looks, keeping its opacity and blend. */
 export async function rasterizeLayer(elementId: string): Promise<boolean> {
   const element = useWorkspaceStore.getState().scene.elements.find((candidate) => candidate.id === elementId)
@@ -282,7 +307,8 @@ export async function rasterizeLayer(elementId: string): Promise<boolean> {
   if (element.locked) return refuse(`「${element.name}」已锁定，解锁后才能栅格化。`)
   // A composition placeholder is not drawn into the picture, so it would come out empty.
   if (element.type === 'shape' && element.role !== 'final') return refuse(`「${element.name}」是构图占位，不在成品里，不能栅格化；先在属性里把用途改成成品。`)
-  const drawn = await drawnAsset([element.id], '栅格化图层', { base: element.id, showHidden: true })
+  // Drawn over the canvas and wherever the layer reaches past it, so what lies off the canvas is kept.
+  const drawn = await drawnAsset([element.id], '栅格化图层', { base: element.id, showHidden: true, area: rasterArea(element) })
   if (drawn === null) return false
   return useWorkspaceStore.getState().execute('栅格化图层', [{ kind: 'element.rasterize', elementId: element.id, assetId: drawn.assetId, transform: drawn.transform }])
 }

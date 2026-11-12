@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CommandBus, createScene, type Scene, type SceneCommand, type SceneElement } from '../../src/domain'
+import { CommandBus, createScene, sceneSchema, type Scene, type SceneCommand, type SceneElement } from '../../src/domain'
 import { agentToolPlanSchema, type AgentToolPlan } from '../../src/shared/agent'
 import { compileAtomicSceneCommands, isAtomicSceneWriteTool } from '../../src/main/agent/atomic-scene-tools'
 import {
@@ -149,6 +149,19 @@ describe('small agent tools', () => {
     expect(right()).toBe(0.8)
     expect((await harness.call('transform', { targets: ['E2'], reset: true })).result).toMatchObject({ ok: true })
     expect(right()).toBe(0.6)
+  })
+
+  it('still changes a layer a crop left larger than four canvases, without letting it grow or go further', async () => {
+    const harness = new Harness()
+    await harness.call('add_shape', { shape: 'rectangle', box: [0, 0, 100, 100] })
+    // Cropped to an eighth: the shape is now eight canvases wide and reaches far past the canvas.
+    harness.scene = sceneSchema.parse({ ...harness.scene, elements: harness.scene.elements.map((element) => ({ ...element, transform: { x: -3.5, y: -3.5, width: 8, height: 8, rotation: 0 } })) })
+    expect((await harness.call('update', { targets: ['E1'], set: { name: '底色', opacity: 0.5 } })).result).toMatchObject({ ok: true })
+    expect(harness.scene.elements[0]).toMatchObject({ name: '底色', opacity: 0.5 })
+    expect((await harness.call('update', { targets: ['E1'], set: { move: [10, 0] } })).result).toMatchObject({ ok: true })
+    expect(harness.scene.elements[0]!.transform.x).toBeCloseTo(-3.4, 6)
+    expect((await harness.call('update', { targets: ['E1'], set: { scale: 1.1 } })).result.summary).toBe('E1「底色」：缩放后超出了允许的尺寸。')
+    expect((await harness.call('update', { targets: ['E1'], set: { move: [-100, 0] } })).result.summary).toBe('E1「底色」：移动后离画布太远。')
   })
 
   it('extends or trims the canvas with every layer kept where it is', async () => {

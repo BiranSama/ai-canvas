@@ -285,18 +285,33 @@ export function placeFromCornerPoints(points: readonly [Point, Point, Point, Poi
   const sin = Math.sin(angle)
   const ox = box.x * canvas.width
   const oy = box.y * canvas.height
-  const corners = points.map(([x, y]) => {
+  const local = points.map(([x, y]) => {
     const dx = x - ox
     const dy = y - oy
     return [(dx * cos - dy * sin) / Math.max(EPSILON, width), (dx * sin + dy * cos) / Math.max(EPSILON, height)] as Point
-  }) as unknown as Corners
-  const rounded = corners.map(([u, v]) => [round(u), round(v)] as Point) as unknown as Corners
+  })
+  // Moved whole boxes away, the box goes along by whole boxes (turned with the layer), so the corners stay
+  // near it, as they are stored, however far the layer is moved; it draws the same.
+  const shiftU = Math.round(local.reduce((sum, [u]) => sum + u, 0) / 4 - 0.5)
+  const shiftV = Math.round(local.reduce((sum, [, v]) => sum + v, 0) / 4 - 0.5)
+  let transform = box
+  if (shiftU !== 0 || shiftV !== 0) {
+    const turn = box.rotation * Math.PI / 180
+    const along = shiftU * width
+    const down = shiftV * height
+    transform = {
+      ...box,
+      x: round((ox + along * Math.cos(turn) - down * Math.sin(turn)) / canvas.width),
+      y: round((oy + along * Math.sin(turn) + down * Math.cos(turn)) / canvas.height)
+    }
+  }
+  const rounded = local.map(([u, v]) => [round(u - shiftU), round(v - shiftV)] as Point) as unknown as Corners
   // A parallelogram stays one after rounding, so text keeps an affine shape.
   if (parallelogram) {
     const [a, b, , d] = rounded
-    return { transform: box, corners: [a, b, [b[0] + d[0] - a[0], b[1] + d[1] - a[1]], d] }
+    return { transform, corners: [a, b, [b[0] + d[0] - a[0], b[1] + d[1] - a[1]], d] }
   }
-  return { transform: box, corners: rounded }
+  return { transform, corners: rounded }
 }
 
 function round(value: number): number {

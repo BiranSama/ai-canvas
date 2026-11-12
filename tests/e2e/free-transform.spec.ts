@@ -238,6 +238,35 @@ async function stopFrames(page: Page): Promise<{ readonly frames: number; readon
   return { frames: gaps.length, median: at(0.5), p95: at(0.95), worst: at(1) }
 }
 
+test('rasterizing a skewed picture that reaches past the canvas keeps what lies outside it', async () => {
+  test.setTimeout(180_000)
+  const out = await mkdtemp(join(tmpdir(), 'ai-canvas-warp-raster-out-'))
+  const { app, page, userData } = await openCoffeePoster(out, 'ai-canvas-warp-raster-')
+  try {
+    const ramp = await importRamp(page, 240)
+    // Its box already runs 76 pixels past the right edge, and the skew takes its top further out.
+    await addLayers(page, [image('出界斜切', ramp, box(900, 100, 200, 200), { corners: [[0.2, 0], [1.2, 0], [1, 1], [0, 1]] })])
+    await openEditor(page)
+    await page.getByRole('tab', { name: '图层' }).click()
+    const panel = page.getByRole('listbox', { name: '图层' })
+    const before = layer((await currentScene(page)).elements, '出界斜切')
+    await panel.locator('.layer-row', { hasText: '出界斜切' }).click({ button: 'right' })
+    await page.getByRole('menuitem', { name: '栅格化图层' }).click()
+    await expect.poll(async () => {
+      const after = layer((await currentScene(page)).elements, '出界斜切')
+      return after.type === 'image' && after.assetId !== (before.type === 'image' ? before.assetId : '') && (after.corners ?? null) === null
+    }, { timeout: 15_000 }).toBe(true)
+    const after = layer((await currentScene(page)).elements, '出界斜切')
+    // The pixels go on to where the skewed top reached, 900 + 1.2 × 200 = 1140, not cut at the canvas edge (1024).
+    expect((after.transform.x + after.transform.width) * WIDTH).toBeGreaterThan(1120)
+    expect(after.transform.x * WIDTH).toBeCloseTo(900, -1)
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true })
+    await rm(out, { recursive: true, force: true })
+  }
+})
+
 test('a 4000-pixel picture keeps up while a perspective corner is dragged', async () => {
   test.setTimeout(180_000)
   const out = await mkdtemp(join(tmpdir(), 'ai-canvas-warp-perf-out-'))

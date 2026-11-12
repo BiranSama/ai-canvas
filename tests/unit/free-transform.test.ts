@@ -28,6 +28,7 @@ import {
   rotateQuad,
   scaleQuad,
   skewQuad,
+  transformLayers,
   transformLayersByQuads,
   transformQuad,
   type Corners,
@@ -343,6 +344,24 @@ describe('transform box handles', () => {
     const around = applyCommands(turned, [{ kind: 'element.group', group: { ...group, childIds: [IDS.shape] }, elementIds: [IDS.shape] }]).elements.find((element) => element.id === groupId)!.transform
     const bounds = layerCanvasBounds(shape.transform, null, canvas)
     close([around.x, around.y, around.width, around.height], [bounds.x / canvas.width, bounds.y / canvas.height, bounds.width / canvas.width, bounds.height / canvas.height], 6)
+  })
+
+  it('takes the box along when a reshaped layer is moved far, so its corners stay within what is stored', () => {
+    const base = makeAllElementTypesScene()
+    const big = sceneSchema.parse({ ...base, canvas: { ...base.canvas, outputWidth: 8192, outputHeight: 8192, aspectWidth: 1, aspectHeight: 1 } })
+    const image = big.elements.find((element) => element.id === IDS.image)!
+    const skewedCorners: Corners = [[0, 0], [1, 0], [1.25, 1], [0.25, 1]]
+    const scene = sceneSchema.parse({ ...big, elements: big.elements.map((element) => element.id === IDS.image ? { ...element, transform: { x: 0.1, y: 0.1, width: 100 / 8192, height: 100 / 8192, rotation: 30 }, corners: skewedCorners } : element) })
+    const skewed = scene.elements.find((element) => element.id === IDS.image)!
+    const canvas = { width: 8192, height: 8192 }
+    const before = layerCornerPoints(skewed.transform, skewedCorners, canvas)
+    const outcome = transformLayers(scene, [skewed], ([x, y]) => [x + 6500, y])
+    expect(outcome.ok).toBe(true)
+    const moved = applyCommands(scene, outcome.ok ? outcome.commands : []).elements.find((element) => element.id === image.id)!
+    const corners = moved.type === 'image' ? moved.corners! : null
+    // The same shape, where it was moved to, and the corners near the box again.
+    layerCornerPoints(moved.transform, corners, canvas).forEach((point, index) => close(point, [before[index]![0] + 6500, before[index]![1]], 4))
+    expect(Math.max(...corners!.flat().map(Math.abs))).toBeLessThan(2)
   })
 
   it('scales text by its type when kept in proportion, and stretches it in its box when not', () => {

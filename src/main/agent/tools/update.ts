@@ -59,9 +59,13 @@ function changesFor(element: SceneElement, set: SetArgs): Changes | string {
   }
   if (set.move !== undefined) transform = { ...transform, x: transform.x + (set.move[0] ?? 0) / 100, y: transform.y + (set.move[1] ?? 0) / 100 }
   if (set.rotation !== undefined) transform = { ...transform, rotation: set.rotation }
-  if (transform.width > 4 || transform.height > 4) return '缩放后超出了允许的尺寸。'
-  if (Math.abs(transform.x) > 4 || Math.abs(transform.y) > 4) return '移动后离画布太远。'
-  if (set.box !== undefined || set.scale !== undefined || set.move !== undefined || set.rotation !== undefined) changes.transform = transform
+  if (set.box !== undefined || set.scale !== undefined || set.move !== undefined || set.rotation !== undefined) {
+    // Within four canvases, or no further than the layer already is (a crop can leave one larger, or further off).
+    const current = element.transform
+    if (transform.width > Math.max(4, current.width) || transform.height > Math.max(4, current.height)) return '缩放后超出了允许的尺寸。'
+    if (Math.abs(transform.x) > Math.max(4, Math.abs(current.x)) || Math.abs(transform.y) > Math.max(4, Math.abs(current.y))) return '移动后离画布太远。'
+    changes.transform = transform
+  }
 
   if (set.name !== undefined) changes.name = set.name
   if (set.opacity !== undefined) changes.opacity = set.opacity
