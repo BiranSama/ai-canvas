@@ -163,14 +163,14 @@ function safeErrorMessage(value: unknown, status: number, providerLabel: string)
   }
   const parsed = z.object({
     error: z.object({
-      code: z.union([z.string(), z.number()]).optional(),
+      code: z.union([z.string(), z.number()]).nullish(),
       message: z.string().max(2_000).optional()
     }).optional()
   }).safeParse(value)
   if (!parsed.success) return `${providerLabel} 返回 HTTP ${status}。`
   const code = parsed.data.error?.code
   const message = parsed.data.error?.message
-  return [code === undefined ? null : String(code), message].filter((part) => part !== null && part !== undefined && part !== '').join(': ')
+  return [code == null ? null : String(code), message].filter((part) => part !== null && part !== undefined && part !== '').join(': ')
     || `${providerLabel} 返回 HTTP ${status}。`
 }
 

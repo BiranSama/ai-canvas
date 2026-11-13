@@ -71,3 +71,39 @@ it('checks the backup model with its own key, the same way as the main one', asy
   await expect(check.check('text-model-backup')).resolves.toMatchObject({ ok: true, summary: '连上了，能调用工具。' })
   await expect(validator(config(), fetcher).validator.check('text-model-backup')).resolves.toMatchObject({ ok: false, summary: '还没有设置备用模型。' })
 })
+
+it.each(['buffered', 'stream'] as const)('checks a thinking OpenAI model through the service card with %s transport', async (mode) => {
+  const file = config()
+  file.providers[0] = { ...file.providers[0], baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-6.1-terra',
+    protocol: 'openai-responses', reasoningEffort: 'medium', transport: { ...file.providers[0].transport, mode } }
+  const fetcher = vi.fn<typeof fetch>(async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+    if ('temperature' in body) return json({ error: { code: null, type: 'invalid_request_error', param: 'temperature', message: "Unsupported parameter: 'temperature' is not supported with this model." } }, 400)
+    expect(body.reasoning).toEqual({ effort: 'medium' })
+    expect(body.stream).toBe(mode === 'stream')
+    const call = { type: 'function_call', call_id: 'call-openai-check', name: 'verifyAiCanvasConnection', arguments: '{"ok":true}' }
+    const response = { id: 'resp-openai-check', status: 'completed', output: [call] }
+    return mode === 'buffered' ? json(response) : new Response([
+      `data: ${JSON.stringify({ type: 'response.output_item.done', output_index: 0, item: call })}\n\n`,
+      `data: ${JSON.stringify({ type: 'response.completed', response })}\n\n`
+    ].join(''), { headers: { 'content-type': 'text/event-stream' } })
+  })
+  const { validator: check } = validator(file, fetcher, { 'openai-compatible-llm': 'fixture-main-key' })
+  await expect(check.check('openai-compatible-llm')).resolves.toMatchObject({ ok: true, summary: '连上了，能调用工具。' })
+  expect(fetcher).toHaveBeenCalledTimes(1)
+})
+
+it('keeps an OpenAI error with a null code useful while redacting the credential and never retrying', async () => {
+  const file = config()
+  file.providers[0] = { ...file.providers[0], baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-6.1-terra',
+    protocol: 'openai-responses', reasoningEffort: 'medium' }
+  const secret = 'fixture-main-error-key'
+  const fetcher = vi.fn<typeof fetch>(async () => json({ error: { code: null, type: 'invalid_request_error', param: 'temperature',
+    message: `Unsupported parameter: 'temperature'. Credential ${secret}` } }, 400))
+  const { validator: check } = validator(file, fetcher, { 'openai-compatible-llm': secret })
+  const result = await check.check('openai-compatible-llm')
+  expect(result.ok).toBe(false)
+  expect(result.summary).toContain("Unsupported parameter: 'temperature'")
+  expect(result.summary).not.toContain(secret)
+  expect(fetcher).toHaveBeenCalledTimes(1)
+})

@@ -3,6 +3,13 @@ import { _electron as electron, expect, test } from '@playwright/test'
 import { access, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { DesktopApi } from '../../src/shared/desktop-api'
+
+interface ConnectionCheckFacts {
+  posts: number
+  fail: boolean
+  requests: Array<{ stream: boolean; temperature: boolean; reasoning: unknown }>
+}
 
 test('Provider settings make protocol routing and the real connection confirmation explicit', async () => {
   const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-provider-protocol-'))
@@ -94,6 +101,78 @@ test('the image module freely configures an explicit protocol and opens directly
     await expect(window.getByLabel('生图服务')).toContainText('owner-image-model')
     await expect(window.getByRole('group', { name: '生成档位' }).getByRole('button', { name: '多候选探索', exact: true })).toHaveClass(/is-active/)
     expect(externalRequests).toEqual([])
+  } finally {
+    await app.close()
+    await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  }
+})
+
+test('Responses settings buttons use saved thinking settings and display null-code API failures without retrying', async () => {
+  const userData = await mkdtemp(join(tmpdir(), 'ai-canvas-e2e-responses-check-'))
+  const app = await electron.launch({
+    args: ['.', `--user-data-dir=${userData}`], cwd: resolve('.'),
+    env: { ...process.env, AI_CANVAS_E2E: '1' }
+  })
+  try {
+    // Only the transport is fake. IPC, settings, the encrypted vault and the
+    // validator run in the disposable Main process; real Fetch is never used.
+    await app.evaluate(() => {
+      const scope = globalThis as typeof globalThis & { __connectionCheckFacts: ConnectionCheckFacts }
+      scope.__connectionCheckFacts = { posts: 0, fail: false, requests: [] }
+      scope.fetch = async (input, init) => {
+        if (String(input) !== 'https://connection.example.test/v1/responses' || init?.method !== 'POST') throw new Error('OFFLINE_FAKE_FETCH_BLOCKED')
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        const facts = scope.__connectionCheckFacts
+        facts.posts += 1
+        facts.requests.push({ stream: body.stream === true, temperature: 'temperature' in body, reasoning: body.reasoning })
+        if ('temperature' in body || facts.fail) return new Response(JSON.stringify({ error: {
+          code: null, type: 'invalid_request_error', param: 'temperature',
+          message: "Unsupported parameter: 'temperature'. fixture-connection-key"
+        } }), { status: 400, headers: { 'content-type': 'application/json' } })
+        const call = { type: 'function_call', call_id: 'call-connection-check', name: 'verifyAiCanvasConnection', arguments: '{"ok":true}' }
+        const response = { id: 'resp-connection-check', status: 'completed', output: [call] }
+        return new Response([
+          { type: 'response.output_item.done', output_index: 0, item: call },
+          { type: 'response.completed', response }
+        ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } })
+      }
+    })
+    const window = await app.firstWindow()
+    await window.setViewportSize({ width: 1280, height: 800 })
+    await window.evaluate(async () => {
+      const api = (globalThis as typeof globalThis & { desktop: DesktopApi }).desktop
+      const current = (await api.getProviderSettings()).providers.find((provider) => provider.kind === 'llm')!
+      if (current.kind !== 'llm') throw new Error('Fixture requires LLM config')
+      await api.setProviderConfig({ ...current, label: 'Offline OpenAI', baseUrl: 'https://connection.example.test/v1',
+        defaultModel: 'gpt-6.1-terra', protocol: 'openai-responses', reasoningEffort: 'medium',
+        transport: { ...current.transport, mode: 'stream' }
+      })
+      await api.setProviderSecret({ providerId: 'openai-compatible-llm', apiKey: 'fixture-connection-key' })
+    })
+    await window.getByTestId('open-settings').click()
+    const dialog = window.getByRole('dialog', { name: '设置', exact: true })
+    const row = dialog.locator('[data-provider-slot="llm"]')
+    await row.getByRole('button', { name: '测试 Offline OpenAI', exact: true }).click()
+    await expect(row.getByTestId('openai-compatible-llm-check')).toContainText('测试通过')
+    await row.getByRole('button', { name: '编辑', exact: true }).click()
+    await row.getByRole('button', { name: '验证工具调用', exact: true }).click()
+    await row.getByRole('button', { name: '确认验证', exact: true }).click()
+    await expect(row.locator('.provider-connection-result')).toContainText('连接正常，工具调用可用')
+    await window.screenshot({ path: test.info().outputPath('responses-buttons-success-1280x800.png') })
+
+    await app.evaluate(() => { (globalThis as typeof globalThis & { __connectionCheckFacts: ConnectionCheckFacts }).__connectionCheckFacts.fail = true })
+    await row.getByRole('button', { name: '测试 Offline OpenAI', exact: true }).click()
+    await expect(row.locator('.provider-check-detail')).toContainText("Unsupported parameter: 'temperature'")
+    await expect(row.locator('.provider-check-detail')).toContainText('[REDACTED]')
+    await row.getByRole('button', { name: '验证工具调用', exact: true }).click()
+    await row.getByRole('button', { name: '确认验证', exact: true }).click()
+    await expect(row.locator('.provider-connection-result')).toContainText("Unsupported parameter: 'temperature'")
+    await expect(row.locator('.provider-connection-result')).toContainText('本次已提交 1 个请求')
+    await expect(dialog).not.toContainText('fixture-connection-key')
+    const facts = await app.evaluate(() => (globalThis as typeof globalThis & { __connectionCheckFacts: ConnectionCheckFacts }).__connectionCheckFacts)
+    expect(facts.posts).toBe(4)
+    expect(facts.requests).toEqual(Array.from({ length: 4 }, () => ({ stream: true, temperature: false, reasoning: { effort: 'medium' } })))
+    await window.screenshot({ path: test.info().outputPath('responses-buttons-error-1280x800.png') })
   } finally {
     await app.close()
     await rm(userData, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
