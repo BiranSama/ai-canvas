@@ -289,7 +289,6 @@ export class ProviderConnectionValidator {
           }
         }],
         toolChoice: llm.reasoningEffort === 'none' ? { name: 'verifyAiCanvasConnection' } : 'auto',
-        temperature: 0,
         maxOutputTokens: Math.max(2_048, Math.min(8_192, llm.maxOutputTokens))
       }, transportMode === 'stream')
       const http = new ArkHttpClient({
