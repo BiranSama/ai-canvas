@@ -67,6 +67,23 @@ describe('layer styles, clipping and blend modes in a PSD', () => {
     expect(fromPsdEffects({ scale: 2, dropShadow: [shadow] }).style?.dropShadow).toMatchObject({ distance: 28, size: 24 })
   })
 
+  it('writes guides and a text\'s flip and skew, and opens the guides again', async () => {
+    const text = {
+      content: '晨雾', orientation: 'horizontal' as const, fontFamily: 'Arial', fontWeight: 400, fontSize: 24, color: '#202020', fillOpacity: 1, letterSpacing: 0, lineHeight: 1.2, align: 'start' as const,
+      box: { x: 1, y: 1, width: 4, height: 4 }, rotation: 90, textHeight: 3, stroke: null, shadow: null,
+      // Mirrored left to right in its box: x' = 4 - x.
+      shear: [-1, 0, 0, 1, 4, 0] as [number, number, number, number, number, number]
+    }
+    const bytes = await buildPsd({ ...documentOf([layer('标题', { text })]), guides: [{ axis: 'x', position: 2 }, { axis: 'y', position: 3.5 }] }, fonts)
+    const psd = readPsd(bytes, { skipLayerImageData: true, skipCompositeImageData: true })
+    expect(psd.imageResources?.gridAndGuidesInformation?.guides).toEqual([{ location: 2, direction: 'vertical' }, { location: 3.5, direction: 'horizontal' }])
+    // Turned a quarter after the flip, about the box's top-left corner (1, 1): [xx, xy, yx, yy, tx, ty].
+    const transform = psd.children![0]!.text!.transform!
+    expect(transform.map((value) => Math.round(value * 1e6) / 1e6 + 0)).toEqual([0, -1, -1, 0, 1, 5])
+    const opened = await readPsdForImport(bytes)
+    expect(opened.guides).toEqual([{ axis: 'x', position: 2 }, { axis: 'y', position: 3.5 }])
+  })
+
   it('keeps a text layer\'s own stroke and shadow next to its layer styles', async () => {
     const text = {
       content: '晨雾', orientation: 'horizontal' as const, fontFamily: 'Arial', fontWeight: 400, fontSize: 24, color: '#202020', fillOpacity: 1, letterSpacing: 0, lineHeight: 1.2, align: 'start' as const,

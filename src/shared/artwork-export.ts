@@ -82,6 +82,8 @@ export const psdTextSchema = z.object({
   /** The text box before rotation, in document pixels; rotation turns it about its top-left corner. */
   box: z.object({ x: finite, y: finite, width: finite.positive(), height: finite.positive() }).strict(),
   rotation: finite,
+  /** A flip or skew from free transform, in the box's pixels before it is turned: [a, b, c, d, e, f] as a canvas transform. */
+  shear: z.tuple([finite, finite, finite, finite, finite, finite]).optional(),
   /** How tall the laid-out lines are; the canvas centres them in the box. */
   textHeight: finite.nonnegative(),
   stroke: z.object({ color: hexColor, width: finite.positive(), opacity: finite.min(0).max(1) }).strict().nullable(),
@@ -158,7 +160,9 @@ export const psdDocumentSchema = z.object({
   /** Bottom first. */
   children: z.array(z.union([psdLayerSchema, psdGroupSchema, psdAdjustmentSchema])).max(10_000),
   /** The flattened picture, for viewers that do not read layers. */
-  composite: rgbaSchema
+  composite: rgbaSchema,
+  /** Guides: a vertical line at x or a horizontal one at y, in document pixels, on the document. */
+  guides: z.array(z.object({ axis: z.enum(['x', 'y']), position: finite.min(0) }).strict()).max(200).optional()
 }).strict().superRefine((value, context) => checkPixels({ width: value.width, height: value.height, pixels: value.composite }, 4, context, ['composite']))
 export type PsdDocument = z.infer<typeof psdDocumentSchema>
 

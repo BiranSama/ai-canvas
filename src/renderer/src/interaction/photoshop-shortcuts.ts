@@ -1,3 +1,7 @@
+import { useFreeTransform } from '../canvas/free-transform-store'
+import { useCrop } from '../canvas/crop-store'
+import { useView } from '../canvas/view-store'
+import { useCanvasSizePanel } from '../components/canvas-size-panel'
 import type { SceneCommand, SceneElement } from '../../../domain'
 import { BLEND_MODES, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { createBlankLayer, layerViaSelection, mergeDown, mergeVisible, stampVisible, toggleClippingMask } from '../canvas/layer-actions'
@@ -44,8 +48,22 @@ export const SHORTCUT_SHEET: readonly ShortcutGroup[] = [
       { keys: 'B', action: '画笔' },
       { keys: 'E', action: '橡皮擦' },
       { keys: 'G / Shift+G', action: '油漆桶或渐变 / 在两者间切换' },
-      { keys: 'Ctrl+T', action: '自由变换' },
+      { keys: 'C', action: '裁剪：拖出画布即扩展，Enter 应用、Esc 复位' },
       { keys: 'F', action: '专注模式' }
+    ]
+  },
+  {
+    title: '变换与画布',
+    entries: [
+      { keys: 'Ctrl+T', action: '自由变换：Enter 应用、Esc 取消' },
+      { keys: '拖角 / Shift+拖角 / Alt+拖', action: '等比缩放 / 不等比 / 以中心为准' },
+      { keys: 'Ctrl+拖角 / Ctrl+拖边', action: '扭曲 / 斜切' },
+      { keys: 'Ctrl+Alt+Shift+拖角', action: '透视' },
+      { keys: 'Ctrl+Alt+C', action: '画布大小（按锚点扩展或裁切）' },
+      { keys: 'Ctrl+R', action: '显示或隐藏标尺；从标尺拖出参考线' },
+      { keys: 'Ctrl+;', action: '显示或隐藏参考线' },
+      { keys: "Ctrl+'", action: '显示或隐藏网格' },
+      { keys: 'Ctrl+Shift+;', action: '对齐（吸附）开关' }
     ]
   },
   {
@@ -303,6 +321,24 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     return true
   }
 
+  // In free transform, Enter applies and Esc puts it back; Ctrl+Z starts it over. Other keys would change the
+  // layers under the box, so they wait, as in Photoshop; zooming still works.
+  const transforming = useFreeTransform.getState()
+  if (transforming.session !== null) {
+    if (event.key === 'Enter' && !command) return run(() => { void transforming.apply() })
+    if (event.key === 'Escape') return run(() => transforming.cancel())
+    if (command && key === 'z') return run(() => transforming.cancel())
+    if (command && (event.key === '0' || event.key === '1' || event.key === '+' || event.key === '=' || event.key === '-')) return false
+    if (['Shift', 'Control', 'Alt', 'Meta', ' '].includes(event.key)) return false
+    return run(() => {})
+  }
+
+  // With the crop tool, Enter gives the canvas the frame and Esc puts the frame back over the canvas.
+  if (state.activeTool === 'crop' && useCrop.getState().frame !== null && !command) {
+    if (event.key === 'Enter') return run(() => { void useCrop.getState().commit() })
+    if (event.key === 'Escape') return run(() => useCrop.getState().reset())
+  }
+
   if (event.key === 'Backspace' || event.key === 'Delete') {
     if (event.altKey && !command) return run(() => fill(state.foregroundColor, '前景色'))
     if (command && !event.altKey) return run(() => fill(state.backgroundColor, '背景色'))
@@ -324,6 +360,12 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
   }
 
   if (command) {
+    // Photoshop's 视图: rulers, guides, grid and snapping.
+    if (!event.altKey && !event.shiftKey && key === 'r') return run(() => useView.getState().toggle('rulers'))
+    if (!event.altKey && event.code === 'Semicolon') return run(() => useView.getState().toggle(event.shiftKey ? 'snap' : 'guides'))
+    if (!event.altKey && !event.shiftKey && event.code === 'Quote') return run(() => useView.getState().toggle('grid'))
+    // Photoshop's 画布大小.
+    if (event.altKey && !event.shiftKey && key === 'c') return run(() => useCanvasSizePanel.getState().open('keep-center'))
     if (event.altKey && !event.shiftKey && key === 'a') return run(() => state.setSelection(state.scene.elements.filter((element) => element.groupId === null).map((element) => element.id)))
     if (event.shiftKey && !event.altKey && key === 'n') return run(() => { void createBlankLayer() })
     if (event.code === 'KeyE' && event.shiftKey) return event.altKey ? run(() => { void stampVisible() }) : run(() => { void mergeVisible() })
@@ -354,7 +396,7 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
     if (key === 'u') return run(() => { void adjustSelectedLayer('hue-saturation') })
     if (key === 'b') return run(() => { void adjustSelectedLayer('color-balance') })
     if (event.code === 'KeyE') return run(() => { void mergeDown() })
-    if (key === 't') return run(() => state.setActiveTool('select'))
+    if (key === 't') return run(() => { state.setActiveTool('select'); useFreeTransform.getState().start() })
     if (event.key === ',') {
       return run(() => {
         const elements = selectedElements()
@@ -402,6 +444,7 @@ export function handlePhotoshopShortcut(event: KeyboardEvent, context: Photoshop
   if (/^(Digit|Numpad)[0-9]$/.test(event.code) && state.activeTool === 'select') return run(() => setOpacity(Number(event.code.slice(-1)), event.timeStamp || Date.now()))
   if (key === 'v') return run(() => context.chooseTool('select'))
   if (key === 'h') return run(() => context.chooseTool('hand'))
+  if (key === 'c') return run(() => context.chooseTool('crop'))
   if (key === 't') return run(() => context.chooseTool('text'))
   if (key === 'b') return run(() => context.chooseTool('brush'))
   if (key === 'e') return run(() => context.chooseTool('eraser'))

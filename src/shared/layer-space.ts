@@ -1,4 +1,4 @@
-import type { SceneElement } from '../domain'
+import { applyMatrix, boxWarpMatrix, cornersAreIdentity, invertMatrix, multiplyMatrices, type Corners, type Matrix3, type SceneElement } from '../domain'
 import type { GrayMask } from './mask-raster'
 
 /*
@@ -6,7 +6,8 @@ import type { GrayMask } from './mask-raster'
  * canvas can become a clip or a mask in those pixels. An image layer's
  * pixels are its asset's, placed through its crop and fit; a text or shape
  * layer's mask stretches over its box. Layers rotate about their top-left
- * corner, as the canvas draws them.
+ * corner, as the canvas draws them, after their free-transform corners,
+ * which can make the map projective.
  */
 
 type ImageElement = Extract<SceneElement, { type: 'image' }>
@@ -40,18 +41,30 @@ export function imageDrawRect(image: Size, element: Pick<ImageElement, 'crop' | 
 export interface LayerSpace extends Size {
   /** A point in the layer's pixels (pixel centres at +0.5) as a point on the canvas, in canvas pixels. */
   toCanvas(x: number, y: number): readonly [number, number]
+  /** The same map as a matrix, when it is known: projective after a distort or a perspective. */
+  readonly matrix?: Matrix3
 }
 
-function placed(element: SceneElement, canvas: Size, local: (x: number, y: number) => readonly [number, number]): (x: number, y: number) => readonly [number, number] {
+function layerCornersOf(element: SceneElement): Corners | null {
+  const corners = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null
+  return cornersAreIdentity(corners) ? null : corners!
+}
+
+/** The layer's pixels → its box (local) → through its corners → turned and placed on the canvas. */
+function placedMatrix(element: SceneElement, canvas: Size, local: Matrix3): Matrix3 {
   const originX = element.transform.x * canvas.width
   const originY = element.transform.y * canvas.height
   const angle = element.transform.rotation * Math.PI / 180
   const cos = Math.cos(angle)
   const sin = Math.sin(angle)
-  return (x, y) => {
-    const [lx, ly] = local(x, y)
-    return [originX + lx * cos - ly * sin, originY + lx * sin + ly * cos]
-  }
+  const turn: Matrix3 = [cos, -sin, originX, sin, cos, originY, 0, 0, 1]
+  const corners = layerCornersOf(element)
+  const warped = corners === null ? local : multiplyMatrices(boxWarpMatrix(corners, element.transform.width * canvas.width, element.transform.height * canvas.height), local)
+  return multiplyMatrices(turn, warped)
+}
+
+function spaceOf(width: number, height: number, matrix: Matrix3): LayerSpace {
+  return { width, height, matrix, toCanvas: (x, y) => applyMatrix(matrix, x, y) }
 }
 
 /** An image layer's own pixels on the canvas. */
@@ -61,14 +74,48 @@ export function imageLayerSpace(element: ImageElement, image: Size, canvas: Size
   const { crop, draw } = imageDrawRect(image, element, boxWidth, boxHeight)
   const scaleX = draw.width / crop.width
   const scaleY = draw.height / crop.height
-  return { width: image.width, height: image.height, toCanvas: placed(element, canvas, (x, y) => [draw.x + (x - crop.x) * scaleX, draw.y + (y - crop.y) * scaleY]) }
+  return spaceOf(image.width, image.height, placedMatrix(element, canvas, [scaleX, 0, draw.x - crop.x * scaleX, 0, scaleY, draw.y - crop.y * scaleY, 0, 0, 1]))
 }
 
 /** A mask of this size stretched over the layer's box (text and shapes). */
 export function boxLayerSpace(element: SceneElement, mask: Size, canvas: Size): LayerSpace {
   const sx = element.transform.width * canvas.width / mask.width
   const sy = element.transform.height * canvas.height / mask.height
-  return { width: mask.width, height: mask.height, toCanvas: placed(element, canvas, (x, y) => [x * sx, y * sy]) }
+  return spaceOf(mask.width, mask.height, placedMatrix(element, canvas, [sx, 0, 0, 0, sy, 0, 0, 0, 1]))
+}
+
+/** Whether the map is projective, so it cannot be stepped along a row as an affine one is. */
+function projective(space: LayerSpace): boolean {
+  const matrix = space.matrix
+  return matrix !== undefined && (Math.abs(matrix[6]) > 1e-12 || Math.abs(matrix[7]) > 1e-12)
+}
+
+/** Bilinear read of a gray image at a point whose integer parts index pixel centres; nothing outside. */
+function sampleGray(data: ArrayLike<number>, width: number, height: number, fx: number, fy: number): number {
+  if (fx <= -1 || fy <= -1 || fx >= width || fy >= height) return 0
+  const x0 = Math.floor(fx)
+  const y0 = Math.floor(fy)
+  const tx = fx - x0
+  const ty = fy - y0
+  const inX0 = x0 >= 0
+  const inX1 = x0 + 1 < width
+  const inY0 = y0 >= 0
+  const inY1 = y0 + 1 < height
+  const top = inY0 ? (inX0 ? data[y0 * width + x0]! : 0) * (1 - tx) + (inX1 ? data[y0 * width + x0 + 1]! : 0) * tx : 0
+  const bottom = inY1 ? (inX0 ? data[(y0 + 1) * width + x0]! : 0) * (1 - tx) + (inX1 ? data[(y0 + 1) * width + x0 + 1]! : 0) * tx : 0
+  return Math.round(top * (1 - ty) + bottom * ty)
+}
+
+/** A canvas mask read into the pixels of a layer whose map is projective, one pixel at a time. */
+function maskThroughHomography(mask: GrayMask, space: LayerSpace, matrix: Matrix3): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(space.width * space.height)
+  for (let y = 0; y < space.height; y += 1) {
+    for (let x = 0; x < space.width; x += 1) {
+      const [cx, cy] = applyMatrix(matrix, x + 0.5, y + 0.5)
+      out[y * space.width + x] = sampleGray(mask.data, mask.width, mask.height, cx - 0.5, cy - 0.5)
+    }
+  }
+  return out
 }
 
 /** The size a new mask for a text or shape layer gets: its box in canvas pixels, at most 4096 a side. */
@@ -85,6 +132,7 @@ export function boxMaskSize(element: SceneElement, canvas: Size): Size {
  * that covers the canvas pixel for pixel is a straight copy.
  */
 export function maskInLayerSpace(mask: GrayMask, space: LayerSpace): Uint8Array<ArrayBuffer> {
+  if (projective(space)) return maskThroughHomography(mask, space, space.matrix!)
   const out = new Uint8Array(space.width * space.height)
   const [ox, oy] = space.toCanvas(0, 0)
   const [ax, ay] = space.toCanvas(1, 0)
@@ -133,6 +181,13 @@ export function maskInLayerSpace(mask: GrayMask, space: LayerSpace): Uint8Array<
 
 /** The way back: a point on the canvas as a point in the layer's pixels, and layer pixels per canvas pixel across. */
 export function canvasToLayer(space: LayerSpace): { readonly at: (x: number, y: number) => readonly [number, number]; readonly scale: number } {
+  if (projective(space)) {
+    const inverse = invertMatrix(space.matrix!)
+    // Across at the layer's middle, where a stroke's size is judged.
+    const [mx, my] = space.toCanvas(space.width / 2, space.height / 2)
+    const [nx, ny] = space.toCanvas(space.width / 2 + 1, space.height / 2)
+    return { at: (x, y) => applyMatrix(inverse, x, y), scale: 1 / Math.max(1e-9, Math.hypot(nx - mx, ny - my)) }
+  }
   const [ox, oy] = space.toCanvas(0, 0)
   const [ax, ay] = space.toCanvas(1, 0)
   const [bx, by] = space.toCanvas(0, 1)
@@ -154,6 +209,19 @@ export function canvasToLayer(space: LayerSpace): { readonly at: (x: number, y: 
 
 /** A layer's mask (in its pixels) read onto the canvas, as Ctrl+click on a mask thumbnail loads it as a selection. */
 export function layerMaskOnCanvas(coverage: ArrayLike<number>, space: LayerSpace, canvas: Size): GrayMask {
+  if (projective(space)) {
+    const out = new Uint8Array(canvas.width * canvas.height)
+    const inverse = invertMatrix(space.matrix!)
+    for (let y = 0; y < canvas.height; y += 1) {
+      for (let x = 0; x < canvas.width; x += 1) {
+        const [lx, ly] = applyMatrix(inverse, x + 0.5, y + 0.5)
+        // Beyond the layer there is nothing to load.
+        if (lx < 0 || ly < 0 || lx > space.width || ly > space.height) continue
+        out[y * canvas.width + x] = sampleGray(coverage, space.width, space.height, Math.max(0, Math.min(space.width - 1, lx - 0.5)), Math.max(0, Math.min(space.height - 1, ly - 0.5)))
+      }
+    }
+    return { width: canvas.width, height: canvas.height, data: out }
+  }
   const out = new Uint8Array(canvas.width * canvas.height)
   const back = canvasToLayer(space)
   const [ox, oy] = back.at(0, 0)

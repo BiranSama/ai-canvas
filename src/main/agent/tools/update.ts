@@ -11,7 +11,7 @@ type Changes = z.output<typeof sceneElementChangesSchema>
 
 const setSchema = z.object({
   box: percentBoxSchema.optional().describe('新位置 [x, y, 宽, 高]'),
-  move: z.tuple([z.number().min(-200).max(200), z.number().min(-200).max(200)]).optional().describe('平移 [dx, dy]，百分比'),
+  move: z.array(z.number().min(-200).max(200)).length(2).optional().describe('平移 [dx, dy]，百分比'),
   scale: z.number().min(0.05).max(20).optional().describe('以中心缩放的倍数，0.8 即缩小 20%；文字同时缩放字号'),
   rotation: z.number().min(-360).max(360).optional().describe('旋转角度'),
   name: z.string().min(1).max(120).optional(),
@@ -57,11 +57,15 @@ function changesFor(element: SceneElement, set: SetArgs): Changes | string {
     transform = { ...transform, width: transform.width * set.scale, height: transform.height * set.scale }
     transform = { ...transform, x: centerX - transform.width / 2, y: centerY - transform.height / 2 }
   }
-  if (set.move !== undefined) transform = { ...transform, x: transform.x + set.move[0] / 100, y: transform.y + set.move[1] / 100 }
+  if (set.move !== undefined) transform = { ...transform, x: transform.x + (set.move[0] ?? 0) / 100, y: transform.y + (set.move[1] ?? 0) / 100 }
   if (set.rotation !== undefined) transform = { ...transform, rotation: set.rotation }
-  if (transform.width > 4 || transform.height > 4) return '缩放后超出了允许的尺寸。'
-  if (Math.abs(transform.x) > 4 || Math.abs(transform.y) > 4) return '移动后离画布太远。'
-  if (set.box !== undefined || set.scale !== undefined || set.move !== undefined || set.rotation !== undefined) changes.transform = transform
+  if (set.box !== undefined || set.scale !== undefined || set.move !== undefined || set.rotation !== undefined) {
+    // Within four canvases, or no further than the layer already is (a crop can leave one larger, or further off).
+    const current = element.transform
+    if (transform.width > Math.max(4, current.width) || transform.height > Math.max(4, current.height)) return '缩放后超出了允许的尺寸。'
+    if (Math.abs(transform.x) > Math.max(4, Math.abs(current.x)) || Math.abs(transform.y) > Math.max(4, Math.abs(current.y))) return '移动后离画布太远。'
+    changes.transform = transform
+  }
 
   if (set.name !== undefined) changes.name = set.name
   if (set.opacity !== undefined) changes.opacity = set.opacity

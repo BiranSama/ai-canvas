@@ -7,6 +7,7 @@ import { applyLayerStyles, hasLayerStyles, styledLayerReach } from '../../../sha
 import { assetPixelsVersion, subscribeAssetPixels } from './asset-pixels'
 import { pixelLayerVersion, subscribePixelLayers } from './pixel-layers'
 import { useIsolationRefresh } from './isolation-refresh'
+import { releaseOwnCache } from './konva-cache'
 
 /*
  * A layer with its layer styles, as the canvas and the export stage draw it:
@@ -37,11 +38,13 @@ function sized(canvas: HTMLCanvasElement | null, width: number, height: number):
   return target
 }
 
-export function StyledLayer({ element, width, height, unit, ratio, rotation, blend, contentKey, children }: {
+export function StyledLayer({ element, width, height, extent, unit, ratio, rotation, blend, contentKey, children }: {
   readonly element: Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>
   /** The layer's box in its own units. */
   readonly width: number
   readonly height: number
+  /** Where the content lies when its free-transform corners take it past the box, in the same units. */
+  readonly extent?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
   /** Box units in one output pixel: 1 on the canvas, the export's scale on the export stage. */
   readonly unit: number
   /** Raster pixels per box unit: the screen's resolution on the canvas, 1 for an export. */
@@ -64,26 +67,33 @@ export function StyledLayer({ element, width, height, unit, ratio, rotation, ble
   const paintVersion = useSyncExternalStore(subscribePixelLayers, () => pixelLayerVersion(elementId), () => pixelLayerVersion(elementId))
   const pixelsVersion = useSyncExternalStore(subscribeAssetPixels, assetPixelsVersion, assetPixelsVersion)
   const active = hasLayerStyles(style)
-  const reach = active ? styledLayerReach(element, width / unit, height / unit) * unit : 0
-  const fit = Math.min(ratio, Math.sqrt(STYLE_PIXELS / Math.max(1, (width + reach * 2) * (height + reach * 2))))
+  const area = extent ?? { x: 0, y: 0, width, height }
+  const reach = active ? styledLayerReach(element, area.width / unit, area.height / unit) * unit : 0
+  const originX = Math.floor(area.x - reach)
+  const originY = Math.floor(area.y - reach)
+  const spanX = Math.ceil(area.x + area.width + reach) - originX
+  const spanY = Math.ceil(area.y + area.height + reach) - originY
+  const fit = Math.min(ratio, Math.sqrt(STYLE_PIXELS / Math.max(1, spanX * spanY)))
   const styleKey = JSON.stringify(style)
 
   useLayoutEffect(() => {
     const group = content.current
     if (group === null) return
-    group.clearCache()
+    // Only its own picture: Konva's clearCache would drop those of the warped and masked groups inside too.
+    releaseOwnCache(group)
     shadow.current?.visible(false)
     glow.current?.visible(false)
-    if (!active || width <= 0 || height <= 0) { group.getLayer()?.batchDraw(); return }
-    group.cache({ x: -reach, y: -reach, width: width + reach * 2, height: height + reach * 2, pixelRatio: fit })
+    if (!active || area.width <= 0 || area.height <= 0) { group.getLayer()?.batchDraw(); return }
+    // From a whole unit, as Main's raster starts on a whole pixel.
+    group.cache({ x: originX, y: originY, width: spanX, height: spanY, pixelRatio: fit })
     const raster = cachedCanvas(group)
     const context = raster?.getContext('2d', { willReadFrequently: true }) ?? null
     if (raster === null || context === null || raster.width === 0 || raster.height === 0) return
     const pixels = context.getImageData(0, 0, raster.width, raster.height)
     // The raster may hold a pixel or two more than asked for; the box sits at the padding.
-    const scaleX = raster.width / (width + reach * 2)
-    const scaleY = raster.height / (height + reach * 2)
-    const box = { x: reach * scaleX, y: reach * scaleY, width: width * scaleX, height: height * scaleY, rasterWidth: raster.width, rasterHeight: raster.height }
+    const scaleX = raster.width / spanX
+    const scaleY = raster.height / spanY
+    const box = { x: (area.x - originX) * scaleX, y: (area.y - originY) * scaleY, width: area.width * scaleX, height: area.height * scaleY, rasterWidth: raster.width, rasterHeight: raster.height }
     const result = applyLayerStyles(pixels.data, box, style, scaleX * unit, rotation)
     context.putImageData(pixels, 0, 0)
     for (const under of result.under) {
@@ -93,14 +103,14 @@ export function StyledLayer({ element, width, height, unit, ratio, rotation, ble
       canvases.current[under.kind] = canvas
       canvas.getContext('2d')?.putImageData(new ImageData(under.pixels, raster.width, raster.height), 0, 0)
       node.image(canvas)
-      node.position({ x: -reach, y: -reach })
-      node.size({ width: width + reach * 2, height: height + reach * 2 })
+      node.position({ x: originX, y: originY })
+      node.size({ width: spanX, height: spanY })
       node.globalCompositeOperation(blendModeToCanvasOperation(under.blendMode))
       node.visible(true)
     }
     group.getLayer()?.batchDraw()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- worked out again only when what it draws or how it is styled changes
-  }, [contentKey, styleKey, width, height, reach, fit, unit, rotation, paintVersion, pixelsVersion, active])
+  }, [contentKey, styleKey, area.x, area.y, area.width, area.height, originX, originY, spanX, spanY, reach, fit, unit, rotation, paintVersion, pixelsVersion, active])
 
   useIsolationRefresh()
   const operation = blendModeToCanvasOperation(blend)

@@ -1,5 +1,5 @@
 import Konva from 'konva'
-import { adaptedScene, clipBases, hiddenByGroups, LAYER_STYLE_KINDS, type Scene, type SceneElement } from '../../../domain'
+import { adaptedScene, affineOf, boxWarpMatrix, clipBases, cornersAreIdentity, hiddenByGroups, LAYER_STYLE_KINDS, type Scene, type SceneElement } from '../../../domain'
 import { hasVisibleEffects } from '../../../shared/layer-effects'
 import { MAX_EXPORT_EDGE, type ExportImageFormat, type PsdAdjustment, type PsdLayer, type PsdNode, type PsdText } from '../../../shared/artwork-export'
 import { activeAdjustments, ADJUSTMENT_LABELS, isFilterSettings } from '../../../shared/adjustments'
@@ -279,6 +279,7 @@ function psdText(element: Extract<SceneElement, { type: 'text' }>, scene: Scene)
     align: element.align,
     box,
     rotation: element.transform.rotation,
+    ...(cornersAreIdentity(element.corners) ? {} : { shear: [...affineOf(boxWarpMatrix(element.corners!, box.width, box.height))] as [number, number, number, number, number, number] }),
     textHeight: textHeight(element, box.width, box.height),
     stroke: stroke === null || stroke.alpha === 0 || metrics.strokeWidth <= 0 ? null : { color: stroke.hex, width: metrics.strokeWidth, opacity: stroke.alpha },
     shadow: shadow === null || shadow.alpha === 0 || metrics.shadowBlur <= 0 ? null : { color: shadow.hex, blur: metrics.shadowBlur, opacity: TEXT_SHADOW_OPACITY * shadow.alpha }
@@ -395,7 +396,9 @@ export async function exportPsd(scene: Scene, projectName: string, options: PsdE
     progress({ label: '正在写入 PSD', done, total })
     // Cancelled while the composite was drawn: nothing has been written yet, so nothing is.
     checkAborted(signal)
-    const result = await window.desktop.writeExportPsd({ target: choice.target, document: { width, height, children, composite } })
+    // Guides on the document go with it; Photoshop keeps none past its edges.
+    const guides = (scene.canvas.guides ?? []).filter((guide) => guide.position >= 0 && guide.position <= (guide.axis === 'x' ? width : height))
+    const result = await window.desktop.writeExportPsd({ target: choice.target, document: { width, height, children, composite, ...(guides.length === 0 ? {} : { guides }) } })
     progress({ label: '已保存', done: total, total })
     return { paths: [result.path], notes }
   } finally {

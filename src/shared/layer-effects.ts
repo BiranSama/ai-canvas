@@ -79,6 +79,13 @@ export function shadowGeometry(shadow: NonNullable<ImageEffects['shadow']>, widt
   return { sigma, offsetX: shadow.offsetX * side, offsetY: shadow.offsetY * side, padding: Math.ceil(sigma * 3) }
 }
 
+/** How far an image's effects reach past its box (its shadow, blurred and offset), in the box's units; 0 when they stay inside. */
+export function effectsReach(effects: ImageEffects | undefined, width: number, height: number): number {
+  if (!hasVisibleEffects(effects) || effects.shadow === null || effects.shadow.opacity <= 0) return 0
+  const shadow = shadowGeometry(effects.shadow, width, height)
+  return shadow.padding + Math.max(Math.abs(shadow.offsetX), Math.abs(shadow.offsetY))
+}
+
 const SOFT_SHADOW_OPACITY = 0.55
 
 /** The soft shadow under a subject that the blend controls offer, at a strength of 0–1. */

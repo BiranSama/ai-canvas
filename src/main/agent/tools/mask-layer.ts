@@ -33,7 +33,7 @@ export const maskLayerTool = defineTool({
     invert: z.boolean().optional().describe('反过来：遮住这块，露出其余'),
     feather: z.number().min(0).max(250).optional().describe('边缘羽化，画布像素'),
     combine: z.enum(['replace', 'add', 'subtract', 'intersect']).optional().describe('和已有蒙版怎么合，默认 replace'),
-    subject_of: z.string().min(1).max(120).optional().describe('source=subject 时从这个图片图层里找主体；给调整图层加主体蒙版时必填，只调整主体')
+    subject_of: z.string().min(1).max(120).optional().describe('source=subject 时从这个图片图层找主体；给调整图层加主体蒙版时必填')
   }).strict(),
   registryName: 'scene.update_elements',
   available: (context) => context.layerMask !== null && context.layerMask !== undefined

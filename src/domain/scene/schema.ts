@@ -1,13 +1,17 @@
 import { z } from 'zod'
 import { parseSvgPath } from './svg-path'
+import { cornersAreAffine, cornersAreDrawable, type Corners } from './free-transform'
 import { creativeContextSchema, elementControlIntentSchema, elementProvenanceSchema, textVisualWeightSchema } from '../creative/schema'
 
 export const SCENE_SCHEMA_VERSION = 1 as const
 export const ELEMENT_SCHEMA_VERSION = 1 as const
 
 const finiteNumber = z.number().finite()
-const normalizedPosition = finiteNumber.min(-4).max(4)
-const normalizedSize = finiteNumber.positive().max(4)
+/** How far from the canvas, and how large, a layer can be, in shares of the canvas: wide enough that cropping to a small part keeps every layer, as Photoshop keeps them off the canvas. */
+export const MAX_NORMALIZED_POSITION = 256
+export const MAX_NORMALIZED_SIZE = 256
+const normalizedPosition = finiteNumber.min(-MAX_NORMALIZED_POSITION).max(MAX_NORMALIZED_POSITION)
+const normalizedSize = finiteNumber.positive().max(MAX_NORMALIZED_SIZE)
 const colorSchema = z.string().min(1).max(64)
 const idSchema = z.string().uuid()
 
@@ -24,6 +28,14 @@ export const normalizedTransformSchema = z.object({
   rotation: finiteNumber.min(-3600).max(3600).default(0)
 })
 
+/** A Photoshop guide: a vertical line at x or a horizontal one at y, in the canvas's output pixels. */
+export const guideSchema = z.object({
+  axis: z.enum(['x', 'y']),
+  position: finiteNumber.min(-65_536).max(65_536)
+})
+
+export const MAX_GUIDES = 200
+
 export const canvasSchema = z.object({
   aspectWidth: z.number().int().min(1).max(100),
   aspectHeight: z.number().int().min(1).max(100),
@@ -31,7 +43,8 @@ export const canvasSchema = z.object({
   outputHeight: z.number().int().min(64).max(16384),
   backgroundColor: colorSchema,
   transparent: z.boolean(),
-  globalStyle: z.string().max(4000).default('')
+  globalStyle: z.string().max(4000).default(''),
+  guides: z.array(guideSchema).max(MAX_GUIDES).optional()
 })
 
 const referencePolicySchema = z.enum(['include', 'reference-only', 'exclude'])
@@ -305,6 +318,16 @@ export const layerStyleSchema = z.object({
 
 export const LAYER_STYLE_KINDS = ['dropShadow', 'innerShadow', 'outerGlow', 'stroke', 'colorOverlay', 'gradientOverlay'] as const
 
+const cornerPointSchema = z.tuple([finiteNumber.min(-64).max(64), finiteNumber.min(-64).max(64)])
+
+/**
+ * Photoshop's free transform: where the box's top-left, top-right,
+ * bottom-right and bottom-left corners land, in the box's units (see
+ * free-transform). Null or absent for a plain box; null clears them in an update.
+ */
+export const layerCornersSchema = z.tuple([cornerPointSchema, cornerPointSchema, cornerPointSchema, cornerPointSchema])
+  .refine((corners) => cornersAreDrawable(corners as Corners), 'The corners must make a convex shape the right way round or mirrored.')
+
 export const imageElementSchema = z.object({
   ...elementBaseShape,
   type: z.literal('image'),
@@ -326,7 +349,8 @@ export const imageElementSchema = z.object({
   mask: layerMaskSchema.nullable().optional(),
   /** Adjustments of the layer's own colours, applied in order after its paint and colour match. */
   adjustments: z.array(layerAdjustmentSchema).max(MAX_LAYER_ADJUSTMENTS).optional(),
-  style: layerStyleSchema.optional()
+  style: layerStyleSchema.optional(),
+  corners: layerCornersSchema.nullable().optional()
 })
 
 export const textElementSchema = z.object({
@@ -352,7 +376,9 @@ export const textElementSchema = z.object({
   renderStrategy: z.enum(['standard', 'ai-material', 'ai-complete', 'editable-overlay']),
   resultAssetId: idSchema.nullable(),
   mask: layerMaskSchema.nullable().optional(),
-  style: layerStyleSchema.optional()
+  style: layerStyleSchema.optional(),
+  /** Flipped or skewed only: Photoshop distorts type once it is rasterized. */
+  corners: layerCornersSchema.nullable().optional()
 })
 
 export const sketchStrokeSchema = z.object({
@@ -383,7 +409,8 @@ export const shapeElementSchema = z.object({
   cornerRadius: finiteNumber.min(0).max(0.5).default(0),
   role: z.enum(['final', 'placeholder']),
   mask: layerMaskSchema.nullable().optional(),
-  style: layerStyleSchema.optional()
+  style: layerStyleSchema.optional(),
+  corners: layerCornersSchema.nullable().optional()
 })
 
 export const placeholderElementSchema = z.object({
@@ -558,6 +585,10 @@ export const sceneSchema = sceneBaseSchema.superRefine((scene, context) => {
       }
     }
 
+    if (element.type === 'text' && element.corners !== undefined && element.corners !== null && !cornersAreAffine(element.corners as Corners)) {
+      context.addIssue({ code: 'custom', path: ['elements', index, 'corners'], message: 'Text can be flipped or skewed, not distorted; rasterize it first.' })
+    }
+
     if (element.clipped === true && element.type !== 'image' && element.type !== 'text' && element.type !== 'shape' && element.type !== 'adjustment') {
       context.addIssue({ code: 'custom', path: ['elements', index, 'clipped'], message: `A ${element.type} element cannot be clipped.` })
     }
@@ -599,6 +630,8 @@ export type PaintOp = z.infer<typeof paintOpSchema>
 export type LayerMask = z.infer<typeof layerMaskSchema>
 export type NormalizedTransform = z.infer<typeof normalizedTransformSchema>
 export type Canvas = z.infer<typeof canvasSchema>
+export type Guide = z.infer<typeof guideSchema>
+export type LayerCorners = z.infer<typeof layerCornersSchema>
 export type AdjustmentSettings = z.infer<typeof adjustmentSettingsSchema>
 export type AdjustmentKind = AdjustmentSettings['kind']
 export type FilterSettings = z.infer<typeof filterSettingsSchema>

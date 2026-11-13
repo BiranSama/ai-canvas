@@ -1,6 +1,6 @@
 import sharp from 'sharp'
 import { z } from 'zod'
-import type { NormalizedTransform, Scene, SceneElement } from '../../domain'
+import { layerCanvasBounds, type NormalizedTransform, type Scene, type SceneElement } from '../../domain'
 
 /** A pixel rectangle on the canvas at its output size. */
 export interface PixelBox {
@@ -43,13 +43,14 @@ const layerJobSchema = z.object({
 const selectionFillJobSchema = z.object({
   mode: z.literal('selection-fill'),
   sourceAssetId: z.string().min(1),
-  selectionMaskAssetId: z.string().min(1)
+  selectionMaskAssetId: z.string().min(1),
+  expand: z.boolean().optional()
 })
 
-/** What a Generative Fill job recorded at submit time: the picture it repainted and the selection; null for every other job. */
-export function selectionFillJob(parameters: Readonly<Record<string, unknown>>): { readonly sourceAssetId: string; readonly selectionMaskAssetId: string } | null {
+/** What a Generative Fill job recorded at submit time: the picture it repainted and the selection, and whether it filled a larger canvas; null for every other job. */
+export function selectionFillJob(parameters: Readonly<Record<string, unknown>>): { readonly sourceAssetId: string; readonly selectionMaskAssetId: string; readonly expand: boolean } | null {
   const parsed = selectionFillJobSchema.safeParse(parameters)
-  return parsed.success ? { sourceAssetId: parsed.data.sourceAssetId, selectionMaskAssetId: parsed.data.selectionMaskAssetId } : null
+  return parsed.success ? { sourceAssetId: parsed.data.sourceAssetId, selectionMaskAssetId: parsed.data.selectionMaskAssetId, expand: parsed.data.expand === true } : null
 }
 
 /** What an in-context job recorded at submit time; null for every other job. */
@@ -68,26 +69,21 @@ const MAX_BAND_SHARE_OF_CANVAS = 0.06
 const MAX_GAIN = 1.25
 const MAX_OFFSET = 40
 
-function corners(transform: NormalizedTransform): readonly { x: number; y: number }[] {
-  const { x, y, width, height, rotation } = transform
-  const cx = x + width / 2
-  const cy = y + height / 2
-  const radians = rotation * Math.PI / 180
-  return [[x, y], [x + width, y], [x + width, y + height], [x, y + height]].map(([px, py]) => ({
-    x: cx + (px! - cx) * Math.cos(radians) - (py! - cy) * Math.sin(radians),
-    y: cy + (px! - cx) * Math.sin(radians) + (py! - cy) * Math.cos(radians)
-  }))
-}
-
-/** The element's box on the canvas, in pixels, and the band around it; null when it is off the canvas. */
+/**
+ * Where the element is drawn on the canvas, in pixels (turned about its box's
+ * top-left corner and through its free-transform corners, as the canvas draws
+ * it), and the band around it; null when it is off the canvas.
+ */
 export function layerRegion(scene: Scene, element: SceneElement): LayerRegion | null {
   const width = scene.canvas.outputWidth
   const height = scene.canvas.outputHeight
-  const points = corners(element.transform)
-  const left = Math.max(0, Math.floor(Math.min(...points.map((point) => point.x)) * width))
-  const top = Math.max(0, Math.floor(Math.min(...points.map((point) => point.y)) * height))
-  const right = Math.min(width, Math.ceil(Math.max(...points.map((point) => point.x)) * width))
-  const bottom = Math.min(height, Math.ceil(Math.max(...points.map((point) => point.y)) * height))
+  const bounds = layerCanvasBounds(element.transform, element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null, { width, height })
+  // Rounding noise is not a pixel more.
+  const snap = (value: number): number => Math.round(value * 1e6) / 1e6
+  const left = Math.max(0, Math.floor(snap(bounds.x)))
+  const top = Math.max(0, Math.floor(snap(bounds.y)))
+  const right = Math.min(width, Math.ceil(snap(bounds.x + bounds.width)))
+  const bottom = Math.min(height, Math.ceil(snap(bounds.y + bounds.height)))
   if (right - left < 8 || bottom - top < 8) return null
   const band = Math.max(1, Math.min(
     Math.round(MAX_BAND_SHARE_OF_CANVAS * Math.min(width, height)),

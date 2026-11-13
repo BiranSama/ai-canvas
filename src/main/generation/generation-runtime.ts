@@ -2015,7 +2015,7 @@ export class GenerationRuntime {
         targetElementId: target?.id ?? null,
         sourceAssetId: source.id,
         maskAssetId: mask.asset.id,
-        ...(selectionFill ? { selectionMaskAssetId: input.selectionMaskAssetId } : {}),
+        ...(selectionFill ? { selectionMaskAssetId: input.selectionMaskAssetId, ...(input.expand ? { expand: true } : {}) } : {}),
         contributingMaskIds: mask.contributingMaskIds,
         ...(region === null ? {} : { layerRegion: region }),
         referenceSourceSnapshot: { version: 1, source: referencePreview.source, signature: referencePreview.signature,
@@ -2313,7 +2313,7 @@ export class GenerationRuntime {
       id: input.placementId,
       version: ELEMENT_SCHEMA_VERSION,
       type: 'image',
-      name: fill !== null ? `生成式填充 ${match.result.variantIndex + 1}` : unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一重绘 ${match.result.variantIndex + 1}`,
+      name: fill !== null ? `${fill.expand ? '生成式扩展' : '生成式填充'} ${match.result.variantIndex + 1}` : unified === null ? `生成结果 ${match.result.variantIndex + 1}` : `统一重绘 ${match.result.variantIndex + 1}`,
       description: unified === null
         ? `由 ${match.job.providerId}/${match.job.model} 生成；保留 Result 与 Job 血缘。`
         : `由 ${match.job.providerId}/${match.job.model} 统一重绘；原来的图层保留在它下面，隐藏它就能看到。`,
@@ -2350,7 +2350,8 @@ export class GenerationRuntime {
           // The cut-out covers the element's box and the band it fades across.
           ...(layerTransform === null ? [] : [{
             kind: 'element.update' as const, elementId: target.id,
-            changes: { transform: layerTransform, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill' }
+            // The cut-out is in the canvas's own directions, so any free-transform corners of the old picture go.
+            changes: { transform: layerTransform, crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', corners: null }
           }])
         ]
       }

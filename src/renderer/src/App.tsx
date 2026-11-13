@@ -48,6 +48,10 @@ import { SubjectModelDialog } from './components/SubjectModelDialog'
 import { elementAssetIds } from '../../shared/scene-assets'
 import { nudgeSelection } from './selection/selection-gestures'
 import { CanvasSizeControl } from './components/CanvasSizeControl'
+import { ViewMenu } from './components/ViewMenu'
+import { CropOptionsBar } from './components/CropOptionsBar'
+import { FreeTransformBar } from './components/FreeTransformBar'
+import { useFreeTransform } from './canvas/free-transform-store'
 import { CreationBar } from './components/CreationBar'
 import { ConversationView } from './components/ConversationView'
 import { GenerateView } from './components/GenerateView'
@@ -352,6 +356,7 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
   const editingGroupId = useWorkspaceStore((state) => state.editingGroupId)
   const activeTool = useWorkspaceStore((state) => state.activeTool)
   const setActiveTool = useWorkspaceStore((state) => state.setActiveTool)
+  const freeTransforming = useFreeTransform((state) => state.session !== null)
   useModalScope(importModalRef, () => { setImportChooserOpen(false); setActiveTool('select') }, { active: importChooserOpen })
   const addElement = useWorkspaceStore((state) => state.addElement)
   const deleteSelection = useWorkspaceStore((state) => state.deleteSelection)
@@ -443,7 +448,7 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
       return
     }
     setActiveTool(tool)
-    if (tool === 'select' || tool === 'hand' || tool === 'eyedropper' || isPaintTool(tool) || isSelectionTool(tool)) return
+    if (tool === 'select' || tool === 'hand' || tool === 'crop' || tool === 'eyedropper' || isPaintTool(tool) || isSelectionTool(tool)) return
     if (tool === 'sketch') return
     if (tool === 'image') {
       setImportChooserOpen(true)
@@ -642,11 +647,14 @@ function CanvasView({ onShowLibrary }: { readonly onShowLibrary: () => void }): 
             </div>
           )}
         </section>
-          <div ref={canvasSizeRef} className={`canvas-size-float glass-surface${isPaintTool(activeTool) || isSelectionTool(activeTool) ? ' is-painting' : ''}`} style={canvasUtilityStyles?.size}>
+          <div ref={canvasSizeRef} className={`canvas-size-float glass-surface${isPaintTool(activeTool) || isSelectionTool(activeTool) || activeTool === 'crop' || freeTransforming ? ' is-painting' : ''}`} style={canvasUtilityStyles?.size}>
             <CanvasSizeControl />
+            <ViewMenu />
             {/* The painting tools' options sit beside the canvas size, Photoshop's options bar, and move with it out of the panels' way. */}
             {isPaintTool(activeTool) && <PaintOptionsBar tool={activeTool} />}
             {isSelectionTool(activeTool) && <SelectionOptionsBar tool={activeTool} />}
+            {activeTool === 'crop' && <CropOptionsBar />}
+            <FreeTransformBar />
           </div>
           <div ref={canvasStatusRef} className="canvas-status glass-surface" style={canvasUtilityStyles?.status}>
             <div className="canvas-status-scale">

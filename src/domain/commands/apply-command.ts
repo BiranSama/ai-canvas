@@ -1,5 +1,6 @@
 import type { Draft } from 'immer'
 import { imageElementSchema, sceneElementSchema, WHOLE_CANVAS, type Scene, type SceneElement } from '../scene/schema'
+import { boxAroundLayers } from '../scene/free-transform'
 import { CommandDomainError } from './errors'
 import type { SceneCommand } from './schema'
 
@@ -138,10 +139,8 @@ function groupElements(
 
   // An adjustment layer has no box of its own, so it does not widen the group's.
   const boxed = children.some((element) => element.type !== 'adjustment') ? children.filter((element) => element.type !== 'adjustment') : children
-  const left = Math.min(...boxed.map((element) => element.transform.x))
-  const top = Math.min(...boxed.map((element) => element.transform.y))
-  const right = Math.max(...boxed.map((element) => element.transform.x + element.transform.width))
-  const bottom = Math.max(...boxed.map((element) => element.transform.y + element.transform.height))
+  // Around what each layer covers, through its turn and its corners.
+  const box = boxAroundLayers(boxed.map((element) => ({ transform: element.transform, corners: 'corners' in element ? element.corners : null })), { width: scene.canvas.outputWidth, height: scene.canvas.outputHeight })
   const groupIndex = Math.min(...children.map((element) => element.zIndex))
 
   for (const child of children) child.groupId = groupPayload.id
@@ -151,7 +150,7 @@ function groupElements(
     childIds: elementIds,
     zIndex: groupIndex,
     groupId: null,
-    transform: { x: left, y: top, width: right - left, height: bottom - top, rotation: 0 }
+    transform: box
   })
   scene.elements.splice(groupIndex, 0, group)
   normalizeLayerOrder(scene)

@@ -16,6 +16,8 @@ export interface LayerRenderOptions {
   readonly showHidden?: boolean
   /** Draw the canvas colour first, as part of the picture, so adjustment layers change it as they do on the canvas. */
   readonly canvasBackground?: boolean
+  /** Draw this part of the document, in canvas pixels, past the canvas edge too; the whole canvas otherwise. */
+  readonly area?: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
 }
 
 /**
@@ -31,6 +33,7 @@ export async function renderLayersAsDrawn(ids: readonly string[], options: Layer
       width: scene.canvas.outputWidth,
       height: scene.canvas.outputHeight,
       background: options.canvasBackground === true ? 'canvas' : 'none',
+      ...(options.area === undefined ? {} : { area: options.area }),
       layers: { ids, ...(options.base === undefined ? {} : { base: options.base }), ...(options.showHidden === undefined ? {} : { showHidden: options.showHidden }) }
     })
   } catch {

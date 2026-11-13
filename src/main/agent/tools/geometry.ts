@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { clipStacks, type ClipStack, type NormalizedTransform, type Scene, type SceneElement } from '../../../domain'
+import { clipStacks, cornersAreAffine, cornersAreIdentity, cornersAreMirror, type ClipStack, type NormalizedTransform, type Scene, type SceneElement } from '../../../domain'
 import { describeAdjustment, describeLayerSettings } from '../../../shared/adjustments'
 import { describeLayerStyle, hasLayerStyles } from '../../../shared/layer-styles'
 import type { ElementRefs } from './refs'
@@ -89,6 +89,15 @@ function clippingFacts(element: SceneElement, refs: ElementRefs, scene: Pick<Sce
   return stack === undefined ? [] : [`剪贴蒙版的底层：${stack.memberIds.map((id) => refOrUnknown(refs, id)).join('、')} 剪贴在它上面`]
 }
 
+/** What a free transform did to the layer: flipped, skewed, or its four corners for a perspective or distort. */
+function cornerFacts(element: SceneElement): string[] {
+  const corners = element.type === 'image' || element.type === 'text' || element.type === 'shape' ? element.corners : null
+  if (cornersAreIdentity(corners)) return []
+  if (cornersAreMirror(corners)) return ['水平翻转']
+  const percent = corners!.map(([x, y]) => `${round1(x * 100)},${round1(y * 100)}`).join(' ')
+  return [`${cornersAreAffine(corners!) ? '斜切' : '透视或扭曲'}，四角（框的百分比）${percent}`]
+}
+
 /** One line of exact facts about an element, for `inspect` and the scene summary. */
 export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pick<Scene, 'elements'>): string {
   const facts: string[] = [
@@ -104,6 +113,7 @@ export function elementFacts(element: SceneElement, refs: ElementRefs, scene: Pi
     ...(element.groupId === null ? [] : [`属于 ${refOrUnknown(refs, element.groupId)}`]),
     ...('mask' in element && element.mask !== null && element.mask !== undefined ? [element.mask.enabled ? '有图层蒙版' : '图层蒙版已停用'] : []),
     ...clippingFacts(element, refs, scene),
+    ...cornerFacts(element),
     ...((element.type === 'image' || element.type === 'text' || element.type === 'shape') && hasLayerStyles(element.style) ? [`图层样式：${describeLayerStyle(element.style)}`] : [])
   ]
   if (element.type === 'text') {

@@ -1,4 +1,4 @@
-import type { PaintOp, SceneElement } from '../../../domain'
+import { cornersBendPaint, type PaintOp, type SceneElement } from '../../../domain'
 import { boxLayerSpace, canvasToLayer, imageLayerSpace, type LayerSpace } from '../../../shared/layer-space'
 import { maskGray, paintClipIds, startsWithBaked } from '../../../shared/paint-ops'
 import { showAppNotice } from '../components/app-notice'
@@ -93,6 +93,8 @@ export function paintTarget(): PaintTarget | null {
   }
   const target = element as MaskableElement
   if (target.locked) return refuse(`「${target.name}」已锁定，解锁后才能画。`)
+  // A brush would bend with a skew, distort or perspective, as on Photoshop's smart objects.
+  if ((target.type === 'image' || target.type === 'text' || target.type === 'shape') && cornersBendPaint(target.corners)) return refuse(`「${target.name}」做过斜切、扭曲或透视，画上去会跟着变形；先栅格化（图层右键菜单）再画。`)
   if (!target.visible) return refuse(`「${target.name}」是隐藏的，显示后才能画。`)
   const space = spaceFor(target, editingMask)
   if (space === null) return refuse(`「${target.name}」还没画好，稍后再试。`)

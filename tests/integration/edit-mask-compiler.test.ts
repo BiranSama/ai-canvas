@@ -125,4 +125,34 @@ describe('EditMaskCompiler', () => {
     expect(compiled.contributingMaskIds).toEqual([mask.id])
     await opened.workspace.close(true)
   })
+
+  it('maps a region through an image\'s free-transform corners: on a mirrored image the left of the screen is the right of its pixels', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'ai-canvas-mask-mirrored-'))
+    roots.push(root)
+    const opened = await ProjectWorkspace.create(join(root, 'Mirrored.aicanvas'), 'Mirrored')
+    const sourcePath = join(root, 'source.png')
+    await sharp({ create: { width: 200, height: 100, channels: 4, background: '#718496' } }).png().toFile(sourcePath)
+    const source = await opened.workspace.assets.importImage({ sourcePath })
+    const target: SceneElement = {
+      id: '12000000-0000-4000-8000-000000000081', version: ELEMENT_SCHEMA_VERSION, type: 'image', name: 'Mirrored source', description: '',
+      transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, zIndex: 0, opacity: 1, visible: true, locked: false,
+      groupId: null, semanticRole: 'content', referencePolicy: 'include', assetId: source.id,
+      crop: { x: 0, y: 0, width: 1, height: 1 }, fit: 'fill', referenceRole: 'general', corners: [[1, 0], [0, 0], [0, 1], [1, 1]]
+    }
+    const mask: SceneElement = {
+      id: '12000000-0000-4000-8000-000000000082', version: ELEMENT_SCHEMA_VERSION, type: 'mask', name: 'Left quarter', description: '',
+      transform: { x: 0, y: 0, width: 1, height: 1, rotation: 0 }, zIndex: 1, opacity: 1, visible: true, locked: false,
+      groupId: null, semanticRole: 'edit-mask', referencePolicy: 'exclude', mode: 'edit', targetElementId: target.id,
+      paths: [{ id: '12000000-0000-4000-8000-000000000083', points: [{ x: 0, y: 0 }, { x: .25, y: 0 }, { x: .25, y: 1 }, { x: 0, y: 1 }], closed: true }], feather: 0
+    }
+    const fixture = createNightVeilScene()
+    const scene = sceneSchema.parse({ ...fixture, projectId: opened.workspace.metadata.id, elements: [target, mask], relations: [] })
+    const compiled = await new EditMaskCompiler({
+      assetStore: opened.workspace.assets, stagingDirectory: join(root, 'staging'), idFactory: () => '12000000-0000-4000-8000-000000000084'
+    }).compile(scene, target.id, source)
+    const pixels = await sharp(await readFile(opened.workspace.assets.resolveOriginal(compiled.asset))).greyscale().removeAlpha().raw().toBuffer()
+    expect(pixels[50 * 200 + 190]).toBeGreaterThan(245)
+    expect(pixels[50 * 200 + 10]).toBe(0)
+    await opened.workspace.close(true)
+  })
 })

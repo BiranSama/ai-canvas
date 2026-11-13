@@ -60,4 +60,6 @@ export interface PsdDocumentImport {
   readonly keptAsPictures: readonly string[]
   /** The bottom layer covers the canvas with no transparency, as Photoshop's 背景 does. */
   readonly opaqueBackground: boolean
+  /** Photoshop's guides, in document pixels. */
+  readonly guides?: readonly { readonly axis: 'x' | 'y'; readonly position: number }[]
 }
