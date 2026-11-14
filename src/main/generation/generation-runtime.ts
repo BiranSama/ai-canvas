@@ -440,7 +440,11 @@ export class GenerationRuntime {
       authorization: providerUsage,
       recordUsage: (reply) => this.#userMemory.recordBackgroundUsage(reply)
     })
-    this.#learner = new PreferenceLearner({ store: this.#userMemory, model: this.#backgroundText })
+    this.#learner = new PreferenceLearner({
+      store: this.#userMemory,
+      model: this.#backgroundText,
+      mayLeave: async () => this.#backgroundJobs && await this.#outboundPolicy().catch(() => 'local_only') !== 'local_only'
+    })
   }
 
   static async create(userDataDirectory: string, options: GenerationRuntimeOptions = {}): Promise<GenerationRuntime> {
@@ -674,7 +678,8 @@ export class GenerationRuntime {
     const harnessRepository = new AgentHarnessRepository(projectDatabasePath)
     const contextRepository = new AgentContextRepository(projectDatabasePath)
     this.#outboundPolicy = async () => (await contextRepository.getSettings(project.workspace.metadata.id)).outboundPolicy
-    this.#learningScene = { projectId: project.workspace.metadata.id, scene: null, agentMade: new Set() }
+    // The scene as opened is the baseline, so the first commit, the Agent's included, is compared with it.
+    this.#learningScene = { projectId: project.workspace.metadata.id, scene: project.scene, agentMade: new Set() }
     const outboundContextService = new OutboundContextService(contextRepository)
     const toolExecutor = new AgentToolExecutorShadow({
       repository: new AgentToolCallRepository(projectDatabasePath)
@@ -1584,7 +1589,7 @@ export class GenerationRuntime {
     if (!this.#backgroundJobs) return
     const policy = await this.#outboundPolicy().catch(() => 'local_only')
     if (policy === 'local_only') return
-    await this.#learner.record(kind, text)
+    await this.#learner.record(kind, text, this.#project.workspace.metadata.id)
   }
 
   /** The Agent's layers, and what the person then changed on them by hand. */
@@ -3165,8 +3170,11 @@ export class GenerationRuntime {
     return this.#agent.resolveMemoryCandidate(input)
   }
 
-  setOutboundPolicy(input: SetOutboundPolicyInput): Promise<ProjectKnowledgeSnapshot> {
-    return this.#agent.setOutboundPolicy(input)
+  async setOutboundPolicy(input: SetOutboundPolicyInput): Promise<ProjectKnowledgeSnapshot> {
+    const snapshot = await this.#agent.setOutboundPolicy(input)
+    // What this project taught about preferences stays on this computer from now on.
+    if (snapshot.outboundPolicy === 'local_only') await this.#userMemory.dropProjectSignals(this.#project.workspace.metadata.id).catch(() => undefined)
+    return snapshot
   }
 
   replayAgentEvents(afterSequence: number, limit = 1_000): Promise<readonly AgentEvent[]> {

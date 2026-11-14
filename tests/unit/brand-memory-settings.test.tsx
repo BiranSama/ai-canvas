@@ -93,3 +93,15 @@ describe('the brand in the editor', () => {
     window.removeEventListener('ai-canvas:open-provider-settings', opened)
   })
 })
+
+describe('brand fonts', () => {
+  it('can go back to no title font', async () => {
+    const api = desktop(snapshot({ brand: { name: '晨雾', logo: null, colors: [], titleFont: 'Noto Serif SC', bodyFont: '', copy: [], bannedWords: [] } }))
+    render(<BrandMemorySettings onStatus={() => undefined} />)
+    await act(async () => undefined)
+    expect(screen.queryByRole('button', { name: '不指定正文字体' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '不指定标题字体' }))
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /保存品牌/ })) })
+    expect(api.saveBrandKit).toHaveBeenCalledWith(expect.objectContaining({ titleFont: '' }))
+  })
+})

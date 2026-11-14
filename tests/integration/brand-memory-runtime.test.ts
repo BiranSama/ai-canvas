@@ -142,3 +142,31 @@ it('gives the multi-step engine the project rules and the earlier conversation',
   expect(second).toContain('之前的对话')
   expect(second).toContain('先做一版海报')
 }, 40_000)
+
+it('learns from a manual edit on the layer the Agent made first, and forgets the project when it goes 仅本地', async () => {
+  const { root, runtime } = await setup()
+  vi.stubGlobal('fetch', vi.fn(async (_input: URL | string | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body)) as Item
+    const tools = Array.isArray(body.tools) ? body.tools.length : 0
+    if (tools === 0) return reply('标题海报', 'bg')
+    const answered = (body.input as Item[]).some((item) => item.type === 'function_call_output')
+    if (answered) return reply('加好了。下一步：看看字体。', 'done')
+    return new Response(JSON.stringify({ id: 'call', status: 'completed', output: [
+      { id: 'fc_1', type: 'function_call', call_id: 'c1', name: 'add_text', arguments: JSON.stringify({ content: '晨雾', role: 'title' }), status: 'completed' }
+    ], usage: { input_tokens: 500, output_tokens: 20 } }), { headers: { 'content-type': 'application/json' } })
+  }))
+  await runtime.createProject(join(root, 'learn.aicanvas'), '学习测试')
+  await runTurn(runtime, '加一个标题')
+  const scene = runtime.getWorkspaceBootstrap().scene
+  const title = scene.elements.find((element) => element.type === 'text')!
+  expect(title).toBeDefined()
+  const edited = await runtime.executeSceneCommands({ expectedSceneRevision: scene.revision, batch: {
+    id: crypto.randomUUID(), origin: 'user', summary: '换字体', commands: [{ kind: 'element.update', elementId: title.id, changes: { fontFamily: 'Songti SC' } }]
+  } })
+  expect(edited.ok).toBe(true)
+  await expect.poll(async () => (await runtime.getUserMemory()).learning.signals).toBe(1)
+
+  const knowledge = await runtime.getProjectKnowledge()
+  await runtime.setOutboundPolicy({ policy: 'local_only', expectedVersion: knowledge.outboundPolicyVersion })
+  expect((await runtime.getUserMemory()).learning).toMatchObject({ signals: 0, newSignals: 0 })
+}, 40_000)

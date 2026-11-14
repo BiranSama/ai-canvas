@@ -169,18 +169,28 @@ export class UserMemoryStore {
   }
 
   /** Records what the person did; true when enough has gathered since the last summary to make one. */
-  async recordSignal(kind: PreferenceSignalKind, text: string): Promise<boolean> {
+  async recordSignal(kind: PreferenceSignalKind, text: string, projectId?: string): Promise<boolean> {
     const line = text.trim().slice(0, 300)
     if (line === '') return false
     const result = { due: false }
     await this.#mutate((file) => {
       if (!file.learning.enabled) return file
-      const signal: PreferenceSignal = { kind, text: line, at: new Date().toISOString() }
+      const signal: PreferenceSignal = { kind, text: line, at: new Date().toISOString(), ...(projectId === undefined ? {} : { projectId }) }
       const newSignals = file.learning.newSignals + 1
       result.due = newSignals >= SIGNALS_PER_SUMMARY
       return { ...file, signals: [...file.signals, signal].slice(-MAX_PREFERENCE_SIGNALS), learning: { ...file.learning, newSignals } }
     })
     return result.due
+  }
+
+  /** Forgets the signals a project recorded, as when it turns to 仅本地; they never leave this computer after that. */
+  async dropProjectSignals(projectId: string): Promise<void> {
+    await this.#mutate((file) => {
+      const kept = file.signals.filter((signal) => signal.projectId !== projectId)
+      if (kept.length === file.signals.length) return file
+      const dropped = file.signals.length - kept.length
+      return { ...file, signals: kept, learning: { ...file.learning, newSignals: Math.max(0, file.learning.newSignals - dropped) } }
+    })
   }
 
   /** The signals a summary works from: the newest, and the preferences already kept, so it does not repeat them. */

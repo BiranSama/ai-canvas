@@ -76,14 +76,14 @@ describe('preference learning helpers', () => {
 })
 
 describe('preference learner', () => {
-  function learner(options: { readonly due?: boolean; readonly reply?: string | null; readonly enabled?: boolean } = {}) {
+  function learner(options: { readonly due?: boolean; readonly reply?: string | null; readonly enabled?: boolean; readonly mayLeave?: boolean } = {}) {
     const store = {
       recordSignal: vi.fn(async () => options.due ?? false),
       summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: options.enabled ?? true })),
       summarized: vi.fn(async (candidates: readonly { readonly content: string }[]) => candidates.map((candidate) => ({ id: 'c', kind: 'preference' as const, content: candidate.content, source: 'learned' as const, status: 'pending' as const, createdAt: NOW })))
     }
     const model = { complete: vi.fn(async () => options.reply === null ? null : { text: options.reply ?? '{"preferences":["喜欢简洁"]}', served: 'fast' as const, inputTokens: 1, outputTokens: 1, estimatedCostCny: null }) }
-    return { store, model, learner: new PreferenceLearner({ store, model, delayMs: 5 }) }
+    return { store, model, learner: new PreferenceLearner({ store, model, delayMs: 5, ...(options.mayLeave === undefined ? {} : { mayLeave: async () => options.mayLeave! }) }) }
   }
 
   it('sums up once a summary falls due, and files what the model offers', async () => {
@@ -107,5 +107,25 @@ describe('preference learner', () => {
     const { model, learner: subject } = learner()
     await Promise.all([subject.summarize(), subject.summarize()])
     expect(model.complete).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('preference learner and the outbound policy', () => {
+  it('asks again right before sending, and keeps the signals when the project went 仅本地 meanwhile', async () => {
+    const store = {
+      recordSignal: vi.fn(async () => true),
+      summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: true })),
+      summarized: vi.fn(async () => [])
+    }
+    const model = { complete: vi.fn(async () => null) }
+    let allowed = true
+    const subject = new PreferenceLearner({ store, model, delayMs: 5, mayLeave: async () => allowed })
+    await subject.record('said', '太花了', 'project-1')
+    expect(store.recordSignal).toHaveBeenCalledWith('said', '太花了', 'project-1')
+    allowed = false
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    expect(model.complete).not.toHaveBeenCalled()
+    expect(store.summarized).not.toHaveBeenCalled()
+    subject.close()
   })
 })

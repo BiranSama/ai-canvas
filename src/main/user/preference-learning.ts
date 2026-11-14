@@ -117,6 +117,8 @@ export function parseProjectName(reply: string): string | null {
 export interface PreferenceLearnerOptions {
   readonly store: Pick<UserMemoryStore, 'recordSignal' | 'summaryInput' | 'summarized'>
   readonly model: Pick<BackgroundTextModel, 'complete'>
+  /** Asked again right before a summary is sent: false while the open project keeps everything on this computer. */
+  readonly mayLeave?: () => Promise<boolean>
   /** How long after a summary falls due it runs, so it does not compete with the work at hand. */
   readonly delayMs?: number
 }
@@ -132,9 +134,9 @@ export class PreferenceLearner {
   }
 
   /** Records a signal; a summary that falls due runs a little later. */
-  async record(kind: PreferenceSignalKind, text: string): Promise<void> {
+  async record(kind: PreferenceSignalKind, text: string, projectId?: string): Promise<void> {
     if (this.#closed) return
-    const due = await this.#options.store.recordSignal(kind, text).catch(() => false)
+    const due = await this.#options.store.recordSignal(kind, text, projectId).catch(() => false)
     if (due) this.#schedule()
   }
 
@@ -152,6 +154,8 @@ export class PreferenceLearner {
     const run = (async (): Promise<readonly UserMemoryCandidate[]> => {
       const input = await this.#options.store.summaryInput()
       if (!input.enabled || input.signals.length === 0) return []
+      // The policy may have changed while the summary waited; the signals stay here until it allows them out.
+      if (this.#options.mayLeave !== undefined && !await this.#options.mayLeave().catch(() => false)) return []
       const reply = await this.#options.model.complete({ system: SUMMARY_SYSTEM, prompt: summaryPrompt(input.signals, input.kept), maxOutputTokens: 1_024 })
       // With no model to ask, the signals wait; the next one tries again.
       if (reply === null) return []

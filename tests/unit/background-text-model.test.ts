@@ -73,3 +73,14 @@ describe('background text model', () => {
     expect(failing.recorded).toEqual([])
   })
 })
+
+describe('background usage', () => {
+  it('counts a billed reply with no words before falling back', async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) => String(url).startsWith('https://fast.')
+      ? json({ id: 'c0', choices: [{ finish_reason: 'length', message: { content: '' } }], usage: { prompt_tokens: 300, completion_tokens: 1024 } })
+      : reply('ok'))
+    const { model, recorded } = setup({ fast: true, keys: ['text-model-fast', 'openai-compatible-llm'], fetcher })
+    await expect(model.complete({ system: 's', prompt: 'p' })).resolves.toMatchObject({ served: 'main' })
+    expect(recorded.map((entry) => [entry.served, entry.outputTokens])).toEqual([['fast', 1024], ['main', 8]])
+  })
+})

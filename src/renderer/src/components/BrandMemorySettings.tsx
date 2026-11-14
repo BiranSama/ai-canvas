@@ -135,8 +135,15 @@ export function BrandMemorySettings({ onStatus }: { readonly onStatus: (message:
               {draft.colors.length < MAX_BRAND_COLORS && <button type="button" onClick={() => edit({ colors: [...draft.colors, '#3b6fb6'] })}><Plus size={12} />加一个颜色</button>}
             </div>
           </div>
-          <div className="brand-field"><span>标题字体</span><FontPicker value={draft.titleFont} onChange={(family) => edit({ titleFont: family })} /></div>
-          <div className="brand-field"><span>正文字体</span><FontPicker value={draft.bodyFont} onChange={(family) => edit({ bodyFont: family })} /></div>
+          {(['titleFont', 'bodyFont'] as const).map((field) => (
+            <div key={field} className="brand-field">
+              <span>{field === 'titleFont' ? '标题字体' : '正文字体'}</span>
+              <div className="brand-font-row">
+                <FontPicker value={draft[field]} onChange={(family) => edit({ [field]: family })} />
+                {draft[field] !== '' && <button type="button" aria-label={`不指定${field === 'titleFont' ? '标题' : '正文'}字体`} onClick={() => edit({ [field]: '' })}><X size={12} />不指定</button>}
+              </div>
+            </div>
+          ))}
           <label className="brand-field"><span>常用文案（一行一条，最多 {MAX_BRAND_COPY} 条）</span><textarea aria-label="常用文案" rows={3} placeholder={'例如：每天新鲜烘焙\n营业时间 8:00–20:00'} value={draft.copy} onChange={(event) => edit({ copy: event.currentTarget.value })} /></label>
           <label className="brand-field"><span>禁用词（画面上的字不出现，用逗号或顿号隔开）</span><textarea aria-label="禁用词" rows={2} placeholder="例如：最、第一、全网最低" value={draft.bannedWords} onChange={(event) => edit({ bannedWords: event.currentTarget.value })} /></label>
           <div className="brand-actions">

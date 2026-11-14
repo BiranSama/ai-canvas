@@ -115,7 +115,6 @@ export class BackgroundTextModel {
       if (request.signal?.aborted === true) return null
       try {
         const { text, usage } = await completeTextOnce(llm, request, this.#options)
-        if (text === '') continue
         const reply: BackgroundTextReply = {
           text,
           served,
@@ -123,7 +122,9 @@ export class BackgroundTextModel {
           outputTokens: usage?.outputTokens ?? 0,
           estimatedCostCny: usage === null || llm.pricing === null ? null : estimateModelCostCny(usage, llm.pricing)
         }
-        await this.#options.recordUsage?.(reply).catch(() => undefined)
+        // A reply with no words was still billed (thinking can use the whole budget): count it before trying the next model.
+        if (usage !== null || text !== '') await this.#options.recordUsage?.(reply).catch(() => undefined)
+        if (text === '') continue
         return reply
       } catch {
         // The next model, if any, takes it.

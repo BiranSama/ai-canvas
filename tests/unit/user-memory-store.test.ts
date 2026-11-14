@@ -132,3 +132,16 @@ describe('user memory store', () => {
     expect(calls).toBe(1)
   })
 })
+
+describe('signals by project', () => {
+  it('forgets one project\'s signals and what they counted toward the next summary', async () => {
+    const store = new UserMemoryStore(file)
+    await store.recordSignal('said', '太花了', 'p1')
+    await store.recordSignal('said', '要简洁', 'p2')
+    await store.recordSignal('edited', '换了字体', 'p1')
+    await store.dropProjectSignals('p1')
+    const after = await store.read()
+    expect(after.signals.map((signal) => signal.text)).toEqual(['要简洁'])
+    expect(after.learning.newSignals).toBe(1)
+  })
+})

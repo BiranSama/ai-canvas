@@ -76,7 +76,9 @@ export const preferenceSignalSchema = z.object({
   kind: preferenceSignalKindSchema,
   /** One line, in the person's language: what they did or said. */
   text: shortText(300),
-  at: z.string().datetime({ offset: true })
+  at: z.string().datetime({ offset: true }),
+  /** The project it came from, so a project that turns to 仅本地 can take its signals back. */
+  projectId: z.string().min(1).max(200).optional()
 }).strict()
 
 export const backgroundModelUsageSchema = z.object({
