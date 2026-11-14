@@ -4,7 +4,8 @@ import { UserMemoryStore } from '../user/user-memory-store'
 import { describeManualEdits, isAutoProjectName, looksLikeFeedback, parseProjectName, PreferenceLearner, PROJECT_NAME_SYSTEM } from '../user/preference-learning'
 import type { PreferenceSignalKind } from '../../shared/user-memory'
 import { brandBrief, MEMORIES_PER_BRIEF, type BrandKitInput, type UserMemoryChange, type UserMemorySnapshot } from '../../shared/user-memory'
-import type { UserContext } from '../agent/context-builder'
+import { OutboundPolicyGuard, type UserContext } from '../agent/context-builder'
+import type { OutboundContextPolicy } from '../../shared/agent-context'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { summarizeGenerationCosts } from '../../shared/generation-cost'
@@ -372,7 +373,7 @@ export class GenerationRuntime {
   readonly #learner: PreferenceLearner
   readonly #projectRenameListeners = new Set<(event: { readonly projectId: string; readonly name: string }) => void>()
   /** The open project's outbound policy, read when a signal or a name would leave this computer. */
-  #outboundPolicy: () => Promise<string> = async () => 'minimal'
+  #outboundPolicy: () => Promise<OutboundContextPolicy> = async () => 'minimal'
   /** The scene as last committed, and the layers the Agent made or changed since the project opened, for learning from manual edits. */
   #learningScene: { readonly projectId: string; scene: Scene | null; readonly agentMade: Set<string> } | null = null
   /** Projects being named now, so one turn's end names a project once. */
@@ -443,7 +444,7 @@ export class GenerationRuntime {
     this.#learner = new PreferenceLearner({
       store: this.#userMemory,
       model: this.#backgroundText,
-      mayLeave: async () => this.#backgroundJobs && await this.#outboundPolicy().catch(() => 'local_only') !== 'local_only'
+      mayLeave: () => this.#textMayLeave()
     })
   }
 
@@ -1584,11 +1585,24 @@ export class GenerationRuntime {
     return { assetId: asset.id, width: logo.width, height: logo.height }
   }
 
+  /**
+   * Whether the person's words may go to a text model outside any turn, judged by the open project's outbound
+   * policy through the same guard a turn's model call passes: 仅本地 blocks it, and so does a custom policy
+   * that does not list user text.
+   */
+  async #textMayLeave(): Promise<boolean> {
+    if (!this.#backgroundJobs) return false
+    const policy = await this.#outboundPolicy().catch(() => null)
+    if (policy === null) return false
+    return new OutboundPolicyGuard().evaluate({
+      policy, dataTypes: ['user_text'], imageAssetIds: [], providerLocal: false, permissionAllowsExternal: true
+    }).allowed
+  }
+
   /** Records a preference signal unless the project keeps everything on this computer. */
   async #signal(kind: PreferenceSignalKind, text: string): Promise<void> {
     if (!this.#backgroundJobs) return
-    const policy = await this.#outboundPolicy().catch(() => 'local_only')
-    if (policy === 'local_only') return
+    if (!await this.#textMayLeave()) return
     await this.#learner.record(kind, text, this.#project.workspace.metadata.id)
   }
 
@@ -1632,7 +1646,7 @@ export class GenerationRuntime {
     if (!this.#backgroundJobs || !isAutoProjectName(project.workspace.metadata.name) || this.#naming.has(projectId)) return
     this.#naming.add(projectId)
     try {
-      if (await this.#outboundPolicy().catch(() => 'local_only') === 'local_only') return
+      if (!await this.#textMayLeave()) return
       const request = await this.#firstRequest()
       if (request === null) return
       const reply = await this.#backgroundText.complete({ system: PROJECT_NAME_SYSTEM, prompt: request.slice(0, 500), maxOutputTokens: 1_024 })
@@ -3172,8 +3186,8 @@ export class GenerationRuntime {
 
   async setOutboundPolicy(input: SetOutboundPolicyInput): Promise<ProjectKnowledgeSnapshot> {
     const snapshot = await this.#agent.setOutboundPolicy(input)
-    // What this project taught about preferences stays on this computer from now on.
-    if (snapshot.outboundPolicy === 'local_only') await this.#userMemory.dropProjectSignals(this.#project.workspace.metadata.id).catch(() => undefined)
+    // A policy that keeps the person's words in: what this project taught about preferences stays on this computer from now on.
+    if (!await this.#textMayLeave()) await this.#userMemory.dropProjectSignals(this.#project.workspace.metadata.id).catch(() => undefined)
     return snapshot
   }
 

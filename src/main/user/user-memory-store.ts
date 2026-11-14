@@ -35,6 +35,9 @@ import {
  */
 
 const EXTENSIONS = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' } as const
+const FORMATS = { 'image/png': 'png', 'image/jpeg': 'jpeg', 'image/webp': 'webp' } as const
+/** A logo's longest side once saved: plenty for any canvas, and well inside what a project takes as an asset. */
+export const MAX_LOGO_EDGE = 4_096
 
 export class UserMemoryStore {
   readonly #filePath: string
@@ -85,15 +88,19 @@ export class UserMemoryStore {
 
   async setLogo(input: { readonly mimeType: string; readonly bytes: Uint8Array }): Promise<void> {
     const { mimeType, bytes } = brandLogoInputSchema.parse(input)
-    const metadata = await sharp(bytes).metadata().catch(() => null)
+    const metadata = await sharp(bytes, { limitInputPixels: false }).metadata().catch(() => null)
     if (metadata?.width === undefined || metadata.height === undefined) throw new Error('这张图片读不出来，换一张 PNG、JPG 或 WebP。')
+    // A larger logo is scaled down once, here, in its own format, so every project can take it.
+    const fits = metadata.width <= MAX_LOGO_EDGE && metadata.height <= MAX_LOGO_EDGE
+    const saved = fits ? { data: Buffer.from(bytes), info: { width: metadata.width, height: metadata.height } }
+      : await sharp(bytes, { limitInputPixels: false }).resize(MAX_LOGO_EDGE, MAX_LOGO_EDGE, { fit: 'inside' }).toFormat(FORMATS[mimeType]).toBuffer({ resolveWithObject: true })
     const fileName = `logo-${randomUUID()}.${EXTENSIONS[mimeType]}`
     await mkdir(this.#brandDirectory, { recursive: true })
-    await writeFile(join(this.#brandDirectory, fileName), bytes)
+    await writeFile(join(this.#brandDirectory, fileName), saved.data)
     const replaced: { fileName: string | null } = { fileName: null }
     await this.#mutate((file) => {
       replaced.fileName = file.brand.logo?.fileName ?? null
-      return { ...file, brand: { ...file.brand, logo: { fileName, mimeType, width: metadata.width!, height: metadata.height!, updatedAt: new Date().toISOString() } } }
+      return { ...file, brand: { ...file.brand, logo: { fileName, mimeType, width: saved.info.width, height: saved.info.height, updatedAt: new Date().toISOString() } } }
     })
     if (replaced.fileName !== null) await this.#removeLogoFile(replaced.fileName)
   }
@@ -194,14 +201,25 @@ export class UserMemoryStore {
   }
 
   /** The signals a summary works from: the newest, and the preferences already kept, so it does not repeat them. */
-  async summaryInput(): Promise<{ readonly signals: readonly PreferenceSignal[]; readonly kept: readonly string[]; readonly enabled: boolean }> {
+  async summaryInput(): Promise<{ readonly signals: readonly PreferenceSignal[]; readonly kept: readonly string[]; readonly enabled: boolean; readonly newSignals: number }> {
     const file = await this.read()
-    return { signals: file.signals.slice(-60), kept: [...file.memories.map((entry) => entry.content), ...file.candidates.map((entry) => entry.content)], enabled: file.learning.enabled }
+    return {
+      signals: file.signals.slice(-60),
+      kept: [...file.memories.map((entry) => entry.content), ...file.candidates.map((entry) => entry.content)],
+      enabled: file.learning.enabled,
+      newSignals: file.learning.newSignals
+    }
   }
 
-  /** Files a summary's candidates and starts counting new signals again. */
-  async summarized(candidates: readonly { readonly kind: UserMemoryKind; readonly content: string }[]): Promise<readonly UserMemoryCandidate[]> {
-    await this.#mutate((file) => ({ ...file, learning: { ...file.learning, newSignals: 0, lastSummaryAt: new Date().toISOString() } }))
+  /**
+   * Files a summary's candidates. `consumed` is how many new signals the summary saw: signals recorded while it
+   * was being written still count toward the next one. Without it, the count starts again from nothing.
+   */
+  async summarized(candidates: readonly { readonly kind: UserMemoryKind; readonly content: string }[], consumed?: number): Promise<readonly UserMemoryCandidate[]> {
+    await this.#mutate((file) => ({
+      ...file,
+      learning: { ...file.learning, newSignals: consumed === undefined ? 0 : Math.max(0, file.learning.newSignals - consumed), lastSummaryAt: new Date().toISOString() }
+    }))
     const added: UserMemoryCandidate[] = []
     for (const candidate of candidates.slice(0, CANDIDATES_PER_SUMMARY)) {
       const filed = await this.propose(candidate.kind, candidate.content, 'learned')

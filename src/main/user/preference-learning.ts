@@ -1,6 +1,6 @@
 import type { Scene, SceneElement } from '../../domain'
 import { sanitizeProjectName } from '../storage/project-library'
-import { CANDIDATES_PER_SUMMARY, type PreferenceSignal, type PreferenceSignalKind, type UserMemoryCandidate } from '../../shared/user-memory'
+import { CANDIDATES_PER_SUMMARY, SIGNALS_PER_SUMMARY, type PreferenceSignal, type PreferenceSignalKind, type UserMemoryCandidate } from '../../shared/user-memory'
 import type { BackgroundTextModel } from '../llm/background-text-model'
 import type { UserMemoryStore } from './user-memory-store'
 
@@ -159,10 +159,16 @@ export class PreferenceLearner {
       const reply = await this.#options.model.complete({ system: SUMMARY_SYSTEM, prompt: summaryPrompt(input.signals, input.kept), maxOutputTokens: 1_024 })
       // With no model to ask, the signals wait; the next one tries again.
       if (reply === null) return []
-      return this.#options.store.summarized(parseSummary(reply.text).map((content) => ({ kind: 'preference' as const, content })))
+      return this.#options.store.summarized(parseSummary(reply.text).map((content) => ({ kind: 'preference' as const, content })), input.newSignals)
     })().catch(() => [] as readonly UserMemoryCandidate[])
     this.#running = run
-    return run.finally(() => { if (this.#running === run) this.#running = null })
+    return run.finally(async () => {
+      if (this.#running !== run) return
+      this.#running = null
+      // Signals that came in while this summary was written may already make up the next one.
+      const left = await this.#options.store.summaryInput().catch(() => null)
+      if (left !== null && left.enabled && left.newSignals >= SIGNALS_PER_SUMMARY) this.#schedule()
+    })
   }
 
   close(): void {

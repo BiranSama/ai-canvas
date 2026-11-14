@@ -10,6 +10,7 @@ import {
   summaryPrompt
 } from '../../src/main/user/preference-learning'
 import type { PreferenceSignal } from '../../src/shared/user-memory'
+import type { BackgroundTextReply } from '../../src/main/llm/background-text-model'
 
 const NOW = '2026-11-14T00:00:00.000Z'
 
@@ -77,10 +78,14 @@ describe('preference learning helpers', () => {
 
 describe('preference learner', () => {
   function learner(options: { readonly due?: boolean; readonly reply?: string | null; readonly enabled?: boolean; readonly mayLeave?: boolean } = {}) {
+    const counter = { pending: 12 }
     const store = {
       recordSignal: vi.fn(async () => options.due ?? false),
-      summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: options.enabled ?? true })),
-      summarized: vi.fn(async (candidates: readonly { readonly content: string }[]) => candidates.map((candidate) => ({ id: 'c', kind: 'preference' as const, content: candidate.content, source: 'learned' as const, status: 'pending' as const, createdAt: NOW })))
+      summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: options.enabled ?? true, newSignals: counter.pending })),
+      summarized: vi.fn(async (candidates: readonly { readonly content: string }[], consumed?: number) => {
+        counter.pending = Math.max(0, counter.pending - (consumed ?? counter.pending))
+        return candidates.map((candidate) => ({ id: 'c', kind: 'preference' as const, content: candidate.content, source: 'learned' as const, status: 'pending' as const, createdAt: NOW }))
+      })
     }
     const model = { complete: vi.fn(async () => options.reply === null ? null : { text: options.reply ?? '{"preferences":["喜欢简洁"]}', served: 'fast' as const, inputTokens: 1, outputTokens: 1, estimatedCostCny: null }) }
     return { store, model, learner: new PreferenceLearner({ store, model, delayMs: 5, ...(options.mayLeave === undefined ? {} : { mayLeave: async () => options.mayLeave! }) }) }
@@ -89,7 +94,7 @@ describe('preference learner', () => {
   it('sums up once a summary falls due, and files what the model offers', async () => {
     const { store, model, learner: subject } = learner({ due: true })
     await subject.record('said', '太花了')
-    await vi.waitFor(() => expect(store.summarized).toHaveBeenCalledWith([{ kind: 'preference', content: '喜欢简洁' }]))
+    await vi.waitFor(() => expect(store.summarized).toHaveBeenCalledWith([{ kind: 'preference', content: '喜欢简洁' }], 12))
     expect(model.complete).toHaveBeenCalledTimes(1)
     subject.close()
   })
@@ -114,7 +119,7 @@ describe('preference learner and the outbound policy', () => {
   it('asks again right before sending, and keeps the signals when the project went 仅本地 meanwhile', async () => {
     const store = {
       recordSignal: vi.fn(async () => true),
-      summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: true })),
+      summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: true, newSignals: 12 })),
       summarized: vi.fn(async () => [])
     }
     const model = { complete: vi.fn(async () => null) }
@@ -126,6 +131,33 @@ describe('preference learner and the outbound policy', () => {
     await new Promise((resolve) => setTimeout(resolve, 30))
     expect(model.complete).not.toHaveBeenCalled()
     expect(store.summarized).not.toHaveBeenCalled()
+    subject.close()
+  })
+})
+
+describe('signals that arrive during a summary', () => {
+  it('keeps counting them and sums them up next', async () => {
+    const counter = { pending: 12 }
+    let release: () => void = () => undefined
+    const store = {
+      recordSignal: vi.fn(async () => { counter.pending += 1; return counter.pending >= 12 }),
+      summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: true, newSignals: counter.pending })),
+      summarized: vi.fn(async (_candidates: readonly unknown[], consumed?: number) => { counter.pending = Math.max(0, counter.pending - (consumed ?? counter.pending)); return [] })
+    }
+    const model = { complete: vi.fn((): Promise<BackgroundTextReply | null> => new Promise((resolve) => { release = () => resolve(null) })) }
+    model.complete.mockImplementationOnce(() => new Promise((resolve) => {
+      release = () => resolve({ text: '{"preferences":[]}', served: 'fast' as const, inputTokens: 1, outputTokens: 1, estimatedCostCny: null })
+    }))
+    const subject = new PreferenceLearner({ store, model, delayMs: 5 })
+    const first = subject.summarize()
+    await vi.waitFor(() => expect(model.complete).toHaveBeenCalledTimes(1))
+    // Twelve more while the first summary is out.
+    for (let index = 0; index < 12; index += 1) await subject.record('said', `第 ${index} 条`)
+    release()
+    await first
+    expect(store.summarized).toHaveBeenCalledWith([], 12)
+    expect(counter.pending).toBe(12)
+    await vi.waitFor(() => expect(model.complete).toHaveBeenCalledTimes(2))
     subject.close()
   })
 })

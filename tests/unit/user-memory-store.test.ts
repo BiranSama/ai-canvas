@@ -145,3 +145,27 @@ describe('signals by project', () => {
     expect(after.learning.newSignals).toBe(1)
   })
 })
+
+describe('large logos', () => {
+  it('scales a logo larger than 4096 on a side down once, keeping its format and shape', async () => {
+    const store = new UserMemoryStore(file)
+    const big = new Uint8Array(await sharp({ create: { width: 9000, height: 3000, channels: 4, background: { r: 10, g: 10, b: 10, alpha: 1 } } }).png({ compressionLevel: 9 }).toBuffer())
+    await store.setLogo({ mimeType: 'image/png', bytes: big })
+    const logo = (await store.read()).brand.logo!
+    expect(logo).toMatchObject({ mimeType: 'image/png', width: 4096, height: 1365 })
+    const saved = await sharp(await store.readLogo(logo.fileName)).metadata()
+    expect(saved).toMatchObject({ format: 'png', width: 4096, height: 1365 })
+  })
+})
+
+describe('summaries and new signals', () => {
+  it('keeps the signals recorded while a summary was written', async () => {
+    const store = new UserMemoryStore(file)
+    for (let index = 0; index < 12; index += 1) await store.recordSignal('said', `第 ${index} 条`)
+    const seen = (await store.summaryInput()).newSignals
+    await store.recordSignal('said', '写总结时又来一条')
+    await store.summarized([], seen)
+    expect((await store.read()).learning.newSignals).toBe(1)
+  })
+})
+

@@ -170,3 +170,18 @@ it('learns from a manual edit on the layer the Agent made first, and forgets the
   await runtime.setOutboundPolicy({ policy: 'local_only', expectedVersion: knowledge.outboundPolicyVersion })
   expect((await runtime.getUserMemory()).learning).toMatchObject({ signals: 0, newSignals: 0 })
 }, 40_000)
+
+it('records a remark as a signal only when the project lets user text out', async () => {
+  const { root, runtime } = await setup()
+  vi.stubGlobal('fetch', model([]))
+  await runtime.createProject(join(root, 'policy.aicanvas'), '外发测试')
+  await runTurn(runtime, '太花了，要简洁一点')
+  await expect.poll(async () => (await runtime.getUserMemory()).learning.signals).toBe(1)
+
+  const knowledge = await runtime.getProjectKnowledge()
+  await runtime.setOutboundPolicy({ policy: 'custom', expectedVersion: knowledge.outboundPolicyVersion })
+  const scene = runtime.getWorkspaceBootstrap().scene
+  await runtime.startAgentRun(fixtureAgentRequest(scene, '还是太花了'), 'collaboration')
+  await new Promise((resolve) => setTimeout(resolve, 300))
+  expect((await runtime.getUserMemory()).learning.signals).toBe(0)
+}, 40_000)
