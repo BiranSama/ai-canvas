@@ -151,6 +151,7 @@ export class PreferenceLearner {
   /** Sums up the signals into candidates now; one summary at a time. */
   summarize(): Promise<readonly UserMemoryCandidate[]> {
     if (this.#running !== null) return this.#running
+    const outcome = { summedUp: false }
     const run = (async (): Promise<readonly UserMemoryCandidate[]> => {
       const input = await this.#options.store.summaryInput()
       if (!input.enabled || input.signals.length === 0) return []
@@ -159,13 +160,16 @@ export class PreferenceLearner {
       const reply = await this.#options.model.complete({ system: SUMMARY_SYSTEM, prompt: summaryPrompt(input.signals, input.kept), maxOutputTokens: 1_024 })
       // With no model to ask, the signals wait; the next one tries again.
       if (reply === null) return []
+      outcome.summedUp = true
       return this.#options.store.summarized(parseSummary(reply.text).map((content) => ({ kind: 'preference' as const, content })), input.newSignals)
     })().catch(() => [] as readonly UserMemoryCandidate[])
     this.#running = run
     return run.finally(async () => {
       if (this.#running !== run) return
       this.#running = null
-      // Signals that came in while this summary was written may already make up the next one.
+      // Signals that came in while this summary was written may already make up the next one. A summary that
+      // did not get through leaves its signals waiting for the next one recorded, rather than retrying on a timer.
+      if (!outcome.summedUp) return
       const left = await this.#options.store.summaryInput().catch(() => null)
       if (left !== null && left.enabled && left.newSignals >= SIGNALS_PER_SUMMARY) this.#schedule()
     })

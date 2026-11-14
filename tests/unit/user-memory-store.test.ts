@@ -169,3 +169,15 @@ describe('summaries and new signals', () => {
   })
 })
 
+describe('forgetting a project', () => {
+  it('takes only its signals still waiting for a summary off the count', async () => {
+    const store = new UserMemoryStore(file)
+    for (let index = 0; index < 12; index += 1) await store.recordSignal('said', `A ${index}`, 'a')
+    await store.summarized([], 12)
+    for (let index = 0; index < 11; index += 1) await store.recordSignal('said', `B ${index}`, 'b')
+    await store.dropProjectSignals('a')
+    expect((await store.read()).learning.newSignals).toBe(11)
+    expect(await store.recordSignal('said', 'B 11', 'b')).toBe(true)
+  })
+})
+

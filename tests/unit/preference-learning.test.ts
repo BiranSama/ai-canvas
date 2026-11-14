@@ -161,3 +161,22 @@ describe('signals that arrive during a summary', () => {
     subject.close()
   })
 })
+
+describe('a summary that does not get through', () => {
+  it('leaves the signals for the next one recorded instead of retrying on a timer', async () => {
+    const store = {
+      recordSignal: vi.fn(async () => true),
+      summaryInput: vi.fn(async () => ({ signals: [{ kind: 'said' as const, text: '太花了', at: NOW }], kept: [], enabled: true, newSignals: 12 })),
+      summarized: vi.fn(async () => [])
+    }
+    const model = { complete: vi.fn(async (): Promise<BackgroundTextReply | null> => null) }
+    const subject = new PreferenceLearner({ store, model, delayMs: 5 })
+    await subject.summarize()
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(model.complete).toHaveBeenCalledTimes(1)
+    await subject.record('said', '又一条')
+    await vi.waitFor(() => expect(model.complete).toHaveBeenCalledTimes(2))
+    subject.close()
+  })
+})
+

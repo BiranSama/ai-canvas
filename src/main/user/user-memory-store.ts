@@ -195,8 +195,10 @@ export class UserMemoryStore {
     await this.#mutate((file) => {
       const kept = file.signals.filter((signal) => signal.projectId !== projectId)
       if (kept.length === file.signals.length) return file
-      const dropped = file.signals.length - kept.length
-      return { ...file, signals: kept, learning: { ...file.learning, newSignals: Math.max(0, file.learning.newSignals - dropped) } }
+      // The signals not yet summed up are always the newest ones; only those of this project come off the count.
+      const pending = file.signals.slice(Math.max(0, file.signals.length - file.learning.newSignals))
+      const droppedPending = pending.filter((signal) => signal.projectId === projectId).length
+      return { ...file, signals: kept, learning: { ...file.learning, newSignals: Math.max(0, file.learning.newSignals - droppedPending) } }
     })
   }
 
