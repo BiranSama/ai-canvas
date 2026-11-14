@@ -91,6 +91,10 @@ export interface AgentToolContext {
   readonly layerMask?: ((spec: LayerMaskSpec) => Promise<{ readonly assetId: string } | string>) | null
   /** An image layer's pixels with its paint and enabled mask baked in, as a new asset of the same size. */
   readonly bakeImage?: ((elementId: string) => Promise<string | null>) | null
+  /** The person's brand logo copied into the project, or null; absent when there is no logo or the project does not use the brand. */
+  readonly brandLogo?: (() => Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null>) | null
+  /** The person's banned words, which text the Agent writes on the canvas should avoid. */
+  readonly bannedWords?: readonly string[]
 }
 
 export interface AgentToolResult {

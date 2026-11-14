@@ -1,5 +1,7 @@
 import { Check, ChevronDown, CircleOff, Plus, RotateCcw, ShieldCheck, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { UserMemorySnapshot } from '../../../shared/user-memory'
+import { useWorkspaceStore } from '../store/workspace-store'
 import type {
   OutboundContextPolicy,
   ProjectDirectiveCategory,
@@ -37,6 +39,7 @@ export function AgentContextSettings({ onStatus }: { readonly onStatus: (message
   const [memoryText, setMemoryText] = useState('')
   const [memoryKind, setMemoryKind] = useState<ProjectMemoryKind>('direction')
   const [editingMemory, setEditingMemory] = useState<ProjectMemoryEntry | null>(null)
+  const [userMemory, setUserMemory] = useState<UserMemorySnapshot | null>(null)
 
   const load = useCallback((): void => {
     void window.desktop.getProjectKnowledge().then(setSnapshot).catch((error: unknown) => {
@@ -45,6 +48,11 @@ export function AgentContextSettings({ onStatus }: { readonly onStatus: (message
   }, [onStatus])
 
   useEffect(load, [load])
+
+  useEffect(() => {
+    const desktop = window.desktop as Partial<typeof window.desktop>
+    void desktop.getUserMemory?.().then(setUserMemory).catch(() => undefined)
+  }, [])
 
   const mutate = async (operation: () => Promise<ProjectKnowledgeSnapshot>, success: string): Promise<void> => {
     if (busy) return
@@ -107,6 +115,22 @@ export function AgentContextSettings({ onStatus }: { readonly onStatus: (message
           </select>
         </label>
       </article>
+
+      {userMemory !== null && (
+        <label className="settings-switch-row">
+          <input aria-label="这个作品使用品牌" type="checkbox" checked={userMemory.projectUsesBrand} disabled={busy} onChange={(event) => {
+            const enabled = event.currentTarget.checked
+            const projectId = useWorkspaceStore.getState().scene.projectId
+            void window.desktop.changeUserMemory({ action: 'project-brand', projectId, enabled })
+              .then((next) => { setUserMemory(next); onStatus(enabled ? '这个作品会参考你的品牌。' : '这个作品不再参考品牌，偏好照常参考。') })
+              .catch((error: unknown) => onStatus(error instanceof Error ? error.message : '没有改动。'))
+          }} />
+          <span>
+            <strong>使用品牌</strong>
+            <small>{userMemory.brand.name === '' && userMemory.brand.logo === null && userMemory.brand.colors.length === 0 ? '还没有填品牌，在「品牌与记忆」里填。' : '打开时，这个作品的 Agent 会参考「品牌与记忆」里的品牌。给别的客户做图时关掉。'}</small>
+          </span>
+        </label>
+      )}
 
       <div className="context-column-grid">
         <article className="knowledge-card">

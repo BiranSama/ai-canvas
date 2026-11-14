@@ -70,7 +70,7 @@ it('comes back from 偏好 after it was put away', async () => {
   useFirstRunStore.getState().dismissServiceCard()
   const [llm, image] = DEFAULT_PROVIDER_CONFIG.providers
   Object.defineProperty(window, 'desktop', { configurable: true, value: {
-    getProviderSettings: async () => ({ providers: [{ ...llm, configured: true }, { ...image, configured: true }], defaultImageProviderId: 'image-provider', realCallsAuthorized: true, executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy, textHelpers: { vision: null, backup: null }, checks: {} }),
+    getProviderSettings: async () => ({ providers: [{ ...llm, configured: true }, { ...image, configured: true }], defaultImageProviderId: 'image-provider', realCallsAuthorized: true, executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy, textHelpers: { vision: null, backup: null, fast: null }, checks: {} }),
     getRuntimeInfo: async () => { throw new Error('not needed') },
     listGenerationProfiles: async () => ({ realCallsAuthorized: true, profiles: [] })
   } })

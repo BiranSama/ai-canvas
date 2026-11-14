@@ -5,6 +5,7 @@ import { featherSelection } from '../selection/selection-actions'
 import { useWorkspaceStore } from '../store/workspace-store'
 import { showAppNotice } from './app-notice'
 import { useEditDialog } from './edit-dialog-store'
+import { BRAND_COLOR_LIST_ID } from '../store/brand-store'
 
 /*
  * Photoshop's small edit dialogs: Shift+F6 feathers the selection, Shift+F5
@@ -87,7 +88,7 @@ function FillDialog({ onClose }: { readonly onClose: () => void }): React.JSX.El
             <option value="background">背景色</option>
             <option value="color">颜色…</option>
           </select>
-          {use === 'color' && <input type="color" aria-label="填充颜色" value={color} onChange={(event) => setColor(event.currentTarget.value.toUpperCase())} />}
+          {use === 'color' && <input type="color" list={BRAND_COLOR_LIST_ID} aria-label="填充颜色" value={color} onChange={(event) => setColor(event.currentTarget.value.toUpperCase())} />}
         </label>
         <label className="edit-dialog-field">
           <span>不透明度</span>

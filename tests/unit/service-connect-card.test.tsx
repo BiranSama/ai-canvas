@@ -11,7 +11,7 @@ function settings(llmConfigured: boolean): ProviderSettingsSnapshot {
     defaultImageProviderId: 'image-provider',
     realCallsAuthorized: false,
     executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy,
-    textHelpers: { vision: null, backup: null },
+    textHelpers: { vision: null, backup: null, fast: null },
     checks: {}
   }
 }

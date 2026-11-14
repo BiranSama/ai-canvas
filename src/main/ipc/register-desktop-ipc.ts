@@ -11,6 +11,7 @@ import type { AppearanceSettingsService } from '../appearance/appearance-setting
 import type { GenerationRuntime } from '../generation/generation-runtime'
 import type { AppUpdateService } from '../update/app-update-service'
 import { textHelperRoleSchema } from '../../shared/provider-settings'
+import { brandKitInputSchema, brandLogoInputSchema, userMemoryChangeSchema } from '../../shared/user-memory'
 import { localFontCatalog } from '../fonts/local-font-catalog'
 import { takeOpenFileRequests } from '../open-file-requests'
 import { readPsdForImport } from '../psd/psd-import'
@@ -70,6 +71,8 @@ import {
 let subscribedRuntime: Promise<GenerationRuntime> | null = null
 let unsubscribeScene: (() => void) | null = null
 let unsubscribeAgent: (() => void) | null = null
+let unsubscribeUserMemory: (() => void) | null = null
+let unsubscribeProjectRenamed: (() => void) | null = null
 let subscribedAppearance: AppearanceSettingsService | null = null
 let unsubscribeAppearance: (() => void) | null = null
 
@@ -119,8 +122,12 @@ function ensureSceneBroadcast(generationRuntime: Promise<GenerationRuntime>): vo
   if (subscribedRuntime === generationRuntime) return
   unsubscribeScene?.()
   unsubscribeAgent?.()
+  unsubscribeUserMemory?.()
+  unsubscribeProjectRenamed?.()
   unsubscribeScene = null
+  unsubscribeProjectRenamed = null
   unsubscribeAgent = null
+  unsubscribeUserMemory = null
   subscribedRuntime = generationRuntime
   void generationRuntime.then((runtime) => {
     if (subscribedRuntime !== generationRuntime) return
@@ -132,6 +139,16 @@ function ensureSceneBroadcast(generationRuntime: Promise<GenerationRuntime>): vo
     unsubscribeAgent = runtime.subscribeAgent((event) => {
       for (const window of BrowserWindow.getAllWindows()) {
         if (!window.isDestroyed()) window.webContents.send(DESKTOP_EVENTS.agentEvent, event)
+      }
+    })
+    unsubscribeProjectRenamed = runtime.subscribeProjectRenamed((event) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(DESKTOP_EVENTS.projectRenamed, event)
+      }
+    })
+    unsubscribeUserMemory = runtime.subscribeUserMemory(() => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(DESKTOP_EVENTS.userMemoryChanged)
       }
     })
   })
@@ -330,6 +347,12 @@ export function registerDesktopIpc(
   ipcMain.handle(DESKTOP_CHANNELS.providerImageDefaultSet, async (_event, input: unknown) => {
     return (await generationRuntime).setDefaultImageProvider(providerImageIdSchema.parse(input))
   })
+  ipcMain.handle(DESKTOP_CHANNELS.userMemoryGet, async () => (await generationRuntime).getUserMemory())
+  ipcMain.handle(DESKTOP_CHANNELS.userMemoryBrandSave, async (_event, input: unknown) => (await generationRuntime).saveBrandKit(brandKitInputSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.userMemoryLogoSet, async (_event, input: unknown) => (await generationRuntime).setBrandLogo(brandLogoInputSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.userMemoryLogoClear, async () => (await generationRuntime).clearBrandLogo())
+  ipcMain.handle(DESKTOP_CHANNELS.userMemoryChange, async (_event, input: unknown) => (await generationRuntime).changeUserMemory(userMemoryChangeSchema.parse(input)))
+  ipcMain.handle(DESKTOP_CHANNELS.brandLogoImport, async (_event, input: unknown) => (await generationRuntime).importBrandLogo(z.string().min(1).max(200).parse(input)))
   ipcMain.handle(DESKTOP_CHANNELS.projectRecent, async () => (await generationRuntime).listRecentProjects())
   ipcMain.handle(DESKTOP_CHANNELS.projectCreate, async (event, input: unknown) => {
     const parsed = projectCreateSchema.parse(input)

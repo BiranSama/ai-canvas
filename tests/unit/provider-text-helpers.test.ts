@@ -66,7 +66,7 @@ it('refuses a helper model under the wrong role and keeps one of each', async ()
   await service.addTextHelper('backup')
   await service.addTextHelper('backup')
   expect(configs.value.textHelpers.backup?.id).toBe('text-model-backup')
-  expect(() => service.addTextHelper('fast')).toThrow()
-  const swapped = { ...structuredClone(configs.value), textHelpers: { vision: configs.value.textHelpers.backup, backup: null } }
+  expect(() => service.addTextHelper('draw')).toThrow()
+  const swapped = { ...structuredClone(configs.value), textHelpers: { vision: configs.value.textHelpers.backup, backup: null, fast: null } }
   expect(providerConfigFileSchema.safeParse(swapped).success).toBe(false)
 })

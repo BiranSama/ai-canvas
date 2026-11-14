@@ -47,6 +47,7 @@ import { RedactedLogger, redactSensitive, type DiagnosticLogger } from '../secur
 import type { AgentToolExecutorShadow } from './agent-tool-executor-shadow'
 import type { GenerationWorkflowRepository } from '../generation/generation-workflow-repository'
 import { turnModelUsage } from '../../shared/model-usage'
+import type { UserContext } from './context-builder'
 
 export interface AgentRuntimeOptions {
   readonly projectId: string
@@ -66,6 +67,8 @@ export interface AgentRuntimeOptions {
   readonly toolExecutor?: AgentToolExecutorShadow
   readonly harnessRepository: AgentHarnessRepository
   readonly contextRepository?: AgentContextRepository
+  /** The person's brand and cross-project preferences for this project's turns. */
+  readonly userContext?: () => Promise<UserContext | null>
   readonly plannerAdapter?: PlannerAdapter
   readonly executePersistentTool: (tool: AgentPlan['tools'][number], context: AgentLoopToolContext) => Promise<AgentToolOutcome>
   readonly refreshPersistentRequest?: (request: AgentRequest) => Promise<AgentRequest>
@@ -123,7 +126,7 @@ export function receiptItem(plan: AgentPlan['tools'][number], outcome: AgentTool
       : { object: '选中图片', action: '按蒙版创建局部修改', impact: outcome.ok ? '源图、蒙版与新版本均已保留' : failedImpact }
   }
   if (plan.kind === 'memory_candidate') {
-    return { object: '项目记忆', action: '提出候选', impact: outcome.ok ? '等待用户确认，不会静默进入长期上下文' : '没有创建记忆候选' }
+    return { object: plan.scope === 'all' ? '所有作品的偏好' : '项目记忆', action: '提出候选', impact: outcome.ok ? '等待用户确认，不会静默进入长期上下文' : '没有创建记忆候选' }
   }
   if (plan.kind === 'directive_create') {
     return { object: '项目规则', action: '写入已确认规则', impact: outcome.ok ? '后续轮次将采用，可在设置中停用' : '项目规则没有改变' }
@@ -166,6 +169,7 @@ export class AgentRuntime {
       projectId: this.#projectId,
       repository: options.harnessRepository,
       ...(options.contextRepository === undefined ? {} : { contextRepository: options.contextRepository }),
+      ...(options.userContext === undefined ? {} : { userContext: options.userContext }),
       planner: options.plannerAdapter ?? new DeterministicCreativePlannerAdapter(options.planner),
       executeTool: options.executePersistentTool,
       loadRequest: (runId) => this.#repository.getRequest(runId),

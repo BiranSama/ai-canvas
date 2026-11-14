@@ -70,7 +70,7 @@ export class ProviderSettingsService {
       defaultImageProviderId: config.defaultImageProviderId,
       realCallsAuthorized: this.#realCallsAuthorized,
       executionPolicy: config.executionPolicy,
-      textHelpers: { vision: await helper('vision'), backup: await helper('backup') },
+      textHelpers: { vision: await helper('vision'), backup: await helper('backup'), fast: await helper('fast') },
       checks: config.checks
     })
   }

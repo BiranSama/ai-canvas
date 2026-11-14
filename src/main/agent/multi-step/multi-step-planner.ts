@@ -72,6 +72,8 @@ export interface MultiStepPlannerOptions {
   readonly blankLayer?: AgentToolContext['blankLayer']
   readonly layerMask?: AgentToolContext['layerMask']
   readonly bakeImage?: AgentToolContext['bakeImage']
+  /** Copies the person's logo into the project; offered only when the turn's brand has one. */
+  readonly brandLogo?: AgentToolContext['brandLogo']
   readonly newId?: () => string
   /** Model calls one pass may make while it answers read-only tools itself before it stores its progress. */
   readonly maxModelCallsPerPass?: number
@@ -245,7 +247,10 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
       blankLayer: this.#options.blankLayer ?? null,
       marked: input.request.ephemeralAnnotation,
       layerMask: this.#options.layerMask ?? null,
-      bakeImage: this.#options.bakeImage ?? null
+      bakeImage: this.#options.bakeImage ?? null,
+      // The brand comes through the turn's context, so a project with it turned off has neither.
+      brandLogo: context?.projectContext?.brand?.hasLogo === true ? this.#options.brandLogo ?? null : null,
+      bannedWords: context?.projectContext?.brand?.bannedWords ?? []
     }
     const finish = (planned: PlannerStep, emitted: ModelTrace['emitted'], modelTurns: number): PlannerStepResult => {
       const step = planned.kind === 'complete' ? this.#withBackupNote(planned, input.turn.id) : planned

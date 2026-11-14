@@ -58,6 +58,7 @@ import type {
 import type { DesignDirectionSelectionInput, DesignDirectionSelectionResult } from './design-direction-selection'
 import type { DiagnosticExportResult } from './diagnostics'
 import type { ProjectWorkContext } from './project-work-context'
+import type { BrandKitInput, UserMemoryChange, UserMemorySnapshot } from './user-memory'
 import type { GenerationReferencePreviewInput, GenerationReferencePreview } from './generation-reference'
 import type { LocalFontFamily } from './local-fonts'
 import type { ImageEffects } from '../domain'
@@ -114,6 +115,12 @@ export const DESKTOP_CHANNELS = {
   providerTextHelperRemove: 'provider:text-helper-remove',
   providerImageRemove: 'provider:image-remove',
   providerImageDefaultSet: 'provider:image-default-set',
+  userMemoryGet: 'user-memory:get',
+  userMemoryBrandSave: 'user-memory:brand-save',
+  userMemoryLogoSet: 'user-memory:logo-set',
+  userMemoryLogoClear: 'user-memory:logo-clear',
+  userMemoryChange: 'user-memory:change',
+  brandLogoImport: 'user-memory:logo-import',
   projectRecent: 'project:recent',
   projectCreate: 'project:create',
   projectOpen: 'project:open',
@@ -161,7 +168,9 @@ export const DESKTOP_EVENTS = {
   appearanceChanged: 'appearance:changed',
   openFileRequested: 'desktop:open-file-requested',
   appUpdateChanged: 'app:update-changed',
-  subjectModelStatus: 'segmentation:model-status-changed'
+  subjectModelStatus: 'segmentation:model-status-changed',
+  userMemoryChanged: 'user-memory:changed',
+  projectRenamed: 'project:renamed'
 } as const
 
 export type DesktopPlatform =
@@ -288,6 +297,19 @@ export interface DesktopApi {
   removeTextHelper(role: TextHelperRole): Promise<ProviderSettingsSnapshot>
   removeImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
   setDefaultImageProvider(providerId: string): Promise<ProviderSettingsSnapshot>
+  /** The brand and cross-project memory, with the open project's 使用品牌 switch. */
+  getUserMemory(): Promise<UserMemorySnapshot>
+  saveBrandKit(input: BrandKitInput): Promise<UserMemorySnapshot>
+  /** A PNG, JPG or WebP, kept on this computer; replaces the logo there was. */
+  setBrandLogo(input: { readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; readonly bytes: Uint8Array }): Promise<UserMemorySnapshot>
+  clearBrandLogo(): Promise<UserMemorySnapshot>
+  changeUserMemory(change: UserMemoryChange): Promise<UserMemorySnapshot>
+  /** After the brand or memory changes, from settings or from a turn. */
+  onUserMemoryChanged(listener: () => void): () => void
+  /** A new project named after its first turn. */
+  onProjectRenamed(listener: (event: { readonly projectId: string; readonly name: string }) => void): () => void
+  /** Copies the brand logo into the open project; null without a logo. */
+  importBrandLogo(projectId: string): Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null>
   listRecentProjects(): Promise<readonly RecentProjectSummary[]>
   createProject(input: ProjectCreateInput): Promise<ProjectActionResult>
   openProject(): Promise<ProjectActionResult>

@@ -1,4 +1,4 @@
-import { AlertCircle, BarChart3, BookOpen, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Palette, Pencil, Server, ShieldCheck, SlidersHorizontal, Trash2, Wrench, X } from 'lucide-react'
+import { AlertCircle, BarChart3, BookOpen, BrainCircuit, Check, FileDown, FolderInput, FolderOpen, ImageIcon, KeyRound, Palette, Pencil, Server, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Wrench, X } from 'lucide-react'
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useModalScope } from '../interaction/use-modal-scope'
 import type {
@@ -42,16 +42,25 @@ import { useCreationSessionStore } from '../store/creation-session-store'
 import { useFirstRunStore } from '../store/first-run-store'
 import { applyAppearanceSnapshot, defaultAppearanceSnapshot } from '../appearance/apply-appearance'
 import { AgentContextSettings } from './AgentContextSettings'
+import { BrandMemorySettings } from './BrandMemorySettings'
 import { UsageSettings } from './UsageSettings'
 import { AppUpdateSettings } from './AppUpdateSettings'
 
 type ProviderDrafts = Partial<Record<ConfigurableProviderId, ProviderPublicConfig>>
 
-const TEXT_HELPER_NAMES: Record<TextHelperRole, string> = { vision: '看图模型', backup: '备用模型' }
+const TEXT_HELPER_NAMES: Record<TextHelperRole, string> = { vision: '看图模型', backup: '备用模型', fast: '快模型' }
 
-/** The cards in order: the main text model, its vision and backup models, then the image services. */
+/** What happens without each helper, shown beside its delete button. */
+const TEXT_HELPER_WITHOUT: Record<TextHelperRole, string> = {
+  vision: '删除后，主模型不能看图时只读画面的文字描述。',
+  backup: '删除后，主模型限流或连不上时这一轮会停下。',
+  fast: '删除后，给作品起名、总结偏好改用主模型。'
+}
+
+/** The cards in order: the main text model, its vision, backup and fast models, then the image services. */
 function serviceList(snapshot: ProviderSettingsSnapshot): ProviderSettingsSnapshot['providers'] {
-  const helpers = TEXT_HELPER_ROLES.flatMap((role) => snapshot.textHelpers[role] === null ? [] : [snapshot.textHelpers[role]!])
+  // A role an older Main does not send is absent rather than null.
+  const helpers = TEXT_HELPER_ROLES.flatMap((role) => snapshot.textHelpers[role] == null ? [] : [snapshot.textHelpers[role]!])
   return [snapshot.providers[0]!, ...helpers, ...snapshot.providers.slice(1)] as ProviderSettingsSnapshot['providers']
 }
 
@@ -157,10 +166,13 @@ function policyStatus(policy: ProviderExecutionPolicy): string {
 
 export function ProviderSettingsSheet({
   onClose,
-  initialProviderId = null
+  initialProviderId = null,
+  initialSection = 'providers'
 }: {
   readonly onClose: () => void
   readonly initialProviderId?: ConfigurableProviderId | null
+  /** The page to open on; 品牌与记忆 from the conversation's reminder. */
+  readonly initialSection?: 'providers' | 'brand'
 }): React.JSX.Element {
   const modalRef = useRef<HTMLElement>(null)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
@@ -171,7 +183,7 @@ export function ProviderSettingsSheet({
   const [removingImageService, setRemovingImageService] = useState<string | null>(null)
   const [busy, setBusy] = useState<ConfigurableProviderId | null>(null)
   const [expandedProvider, setExpandedProvider] = useState<ConfigurableProviderId | null>(initialProviderId)
-  const [section, setSection] = useState<'providers' | 'preferences' | 'agent' | 'usage' | 'projects' | 'appearance' | 'advanced'>('providers')
+  const [section, setSection] = useState<'providers' | 'preferences' | 'brand' | 'agent' | 'usage' | 'projects' | 'appearance' | 'advanced'>(initialSection)
   const [runtime, setRuntime] = useState<RuntimeInfo | null>(null)
   const [status, setStatus] = useState('正在读取设置…')
   const showFirstRunAgain = useFirstRunStore((state) => state.showAgain)
@@ -509,6 +521,7 @@ export function ProviderSettingsSheet({
           <nav className="settings-navigation" aria-label="设置分类">
             <button type="button" className={section === 'providers' ? 'is-active' : ''} onClick={() => setSection('providers')}><Server size={15} />服务</button>
             <button type="button" className={section === 'preferences' ? 'is-active' : ''} onClick={() => setSection('preferences')}><SlidersHorizontal size={15} />偏好</button>
+            <button type="button" className={section === 'brand' ? 'is-active' : ''} onClick={() => setSection('brand')}><Sparkles size={15} />品牌与记忆</button>
             <button type="button" className={section === 'agent' ? 'is-active' : ''} onClick={() => setSection('agent')}><BookOpen size={15} />项目记忆</button>
             <button type="button" className={section === 'usage' ? 'is-active' : ''} onClick={() => setSection('usage')}><BarChart3 size={15} />用量</button>
             <button type="button" className={section === 'projects' ? 'is-active' : ''} onClick={() => setSection('projects')}><FolderOpen size={15} />项目与存储</button>
@@ -516,6 +529,7 @@ export function ProviderSettingsSheet({
             <button type="button" className={section === 'advanced' ? 'is-active' : ''} onClick={() => setSection('advanced')}><Wrench size={15} />高级</button>
           </nav>
           <div className="provider-settings-list">
+          {section === 'brand' && <BrandMemorySettings onStatus={setStatus} />}
           {section === 'agent' && <AgentContextSettings onStatus={setStatus} />}
           {section === 'usage' && <UsageSettings />}
           {section === 'preferences' && snapshot !== null && policyDraft !== null && (
@@ -547,7 +561,7 @@ export function ProviderSettingsSheet({
               </div>
             </section>
           )}
-          {section !== 'providers' && section !== 'preferences' && section !== 'agent' && section !== 'usage' && (
+          {section !== 'providers' && section !== 'preferences' && section !== 'brand' && section !== 'agent' && section !== 'usage' && (
             <section className="settings-section-summary">
               {section === 'projects' && <><span className="settings-kicker">项目库</span><h2>项目与存储</h2><p>新项目无需选择路径，会自动建立唯一的 .aicanvas 项目包。更改以后位置和迁移已有项目是两个独立动作。</p><div className="storage-location-card"><FolderOpen size={17} /><span><small>当前项目库</small><strong>{runtime?.projectLibraryPath ?? '正在读取…'}</strong></span></div><div className="storage-location-actions"><button type="button" disabled={libraryBusy} onClick={() => void changeLibrary('future')}><FolderInput size={14} />只更改以后的位置</button><button type="button" disabled={libraryBusy} onClick={() => void changeLibrary('migrate')}><FolderOpen size={14} />复制并迁移现有项目</button></div><small className="storage-safety-note">迁移会逐项复制和校验，全部通过后才切换；软件不会删除原项目库。</small>{migrationSummary !== null && <div className="migration-summary" role="status">{migrationSummary}</div>}</>}
               {section === 'appearance' && <>
@@ -955,17 +969,20 @@ export function ProviderSettingsSheet({
                     : <button type="button" className="settings-delete" aria-label={`删除生图服务 ${draft.label}`} disabled={busy !== null} onClick={() => setRemovingImageService(provider.id)}><Trash2 size={13} />删除这个服务</button>}
                 </div>}
                 {role !== null && <div className="provider-service-remove">
-                  <small>{role === 'vision' ? '删除后，主模型不能看图时只读画面的文字描述。' : '删除后，主模型限流或连不上时这一轮会停下。'}</small>
+                  <small>{TEXT_HELPER_WITHOUT[role]}</small>
                   <button type="button" className="settings-delete" aria-label={`删除${TEXT_HELPER_NAMES[role]}`} disabled={busy !== null} onClick={() => void removeTextHelper(role)}><Trash2 size={13} />删除{TEXT_HELPER_NAMES[role]}</button>
                 </div>}
                 </div>}
               </article>
-              {provider.id === MAIN_TEXT_MODEL_ID && (snapshot.textHelpers.vision === null || snapshot.textHelpers.backup === null) && <div className="provider-helper-add">
+              {provider.id === MAIN_TEXT_MODEL_ID && TEXT_HELPER_ROLES.some((helper) => snapshot.textHelpers[helper] === null) && <div className="provider-helper-add">
                 {snapshot.textHelpers.vision === null && <button type="button" className="provider-add-service" disabled={busy !== null} onClick={() => void addTextHelper('vision')}>
                   <BrainCircuit size={14} />加一个看图模型<small>主模型不能看图时（比如 DeepSeek），替它看画面</small>
                 </button>}
                 {snapshot.textHelpers.backup === null && <button type="button" className="provider-add-service" disabled={busy !== null} onClick={() => void addTextHelper('backup')}>
                   <BrainCircuit size={14} />加一个备用模型<small>主模型限流或连不上时，替它接着做</small>
+                </button>}
+                {snapshot.textHelpers.fast === null && <button type="button" className="provider-add-service" disabled={busy !== null} onClick={() => void addTextHelper('fast')}>
+                  <BrainCircuit size={14} />加一个快模型<small>给作品起名、总结你的偏好，用便宜快速的模型；不加就用主模型</small>
                 </button>}
               </div>}
               </Fragment>

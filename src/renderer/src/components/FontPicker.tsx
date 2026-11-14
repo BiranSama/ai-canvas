@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { ChevronDown, RotateCw } from 'lucide-react'
 import { findLocalFont, fontLabel, searchLocalFonts, type LocalFontFamily } from '../../../shared/local-fonts'
+import { useBrandStore } from '../store/brand-store'
 
 const RECENT_KEY = 'ai-canvas.recent-fonts'
 const MAX_RECENT = 6
@@ -56,6 +57,7 @@ export function FontPicker({ value, onChange }: { readonly value: string; readon
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [recent, setRecent] = useState<readonly string[]>(() => readRecent())
+  const brandFonts = useBrandStore((state) => state.fonts)
   const rootRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -97,12 +99,22 @@ export function FontPicker({ value, onChange }: { readonly value: string; readon
     const custom = typed !== '' && findLocalFont(fonts, typed) === null
       ? [{ key: `custom:${typed}`, family: typed, label: `使用「${typed}」`, secondary: '这台电脑上没有装这个字体', section: '其他名称' }]
       : []
+    // The brand's fonts come first, installed or not, while nothing is typed.
+    const brandRows = query.trim() === ''
+      ? brandFonts.map((entry) => {
+          const font = findLocalFont(fonts, entry.family)
+          return font === null
+            ? { key: `品牌字体:${entry.family}`, family: entry.family, label: entry.family, secondary: `${entry.note} · 这台电脑上没有装`, section: '品牌字体' }
+            : { ...toRow(font, '品牌字体'), secondary: entry.note }
+        })
+      : []
     return [
+      ...brandRows,
       ...recentRows,
       ...matches.map((font) => toRow(font, font.chinese ? '中文字体' : '其他字体')),
       ...custom
     ]
-  }, [fonts, query, recent])
+  }, [fonts, query, recent, brandFonts])
 
   useEffect(() => {
     if (!open) return

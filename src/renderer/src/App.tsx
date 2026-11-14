@@ -76,6 +76,8 @@ import { useModalScope } from './interaction/use-modal-scope'
 import { flushProjectWorkContext, startProjectContextSync } from './store/project-context-sync'
 import { projectContextWritable, projectGeneration, setProjectContextWritable } from './store/project-context-lifecycle'
 import type { ConfigurableProviderId } from '../../shared/provider-settings'
+import { startBrandSync } from './store/brand-store'
+import { BrandColorList } from './components/BrandColorList'
 
 const viewLabels: Record<WorkspaceView, string> = {
   conversation: '对话',
@@ -157,6 +159,7 @@ function WorkspaceHeader({
   const exportOpen = useExportSheet((state) => state.open)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsProviderId, setSettingsProviderId] = useState<ConfigurableProviderId | null>(null)
+  const [settingsSection, setSettingsSection] = useState<'brand' | null>(null)
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [recentProjects, setRecentProjects] = useState<readonly RecentProjectSummary[]>([])
   const [projectBusy, setProjectBusy] = useState(false)
@@ -184,8 +187,9 @@ function WorkspaceHeader({
 
   useEffect(() => {
     const openProviderSettings = (event: Event): void => {
-      const detail = (event as CustomEvent<{ providerId?: ConfigurableProviderId }>).detail
+      const detail = (event as CustomEvent<{ providerId?: ConfigurableProviderId; section?: 'brand' }>).detail
       setSettingsProviderId(detail?.providerId ?? null)
+      setSettingsSection(detail?.section ?? null)
       setSettingsOpen(true)
     }
     window.addEventListener('ai-canvas:open-provider-settings', openProviderSettings)
@@ -301,7 +305,7 @@ function WorkspaceHeader({
         <button type="button" className="icon-button" aria-label="重做" disabled={!canRedo} onClick={redo}><Redo2 size={17} /></button>
         <span className="header-divider" />
         {!inspectorOpen && <button type="button" className="icon-button" aria-label="打开图层检查器" onClick={() => setInspectorOpen(true)}><Layers3 size={17} /></button>}
-        <button ref={settingsButtonRef} type="button" className="icon-button" data-testid="open-settings" aria-label="设置" onClick={() => { setSettingsProviderId(null); setSettingsOpen(true) }}><Settings2 size={16} /></button>
+        <button ref={settingsButtonRef} type="button" className="icon-button" data-testid="open-settings" aria-label="设置" onClick={() => { setSettingsProviderId(null); setSettingsSection(null); setSettingsOpen(true) }}><Settings2 size={16} /></button>
         {canExport && <div className="export-control"><button type="button" title="导出（Ctrl+Alt+Shift+W）" onClick={() => useExportSheet.getState().show()}><Download size={15} />导出</button></div>}
       </div>
     </header>
@@ -327,7 +331,7 @@ function WorkspaceHeader({
       event.currentTarget.value = ''
       if (file !== undefined) openFile(file)
     }} />
-    {settingsOpen && <ProviderSettingsSheet initialProviderId={settingsProviderId} onClose={closeSettings} />}
+    {settingsOpen && <ProviderSettingsSheet initialProviderId={settingsProviderId} initialSection={settingsSection ?? 'providers'} onClose={closeSettings} />}
     {shortcutsOpen && <ShortcutSheet onClose={() => setShortcutsOpen(false)} />}
     {exportOpen && <ExportSheet onClose={() => useExportSheet.getState().hide()} onSaveSizeAsProject={saveSizeAsProject} />}
     <EditDialogs />
@@ -713,6 +717,12 @@ export function App(): React.JSX.Element {
   const projectSession = useWorkspaceStore((state) => state.projectSession)
   const workContextProblem = useWorkspaceStore((state) => state.workContextProblem)
   useEffect(() => startProjectContextSync(), [])
+  useEffect(() => startBrandSync(), [])
+  // A new project gets its name after the first turn; the title follows.
+  useEffect(() => (window.desktop as Partial<DesktopApi> | undefined)?.onProjectRenamed?.((event) => {
+    const workspace = useWorkspaceStore.getState()
+    if (workspace.scene.projectId === event.projectId) workspace.setProjectName(event.name)
+  }), [])
   const [screen, setScreen] = useState<'loading' | 'library' | 'workspace' | 'recovery'>('loading')
   const [runtimeInfo, setRuntimeInfo] = useState<RuntimeInfo | null>(null)
   const [startupAttempt, setStartupAttempt] = useState(0)
@@ -833,6 +843,7 @@ export function App(): React.JSX.Element {
   return (
     <>
       <LiquidGlassDefs />
+      <BrandColorList />
       <div className="app-shell">
         <AppNotice />
         {workContextProblem !== null && <div className="workspace-save-problem" role="alert">

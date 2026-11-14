@@ -43,7 +43,8 @@ import {
   recentConversationStart,
   contextSourceHash,
   isConversationItem,
-  type DirectiveConflict
+  type DirectiveConflict,
+  type UserContext
 } from './context-builder'
 import type { PlannerAdapter } from './planner-adapter'
 import { turnModelCostCny } from './multi-step/trace'
@@ -132,6 +133,8 @@ export interface PersistentAgentLoopOptions {
   readonly projectId: string
   readonly repository: AgentHarnessRepository
   readonly contextRepository?: AgentContextRepository
+  /** The person's brand and cross-project preferences for this project's turns. */
+  readonly userContext?: () => Promise<UserContext | null>
   readonly contextBuilder?: ContextBuilder
   readonly allowedTools?: readonly string[]
   readonly planner: PlannerAdapter
@@ -628,6 +631,7 @@ export class PersistentAgentLoop {
   readonly #projectId: string
   readonly #repository: AgentHarnessRepository
   readonly #contextRepository: AgentContextRepository | null
+  readonly #userContext: (() => Promise<UserContext | null>) | null
   readonly #contextBuilder: ContextBuilder
   readonly #contextCompactor: ContextCompactor
   readonly #allowedTools: readonly string[]
@@ -660,6 +664,7 @@ export class PersistentAgentLoop {
     this.#projectId = options.projectId
     this.#repository = options.repository
     this.#contextRepository = options.contextRepository ?? null
+    this.#userContext = options.userContext ?? null
     this.#contextBuilder = options.contextBuilder ?? new ContextBuilder()
     this.#contextCompactor = new ContextCompactor()
     this.#allowedTools = [...(options.allowedTools ?? [
@@ -1156,13 +1161,15 @@ export class PersistentAgentLoop {
         await this.#projection.onPlanningStarted?.({ turn, legacyRunId, request: plannerRequest })
       }
       if (this.#contextRepository !== null) {
-        const [settings, directives, memories, goal, allContextItems, threadTurns] = await Promise.all([
+        const [settings, directives, memories, goal, allContextItems, threadTurns, userContext] = await Promise.all([
           this.#contextRepository.getSettings(this.#projectId),
           this.#contextRepository.listDirectives(this.#projectId, false),
           this.#contextRepository.listMemories(this.#projectId, false),
           Promise.resolve(activeGoal),
           this.#repository.listItems(turn.threadId),
-          this.#repository.listTurns(turn.threadId)
+          this.#repository.listTurns(turn.threadId),
+          // The person's brand and preferences help; a turn never waits on them failing.
+          this.#userContext === null ? Promise.resolve(null) : this.#userContext().catch(() => null)
         ])
         const contextItems = taskScopedItems(allContextItems, threadTurns, turn)
         const compactions = await this.#prepareContextCompactions(turn, contextItems)
@@ -1178,7 +1185,8 @@ export class PersistentAgentLoop {
           compactions,
           outboundPolicy: settings.outboundPolicy,
           allowedTools: this.#allowedTools,
-          resolvedDirectiveIds: resolution.resolvedDirectiveIds
+          resolvedDirectiveIds: resolution.resolvedDirectiveIds,
+          userContext
         })
         const existing = turn.contextManifestId === null
           ? null

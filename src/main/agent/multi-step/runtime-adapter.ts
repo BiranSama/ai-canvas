@@ -57,6 +57,8 @@ export function createMultiStepPlannerAdapter(options: {
   readonly fetcher?: typeof fetch
   /** This computer's fonts by default. */
   readonly fonts?: () => Promise<readonly LocalFontFamily[]>
+  /** The person's brand logo copied into this project, or null without one. */
+  readonly brandLogo?: () => Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null>
   /** Select Subject's local model, when this app has it. */
   readonly subject?: {
     ready(): Promise<boolean>
@@ -184,6 +186,7 @@ export function createMultiStepPlannerAdapter(options: {
         summary: `${image.label}（${image.defaultModel}），每次最多 ${maxImages} 张${image.pricePerImageCny === null ? '' : `，约 ¥${image.pricePerImageCny.toFixed(2)}/张`}；${references ? '可以用画布作参考图' : '不接受参考图，只能按文字生成'}；${edits ? image.protocol === 'ark-seedream' ? '局部修改用标注图引导' : '局部修改用蒙版' : '不支持局部修改'}。`
       }
     },
+    ...(options.brandLogo === undefined ? {} : { brandLogo: options.brandLogo }),
     readAttachment: readImage,
     readAsset: async (assetId) => {
       const read = await readImage(assetId)

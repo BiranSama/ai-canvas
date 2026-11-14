@@ -10,7 +10,7 @@ function snapshot(changes: Partial<ProviderSettingsSnapshot> = {}): ProviderSett
     defaultImageProviderId: 'image-provider',
     realCallsAuthorized: true,
     executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy,
-    textHelpers: { vision: null, backup: null },
+    textHelpers: { vision: null, backup: null, fast: null },
     checks: {},
     ...changes
   }
@@ -25,7 +25,7 @@ function desktop(initial: ProviderSettingsSnapshot) {
     listGenerationProfiles: vi.fn(async () => ({ realCallsAuthorized: true, profiles: [] })),
     getAgentEngine: vi.fn(async () => ({ active: 'multi-step', forcedByEnvironment: false })),
     checkProvider: vi.fn(async (id: string) => snapshot({ checks: { [id]: failed } })),
-    addTextHelper: vi.fn(async () => snapshot({ textHelpers: { vision: { ...newTextHelperConfig('vision'), configured: false }, backup: null } })),
+    addTextHelper: vi.fn(async () => snapshot({ textHelpers: { vision: { ...newTextHelperConfig('vision'), configured: false }, backup: null, fast: null } })),
     removeTextHelper: vi.fn(async () => snapshot()),
     setProviderConfig: vi.fn(async () => initial)
   }

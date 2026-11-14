@@ -33,7 +33,7 @@ async function assertAvailableDirectory(targetDirectory: string): Promise<void> 
 
 export class ProjectWorkspace {
   readonly directory: string
-  readonly metadata: ProjectMetadata
+  #metadata: ProjectMetadata
   readonly repository: ProjectRepository
   readonly assets: AssetStore
   readonly #now: () => string
@@ -46,7 +46,7 @@ export class ProjectWorkspace {
     options: ProjectWorkspaceOptions
   ) {
     this.directory = directory
-    this.metadata = metadata
+    this.#metadata = metadata
     this.repository = repository
     this.#now = options.now ?? (() => new Date().toISOString())
     this.#idFactory = options.idFactory ?? randomUUID
@@ -118,6 +118,17 @@ export class ProjectWorkspace {
       recovered,
       recoveredFromOlderSnapshot: !loaded.latestSnapshotWasValid
     }
+  }
+
+  get metadata(): ProjectMetadata {
+    return this.#metadata
+  }
+
+  /** Changes the name shown for the project; its folder keeps its name. */
+  async rename(name: string): Promise<void> {
+    const now = this.#now()
+    await this.repository.updateProjectName(name, now)
+    this.#metadata = { ...this.#metadata, name: name.trim() || this.#metadata.name, updatedAt: now }
   }
 
   async saveScene(scene: Scene, reason: SnapshotReason = 'explicit', batch: OperationBatch | null = null): Promise<string> {

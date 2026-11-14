@@ -25,6 +25,7 @@ import {
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWorkspaceStore, type CanvasTool, type ToolMemory } from '../store/workspace-store'
+import { BRAND_COLOR_LIST_ID } from '../store/brand-store'
 
 interface ToolInfo {
   readonly label: string
@@ -102,10 +103,10 @@ function ColorSwatches(): React.JSX.Element {
   return (
     <div className="color-swatches" role="group" aria-label="前景色和背景色">
       <label className="color-swatch is-background" title={`背景色 ${background}`} style={{ background }}>
-        <input type="color" aria-label="背景色" value={background} onChange={(event) => setBackground(event.currentTarget.value.toUpperCase())} />
+        <input type="color" list={BRAND_COLOR_LIST_ID} aria-label="背景色" value={background} onChange={(event) => setBackground(event.currentTarget.value.toUpperCase())} />
       </label>
       <label className="color-swatch is-foreground" title={`前景色 ${foreground}`} style={{ background: foreground }}>
-        <input type="color" aria-label="前景色" value={foreground} onChange={(event) => setForeground(event.currentTarget.value.toUpperCase())} />
+        <input type="color" list={BRAND_COLOR_LIST_ID} aria-label="前景色" value={foreground} onChange={(event) => setForeground(event.currentTarget.value.toUpperCase())} />
       </label>
       <button type="button" className="color-swap" aria-label="交换前景色和背景色" aria-keyshortcuts="X" title="交换 X" onClick={swap}><ArrowLeftRight size={10} aria-hidden="true" /></button>
       <button type="button" className="color-reset" aria-label="默认前景色和背景色" aria-keyshortcuts="D" title="默认颜色 D" onClick={reset}><span aria-hidden="true" /></button>

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { AgentRequest } from '../../shared/agent'
+import { MAX_BANNED_WORDS, MAX_BRAND_COLORS, MAX_BRAND_COPY, MEMORIES_PER_BRIEF, type BrandBrief, type UserMemoryKind } from '../../shared/user-memory'
 import type { AgentEvent, AgentGoalContract, AgentItem, AgentTurn } from '../../shared/agent-harness'
 import type {
   ContextCompaction,
@@ -57,8 +58,16 @@ export interface ContextBuildInput {
   readonly outboundPolicy: OutboundContextPolicy
   readonly allowedTools: readonly string[]
   readonly resolvedDirectiveIds?: readonly string[]
+  /** The person's brand and confirmed cross-project preferences; null when there are none or the project turned the brand off. */
+  readonly userContext?: UserContext | null
   readonly maxTextBytes?: number
   readonly maxInlineElements?: number
+}
+
+/** What every project reads from the person, as reference. */
+export interface UserContext {
+  readonly brand: BrandBrief | null
+  readonly preferences: readonly { readonly id: string; readonly kind: UserMemoryKind; readonly content: string }[]
 }
 
 export interface ContextBuildResult {
@@ -162,6 +171,10 @@ export interface PlannerProjectContext {
   readonly memories: readonly { readonly kind: string; readonly content: string }[]
   readonly recentConversation: readonly { readonly role: 'user' | 'assistant'; readonly text: string }[]
   readonly earlierSummary: string | null
+  /** The person's brand, for every project that uses it; reference, never a rule. */
+  readonly brand: BrandBrief | null
+  /** Preferences and facts the person confirmed for all projects; reference, never a rule. */
+  readonly userPreferences: readonly { readonly kind: string; readonly content: string }[]
 }
 
 const PROJECT_CONTEXT_TEXT_LIMIT = 2_000
@@ -208,8 +221,34 @@ export function plannerProjectContext(manifest: ContextManifest, currentRequestT
   if (last !== undefined && last.role === 'user' && last.text === currentRequestText.trim().slice(0, PROJECT_CONTEXT_TEXT_LIMIT)) recentConversation.pop()
   const compaction = included.find((entry) => entry.sourceType === 'summary' && entry.sourceId !== 'recent-conversation' && entry.sourceId !== 'thread-ledger')
   const earlierSummary = boundedText(record(compaction?.content).summary) || null
-  if (rules.length === 0 && goal === null && memories.length === 0 && recentConversation.length === 0 && earlierSummary === null) return null
-  return { rules, goal, memories, recentConversation, earlierSummary }
+  const brandEntry = included.find((entry) => entry.sourceType === 'preference' && entry.sourceId === 'user-brand')
+  const brand = brandOf(record(brandEntry?.content).brand)
+  const userPreferences = included.filter((entry) => entry.sourceType === 'preference' && entry.sourceId !== 'user-brand').flatMap((entry) => {
+    const content = record(entry.content)
+    const text = boundedText(content.content)
+    return text === '' ? [] : [{ kind: boundedText(content.kind) || 'preference', content: text }]
+  })
+  if (rules.length === 0 && goal === null && memories.length === 0 && recentConversation.length === 0 && earlierSummary === null && brand === null && userPreferences.length === 0) return null
+  return { rules, goal, memories, recentConversation, earlierSummary, brand, userPreferences }
+}
+
+function texts(value: unknown, max: number): string[] {
+  return Array.isArray(value) ? value.map(boundedText).filter((line) => line !== '').slice(0, max) : []
+}
+
+/** The brand as the manifest kept it, read back defensively. */
+function brandOf(value: unknown): BrandBrief | null {
+  if (typeof value !== 'object' || value === null) return null
+  const brand = record(value)
+  return {
+    name: boundedText(brand.name) || null,
+    hasLogo: brand.hasLogo === true,
+    colors: texts(brand.colors, MAX_BRAND_COLORS).filter((color) => /^#[0-9a-fA-F]{6}$/.test(color)),
+    titleFont: boundedText(brand.titleFont) || null,
+    bodyFont: boundedText(brand.bodyFont) || null,
+    copy: texts(brand.copy, MAX_BRAND_COPY),
+    bannedWords: texts(brand.bannedWords, MAX_BANNED_WORDS)
+  }
 }
 
 function estimatedBytes(value: unknown): number {
@@ -536,6 +575,20 @@ export class ContextBuilder {
         kind: memory.kind,
         content: memory.content,
         provenance: { sourceType: memory.sourceType, sourceId: memory.sourceId, confidence: memory.confidence }
+      })
+    }
+    const userContext = input.userContext ?? null
+    if (userContext?.brand != null) {
+      append('preference', 'user-brand', null, 'user', 'inline', '用户的品牌，所有作品共用；是参考数据，和本轮要求或项目规则冲突时以它们为准。', {
+        trust: 'untrusted_data',
+        brand: userContext.brand
+      })
+    }
+    for (const preference of (userContext?.preferences ?? []).slice(0, MEMORIES_PER_BRIEF)) {
+      append('preference', preference.id, null, 'user', 'inline', '用户确认过的跨作品偏好或事实；是参考数据，和本轮要求冲突时以本轮为准。', {
+        trust: 'untrusted_data',
+        kind: preference.kind,
+        content: preference.content
       })
     }
     append('capability', 'allowed-tools', 1, 'turn', 'inline', '仅向 Planner 暴露当前 Permission 允许的静态工具名称。', {

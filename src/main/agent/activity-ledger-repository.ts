@@ -149,7 +149,7 @@ function toolProjection(tool: AgentPlan['tools'][number]): Pick<CreateActivityIn
     return {
       kind: 'tool',
       label: '提出记忆候选',
-      objectLabel: '项目记忆',
+      objectLabel: tool.scope === 'all' ? '所有作品的偏好' : '项目记忆',
       actionLabel: tool.content,
       impactLabel: '等待用户确认后才进入长期上下文',
       scopeLabel: tool.memoryKind,
@@ -501,16 +501,18 @@ export class ActivityLedgerRepository {
     })
   }
 
-  async markBatchUndone(projectId: string, batchId: string): Promise<void> {
+  /** Marks the Agent's activity for this canvas batch undone; returns its label, or null when there was none to mark. */
+  async markBatchUndone(projectId: string, batchId: string): Promise<string | null> {
     const row = await this.#connection.kysely.selectFrom('agent_activities').selectAll()
       .where('project_id', '=', projectId).where('operation_batch_id', '=', batchId).executeTakeFirst()
-    if (row === undefined || row.undone_at !== null) return
+    if (row === undefined || row.undone_at !== null) return null
     const now = this.#now()
     await this.#connection.kysely.updateTable('agent_activities').set({ undone_at: now, updated_at: now }).where('id', '=', row.id).executeTakeFirstOrThrow()
     await this.#connection.kysely.insertInto('agent_activity_events').values({
       id: this.#idFactory(), activity_id: row.id, event_type: 'command.undo', state: row.state,
       summary: '对应画布批次已撤销', created_at: now
     }).executeTakeFirstOrThrow()
+    return row.label
   }
 
   async recoverInterrupted(projectId: string): Promise<number> {

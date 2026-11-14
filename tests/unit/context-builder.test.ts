@@ -246,7 +246,9 @@ describe('AH1 S5 ContextBuilder', () => {
       goal: { objective: '创建海报', completionDefinition: ['画布完整'] },
       memories: [{ kind: 'constraint', content: '作者偏好低饱和的清晨色调' }],
       recentConversation: [{ role: 'assistant', text: '上一次建议先建立布局。' }],
-      earlierSummary: null
+      earlierSummary: null,
+      brand: null,
+      userPreferences: []
     })
 
     const excludedMemory = contextManifestSchema.parse({

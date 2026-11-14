@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { cacheHitPercent, tokenCount } from '../../../shared/model-usage'
 import { formatTimeLimit } from '../../../shared/execution-timing'
 import { turnUsageRows, usageTotals, type TurnUsageRow } from '../agent/turn-usage'
+import type { BackgroundModelUsage } from '../../../shared/user-memory'
 
 function cost(value: number | null): string {
   if (value === null) return '未定价'
@@ -12,8 +13,12 @@ function cost(value: number | null): string {
 export function UsageSettings(): React.JSX.Element {
   const [rows, setRows] = useState<readonly TurnUsageRow[] | null>(null)
   const [problem, setProblem] = useState<string | null>(null)
+  const [background, setBackground] = useState<BackgroundModelUsage | null>(null)
   useEffect(() => {
     let mounted = true
+    void (window.desktop as Partial<typeof window.desktop>).getUserMemory?.()
+      .then((snapshot) => { if (mounted) setBackground(snapshot.backgroundUsage) })
+      .catch(() => undefined)
     void window.desktop.getAgentHarnessSnapshot()
       .then((snapshot) => { if (mounted) setRows(turnUsageRows(snapshot, Date.now())) })
       .catch((error: unknown) => { if (mounted) setProblem(error instanceof Error ? error.message : '没有读到用量。') })
@@ -35,6 +40,7 @@ export function UsageSettings(): React.JSX.Element {
         <span><small>输出</small><strong>{tokenCount(totals.outputTokens)}</strong></span>
         <span><small>估算费用</small><strong>{cost(totals.estimatedCostCny)}{totals.partlyUnpriced ? ' 起' : ''}</strong></span>
       </div>}
+      {background !== null && background.calls > 0 && <p className="usage-background" data-testid="usage-background">快模型（给作品起名、总结偏好，所有作品合计）：{background.calls} 次，输入 {tokenCount(background.inputTokens)}，输出 {tokenCount(background.outputTokens)}，估算 {cost(background.estimatedCostCny)}。</p>}
       {rows !== null && rows.length === 0 && <p>这个项目还没有对话。</p>}
       {rows !== null && rows.length > 0 && <table className="usage-table">
         <thead><tr><th>开始</th><th>要求</th><th>调用</th><th>输入</th><th>命中</th><th>输出</th><th>估算</th><th>用时</th></tr></thead>
