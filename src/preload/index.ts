@@ -30,6 +30,7 @@ import type { AssetImportInput, PixelImportInput, ProjectCreateInput, ProjectFav
 import type { SceneChangedEvent, SceneExecuteInput, SceneHistoryInput } from '../shared/scene-authority'
 import type { DesignDirectionSelectionInput } from '../shared/design-direction-selection'
 import type { ProjectWorkContext } from '../shared/project-work-context'
+import type { BrandKitInput, UserMemoryChange } from '../shared/user-memory'
 import type { SubjectModelDownloadInput, SubjectModelStatus, SubjectSegmentInput } from '../shared/segmentation'
 import type { AppUpdateSnapshot } from '../shared/app-update'
 import type { ExportFileChoice, ExportImageWrite, ExportPdfWrite, ExportPsdWrite, ExportTargetChoice, ExportWriteResult } from '../shared/artwork-export'
@@ -109,6 +110,22 @@ const desktopApi: DesktopApi = Object.freeze({
   removeTextHelper: (role: TextHelperRole) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerTextHelperRemove, role),
   removeImageProvider: (providerId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageRemove, providerId),
   setDefaultImageProvider: (providerId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.providerImageDefaultSet, providerId),
+  getUserMemory: () => ipcRenderer.invoke(DESKTOP_CHANNELS.userMemoryGet),
+  saveBrandKit: (input: BrandKitInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.userMemoryBrandSave, input),
+  setBrandLogo: (input: { readonly mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; readonly bytes: Uint8Array }) => ipcRenderer.invoke(DESKTOP_CHANNELS.userMemoryLogoSet, input),
+  clearBrandLogo: () => ipcRenderer.invoke(DESKTOP_CHANNELS.userMemoryLogoClear),
+  changeUserMemory: (change: UserMemoryChange) => ipcRenderer.invoke(DESKTOP_CHANNELS.userMemoryChange, change),
+  importBrandLogo: (projectId: string) => ipcRenderer.invoke(DESKTOP_CHANNELS.brandLogoImport, projectId),
+  onProjectRenamed: (listener: (event: { readonly projectId: string; readonly name: string }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: { readonly projectId: string; readonly name: string }): void => listener(value)
+    ipcRenderer.on(DESKTOP_EVENTS.projectRenamed, handler)
+    return () => ipcRenderer.removeListener(DESKTOP_EVENTS.projectRenamed, handler)
+  },
+  onUserMemoryChanged: (listener: () => void) => {
+    const handler = (): void => listener()
+    ipcRenderer.on(DESKTOP_EVENTS.userMemoryChanged, handler)
+    return () => ipcRenderer.removeListener(DESKTOP_EVENTS.userMemoryChanged, handler)
+  },
   listRecentProjects: () => ipcRenderer.invoke(DESKTOP_CHANNELS.projectRecent),
   createProject: (input: ProjectCreateInput) => ipcRenderer.invoke(DESKTOP_CHANNELS.projectCreate, input),
   openProject: () => ipcRenderer.invoke(DESKTOP_CHANNELS.projectOpen),

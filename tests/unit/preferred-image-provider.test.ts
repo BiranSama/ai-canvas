@@ -12,7 +12,7 @@ function settings(defaultImageProviderId = 'image-provider-grok1'): ProviderSett
     defaultImageProviderId,
     realCallsAuthorized: true,
     executionPolicy: DEFAULT_PROVIDER_CONFIG.executionPolicy,
-    textHelpers: { vision: null, backup: null },
+    textHelpers: { vision: null, backup: null, fast: null },
     checks: {}
   }
 }

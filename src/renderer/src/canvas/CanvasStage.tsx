@@ -88,6 +88,7 @@ import { opaqueWhereCovered } from './opaque-filter'
 import { useIsolationRefresh } from './isolation-refresh'
 import { useStylePreview, withStylePreview } from '../layer-styles/style-actions'
 import { hasLayerStyles } from '../../../shared/layer-styles'
+import { BRAND_COLOR_LIST_ID } from '../store/brand-store'
 
 interface Size {
   width: number
@@ -2708,11 +2709,11 @@ export const CanvasStage = forwardRef<CanvasStageHandle, CanvasStageProps>(funct
           <span className="shape-toolbar-divider" aria-hidden="true" />
           <label className="shape-color-well" title="填充">
             <span>填充</span>
-            <input aria-label="形状填充" type="color" value={shapeEditElement.fill} onChange={(event) => void updateElement(shapeEditElement.id, { fill: event.currentTarget.value }, `调整“${shapeEditElement.name}”填充`)} />
+            <input aria-label="形状填充" type="color" list={BRAND_COLOR_LIST_ID} value={shapeEditElement.fill} onChange={(event) => void updateElement(shapeEditElement.id, { fill: event.currentTarget.value }, `调整“${shapeEditElement.name}”填充`)} />
           </label>
           <label className={`shape-color-well${shapeEditElement.stroke === null ? ' is-off' : ''}`} title="描边">
             <span>描边</span>
-            <input aria-label="形状描边" type="color" value={shapeEditElement.stroke ?? '#7890AA'} onChange={(event) => void updateElement(shapeEditElement.id, { stroke: event.currentTarget.value }, `调整“${shapeEditElement.name}”描边`)} />
+            <input aria-label="形状描边" type="color" list={BRAND_COLOR_LIST_ID} value={shapeEditElement.stroke ?? '#7890AA'} onChange={(event) => void updateElement(shapeEditElement.id, { stroke: event.currentTarget.value }, `调整“${shapeEditElement.name}”描边`)} />
           </label>
           <button type="button" className={`shape-stroke-toggle${shapeEditElement.stroke === null ? '' : ' is-active'}`} aria-label={shapeEditElement.stroke === null ? '启用描边' : '关闭描边'} aria-pressed={shapeEditElement.stroke !== null} onClick={() => void updateElement(shapeEditElement.id, { stroke: shapeEditElement.stroke === null ? '#7890AA' : null }, shapeEditElement.stroke === null ? '启用形状描边' : '关闭形状描边')}><Minus size={15} /></button>
           <span className="shape-toolbar-divider" aria-hidden="true" />

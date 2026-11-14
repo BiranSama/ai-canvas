@@ -24,6 +24,7 @@ import { useProjectScope } from '../store/use-project-scope'
 import { completionFactsSchema } from '../../../shared/design-capability'
 import { formatTurnModelUsage } from '../../../shared/model-usage'
 import { splitReplySuggestions } from '../../../shared/reply-suggestions'
+import { PendingPreferencesNotice } from './PendingPreferencesNotice'
 
 const ACTIVE_STATUSES = new Set<AgentRun['status']>([
   'queued', 'planning', 'awaiting_confirmation', 'awaiting_execution', 'executing'
@@ -894,6 +895,7 @@ export function ConversationView({ Header, onShowLibrary }: {
         style={{ '--conversation-ratio': `${conversationRatio}%` } as CSSProperties}
       >
         <section className="conversation-document" aria-label="创作对话">
+          <PendingPreferencesNotice />
           <div className="conversation-title">
             <div className="conversation-title-row">
               <span>创作记录</span>

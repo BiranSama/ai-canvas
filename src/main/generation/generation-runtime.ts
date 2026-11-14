@@ -1,4 +1,11 @@
 import { paintedImageBytes } from '../paint/painted-image'
+import { BackgroundTextModel } from '../llm/background-text-model'
+import { UserMemoryStore } from '../user/user-memory-store'
+import { describeManualEdits, isAutoProjectName, looksLikeFeedback, parseProjectName, PreferenceLearner, PROJECT_NAME_SYSTEM } from '../user/preference-learning'
+import type { PreferenceSignalKind } from '../../shared/user-memory'
+import { brandBrief, MEMORIES_PER_BRIEF, type BrandKitInput, type UserMemoryChange, type UserMemorySnapshot } from '../../shared/user-memory'
+import { OutboundPolicyGuard, type UserContext } from '../agent/context-builder'
+import type { OutboundContextPolicy } from '../../shared/agent-context'
 import { createHash, randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { summarizeGenerationCosts } from '../../shared/generation-cost'
@@ -184,6 +191,12 @@ export interface GenerationRuntimeOptions {
   readonly agentEngine?: AgentEngine
   /** Select Subject's local model, for the agent's masks; the app passes its one service. */
   readonly subject?: () => Pick<SubjectSegmentation, 'status' | 'segment'>
+  /**
+   * Naming new projects and learning preferences, which call a text model
+   * outside any turn. On by default; the eval harness turns them off so a
+   * turn sees only its own model calls and writes nothing to user memory.
+   */
+  readonly backgroundJobs?: boolean
 }
 
 type ImageProviderConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -353,6 +366,19 @@ export class GenerationRuntime {
   readonly #librarySettings: LibrarySettingsStore
   readonly #recentProjects: RecentProjectsStore
   readonly #diagnosticLog: FileRedactedLogger
+  /** The brand and cross-project memory, on this computer. */
+  readonly #userMemory: UserMemoryStore
+  /** Small jobs outside any turn: the fast model, else the main one. */
+  readonly #backgroundText: BackgroundTextModel
+  readonly #learner: PreferenceLearner
+  readonly #projectRenameListeners = new Set<(event: { readonly projectId: string; readonly name: string }) => void>()
+  /** The open project's outbound policy, read when a signal or a name would leave this computer. */
+  #outboundPolicy: () => Promise<OutboundContextPolicy> = async () => 'minimal'
+  /** The scene as last committed, and the layers the Agent made or changed since the project opened, for learning from manual edits. */
+  #learningScene: { readonly projectId: string; scene: Scene | null; readonly agentMade: Set<string> } | null = null
+  /** Projects being named now, so one turn's end names a project once. */
+  readonly #naming = new Set<string>()
+  #backgroundJobs = true
   readonly #sceneListeners = new Set<(event: SceneChangedEvent) => void>()
   readonly #agentListeners = new Set<(event: AgentEvent) => void>()
   #sceneService!: SceneService
@@ -408,6 +434,18 @@ export class GenerationRuntime {
     })
     this.#recentProjects = new RecentProjectsStore(join(userDataDirectory, 'state', 'recent-projects.json'))
     this.#diagnosticLog = new FileRedactedLogger(join(userDataDirectory, 'logs', 'diagnostic.jsonl'))
+    this.#userMemory = new UserMemoryStore(join(userDataDirectory, 'state', 'user-memory.json'))
+    this.#backgroundText = new BackgroundTextModel({
+      config: providerConfig,
+      secrets,
+      authorization: providerUsage,
+      recordUsage: (reply) => this.#userMemory.recordBackgroundUsage(reply)
+    })
+    this.#learner = new PreferenceLearner({
+      store: this.#userMemory,
+      model: this.#backgroundText,
+      mayLeave: () => this.#textMayLeave()
+    })
   }
 
   static async create(userDataDirectory: string, options: GenerationRuntimeOptions = {}): Promise<GenerationRuntime> {
@@ -454,6 +492,7 @@ export class GenerationRuntime {
       options.agentEngine ?? environmentAgentEngine()
     )
     runtime.#subject = options.subject
+    runtime.#backgroundJobs = options.backgroundJobs ?? true
     await runtime.#refreshConfiguredImageProvider()
     await runtime.#activate(project, openedRecent)
     return runtime
@@ -639,6 +678,9 @@ export class GenerationRuntime {
     const conversationRepository = new ConversationRepository(projectDatabasePath)
     const harnessRepository = new AgentHarnessRepository(projectDatabasePath)
     const contextRepository = new AgentContextRepository(projectDatabasePath)
+    this.#outboundPolicy = async () => (await contextRepository.getSettings(project.workspace.metadata.id)).outboundPolicy
+    // The scene as opened is the baseline, so the first commit, the Agent's included, is compared with it.
+    this.#learningScene = { projectId: project.workspace.metadata.id, scene: project.scene, agentMade: new Set() }
     const outboundContextService = new OutboundContextService(contextRepository)
     const toolExecutor = new AgentToolExecutorShadow({
       repository: new AgentToolCallRepository(projectDatabasePath)
@@ -681,6 +723,7 @@ export class GenerationRuntime {
       assets: project.workspace.assets,
       scene: () => sceneService.state().scene,
       importImage: (bytes, sourceId) => this.#importDerivedImage(project, bytes, 'imported', sourceId),
+      brandLogo: () => this.#brandLogoAsset(project),
       ...(this.#subject === undefined ? {} : { subject: this.#subjectModel(this.#subject) })
     })
     // Both engines are ready; each new turn takes the one the settings call for now.
@@ -703,6 +746,7 @@ export class GenerationRuntime {
       toolExecutor,
       harnessRepository,
       contextRepository,
+      userContext: () => this.#userContextFor(project.workspace.metadata.id),
       generationWorkflowRepository: workflowRepository,
       loadGenerationJob: (jobId) => repository.getJob(jobId),
       activateGenerationJob: (jobId) => workflowCoordinator.activate(jobId),
@@ -743,6 +787,10 @@ export class GenerationRuntime {
         )
       }
       for (const listener of this.#agentListeners) listener(event)
+      if (event.type === 'turn.completed') {
+        const status = (event.payload as { readonly status?: unknown } | null)?.status
+        if (status === 'completed' || status === 'completed_with_notes') void this.#nameAfterFirstTurn(project)
+      }
     })
     this.#project = project
     this.#repository = repository
@@ -1380,6 +1428,7 @@ export class GenerationRuntime {
   async #afterSceneCommit(project: OpenProjectResult, event: SceneChangedEvent): Promise<void> {
     const scene = event.state.scene
     if (this.#project !== project) return
+    this.#learnFromCommit(project, event)
     await rm(join(this.#project.workspace.directory, 'preview', 'cover.webp'), { force: true }).catch(() => undefined)
     await this.#recentProjects.update(this.#project.workspace.metadata.id, {
       lastOpenedAt: new Date().toISOString(),
@@ -1483,6 +1532,145 @@ export class GenerationRuntime {
       summary: result.ok ? '连上了，能调用工具。' : `${result.failure.title}：${result.failure.nextAction}`.slice(0, 400)
     }).catch(() => undefined)
     return result
+  }
+
+  /** The brand and cross-project memory, with the open project's 使用品牌 switch. */
+  getUserMemory(): Promise<UserMemorySnapshot> {
+    return this.#userMemory.snapshot(this.#project.workspace.metadata.id)
+  }
+
+  async saveBrandKit(input: BrandKitInput): Promise<UserMemorySnapshot> {
+    await this.#userMemory.saveBrand(input)
+    return this.getUserMemory()
+  }
+
+  async setBrandLogo(input: { readonly mimeType: string; readonly bytes: Uint8Array }): Promise<UserMemorySnapshot> {
+    await this.#userMemory.setLogo(input)
+    return this.getUserMemory()
+  }
+
+  async clearBrandLogo(): Promise<UserMemorySnapshot> {
+    await this.#userMemory.clearLogo()
+    return this.getUserMemory()
+  }
+
+  async changeUserMemory(change: UserMemoryChange): Promise<UserMemorySnapshot> {
+    await this.#userMemory.change(change)
+    return this.getUserMemory()
+  }
+
+  /** What a turn of this project reads from the person: the brand unless the project turned it off, and enabled preferences. */
+  async #userContextFor(projectId: string): Promise<UserContext | null> {
+    const file = await this.#userMemory.read()
+    const brand = file.projectsWithoutBrand.includes(projectId) ? null : brandBrief(file.brand)
+    const preferences = file.memories.filter((entry) => entry.enabled).slice(-MEMORIES_PER_BRIEF).reverse()
+      .map((entry) => ({ id: entry.id, kind: entry.kind, content: entry.content }))
+    return brand === null && preferences.length === 0 ? null : { brand, preferences }
+  }
+
+  /** The brand logo copied into the open project, for 插入 Logo in the editor. */
+  async importBrandLogo(projectId: string): Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null> {
+    this.#assertRequestedProject(projectId)
+    return this.#brandLogoAsset(this.#project)
+  }
+
+  /** The person's logo copied into this project as an asset, or null without one. */
+  async #brandLogoAsset(project: OpenProjectResult): Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null> {
+    const logo = (await this.#userMemory.read()).brand.logo
+    if (logo === null) return null
+    // Staged as PNG whatever it was saved as, transparency kept; read as bytes so no file handle outlives the call.
+    const bytes = await this.#userMemory.readLogo(logo.fileName).then((source) => sharp(source).png().toBuffer()).catch(() => null)
+    if (bytes === null) return null
+    const asset = await this.#importDerivedImage(project, bytes, 'imported', 'brand-logo')
+    return { assetId: asset.id, width: logo.width, height: logo.height }
+  }
+
+  /**
+   * Whether the person's words may go to a text model outside any turn, judged by the open project's outbound
+   * policy through the same guard a turn's model call passes: 仅本地 blocks it, and so does a custom policy
+   * that does not list user text.
+   */
+  async #textMayLeave(): Promise<boolean> {
+    if (!this.#backgroundJobs) return false
+    const policy = await this.#outboundPolicy().catch(() => null)
+    if (policy === null) return false
+    return new OutboundPolicyGuard().evaluate({
+      policy, dataTypes: ['user_text'], imageAssetIds: [], providerLocal: false, permissionAllowsExternal: true
+    }).allowed
+  }
+
+  /** Records a preference signal unless the project keeps everything on this computer. */
+  async #signal(kind: PreferenceSignalKind, text: string): Promise<void> {
+    if (!this.#backgroundJobs) return
+    if (!await this.#textMayLeave()) return
+    await this.#learner.record(kind, text, this.#project.workspace.metadata.id)
+  }
+
+  /** The Agent's layers, and what the person then changed on them by hand. */
+  #learnFromCommit(project: OpenProjectResult, event: SceneChangedEvent): void {
+    const learning = this.#learningScene
+    if (learning === null || learning.projectId !== project.workspace.metadata.id) return
+    const before = learning.scene
+    const after = event.state.scene
+    learning.scene = after
+    if (before === null) return
+    if (event.reason === 'agent') {
+      for (const element of after.elements) {
+        const previous = before.elements.find((candidate) => candidate.id === element.id)
+        if (previous === undefined || JSON.stringify(previous) !== JSON.stringify(element)) learning.agentMade.add(element.id)
+      }
+      return
+    }
+    if (event.reason !== 'user') return
+    for (const line of describeManualEdits(before, after, learning.agentMade)) void this.#signal('edited', line)
+  }
+
+  /** What the person asked for in the project's first turn, or null. */
+  async #firstRequest(): Promise<string | null> {
+    const snapshot = await this.#agent.harnessSnapshot()
+    const first = [...snapshot.turns].sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))[0]
+    if (first === undefined) return null
+    const message = snapshot.items.find((item) => item.turnId === first.id && item.type === 'user_message')?.payload as { readonly request?: { readonly text?: unknown } } | undefined
+    const text = message?.request?.text
+    return typeof text === 'string' && text.trim() !== '' ? text.trim() : null
+  }
+
+  /**
+   * After a new project's first finished turn, a short name from what the
+   * person asked for, by the fast model. Only a project still under its
+   * automatic name is named, so a name the person chose, or one given
+   * before, stays. Without a model the name stays as it is.
+   */
+  async #nameAfterFirstTurn(project: OpenProjectResult): Promise<void> {
+    const projectId = project.workspace.metadata.id
+    if (!this.#backgroundJobs || !isAutoProjectName(project.workspace.metadata.name) || this.#naming.has(projectId)) return
+    this.#naming.add(projectId)
+    try {
+      if (!await this.#textMayLeave()) return
+      const request = await this.#firstRequest()
+      if (request === null) return
+      const reply = await this.#backgroundText.complete({ system: PROJECT_NAME_SYSTEM, prompt: request.slice(0, 500), maxOutputTokens: 1_024 })
+      const name = reply === null ? null : parseProjectName(reply.text)
+      if (name === null || this.#project !== project || !isAutoProjectName(project.workspace.metadata.name)) return
+      await project.workspace.rename(name)
+      await this.#recentProjects.update(projectId, { name }).catch(() => undefined)
+      for (const listener of this.#projectRenameListeners) listener({ projectId, name })
+    } catch (error) {
+      this.#diagnosticLog.write('warn', 'project.auto-name-failed', { message: error instanceof Error ? error.message : 'The project could not be named.' }, projectId)
+    } finally {
+      this.#naming.delete(projectId)
+    }
+  }
+
+  /** Called when a project gets its name after the first turn. */
+  subscribeProjectRenamed(listener: (event: { readonly projectId: string; readonly name: string }) => void): () => void {
+    this.#projectRenameListeners.add(listener)
+    return () => this.#projectRenameListeners.delete(listener)
+  }
+
+  /** Called after the brand or memory changes, from settings or from a turn. */
+  subscribeUserMemory(listener: () => void): () => void {
+    return this.#userMemory.onChange(listener)
   }
 
   /** 测试 on a service's card; its outcome is kept on the card until the service changes. */
@@ -2739,6 +2927,17 @@ export class GenerationRuntime {
         sceneRevisionAfter: receipt.sceneRevision
       }
     }
+    if (tool.kind === 'memory_candidate' && tool.scope === 'all') {
+      const candidate = await this.#userMemory.propose(tool.memoryKind === 'fact' ? 'fact' : 'preference', tool.content, 'agent')
+      return {
+        toolIndex: context.toolIndex,
+        ok: true,
+        batchId: null,
+        jobId: null,
+        affectedElementIds: [],
+        message: candidate === null ? '这条偏好已经记过或提过，没有重复提出。' : '已提出一条所有作品共用的偏好，等用户在「品牌与记忆」里确认。'
+      }
+    }
     if (tool.kind === 'memory_candidate') {
       await this.#agent.createMemoryCandidate({
         kind: tool.memoryKind,
@@ -2985,8 +3184,11 @@ export class GenerationRuntime {
     return this.#agent.resolveMemoryCandidate(input)
   }
 
-  setOutboundPolicy(input: SetOutboundPolicyInput): Promise<ProjectKnowledgeSnapshot> {
-    return this.#agent.setOutboundPolicy(input)
+  async setOutboundPolicy(input: SetOutboundPolicyInput): Promise<ProjectKnowledgeSnapshot> {
+    const snapshot = await this.#agent.setOutboundPolicy(input)
+    // A policy that keeps the person's words in: what this project taught about preferences stays on this computer from now on.
+    if (!await this.#textMayLeave()) await this.#userMemory.dropProjectSignals(this.#project.workspace.metadata.id).catch(() => undefined)
+    return snapshot
   }
 
   replayAgentEvents(afterSequence: number, limit = 1_000): Promise<readonly AgentEvent[]> {
@@ -3000,20 +3202,34 @@ export class GenerationRuntime {
 
   startAgentRun(request: AgentRequest, mode: AgentMode = 'collaboration', taskRelation?: TaskRelation): Promise<AgentRun> {
     this.#assertRequestedProject(request.projectId)
+    this.#learnFromRequest(request.text, taskRelation ?? null)
     return this.#agent.start(request, mode, taskRelation)
   }
 
   inputAgentRun(request: AgentRequest, semantics: TurnInputMode | AgentTaskDispatch): Promise<AgentRun> {
     this.#assertRequestedProject(request.projectId)
+    this.#learnFromRequest(request.text, typeof semantics === 'object' ? semantics.taskRelation : null)
     return this.#agent.input(request, semantics)
+  }
+
+  /** A request to redo the work, or a remark about it, is a signal; a plain request is not. */
+  #learnFromRequest(text: string, relation: TaskRelation | null): void {
+    const line = text.trim().slice(0, 200)
+    if (line === '') return
+    if (relation === 'revise_current') void this.#signal('redone', `让 Agent 改：「${line}」`)
+    else if (looksLikeFeedback(line)) void this.#signal('said', line)
   }
 
   resumeAgentQueue(): Promise<number> {
     return this.#agent.resumeQueue()
   }
 
-  resolveTemporaryAgentTurn(turnId: string, resolution: 'accept' | 'reject'): Promise<AgentHarnessSnapshot> {
-    return this.#agent.resolveTemporaryTry(turnId, resolution)
+  async resolveTemporaryAgentTurn(turnId: string, resolution: 'accept' | 'reject'): Promise<AgentHarnessSnapshot> {
+    const snapshot = await this.#agent.resolveTemporaryTry(turnId, resolution)
+    const message = snapshot.items.find((item) => item.turnId === turnId && item.type === 'user_message')?.payload as { readonly request?: { readonly text?: unknown } } | undefined
+    const request = typeof message?.request?.text === 'string' ? message.request.text.trim().slice(0, 120) : ''
+    if (request !== '') void this.#signal(resolution === 'accept' ? 'accepted' : 'undone', `${resolution === 'accept' ? '采用了' : '没有采用'} Agent 按「${request}」做的一版`)
+    return snapshot
   }
 
   confirmAgentRun(runId: string, optionId?: string): Promise<AgentRun> {
@@ -3027,7 +3243,8 @@ export class GenerationRuntime {
   async markActivityBatchUndone(batchId: string): Promise<void> {
     const ledger = new ActivityLedgerRepository(join(this.#project.workspace.directory, 'project.db'))
     try {
-      await ledger.markBatchUndone(this.#project.workspace.metadata.id, batchId)
+      const undone = await ledger.markBatchUndone(this.#project.workspace.metadata.id, batchId)
+      if (undone !== null) void this.#signal('undone', `撤销了 Agent 做的「${undone.slice(0, 120)}」`)
     } finally {
       await ledger.close()
     }
@@ -3062,6 +3279,7 @@ export class GenerationRuntime {
     this.#closePromise = (async () => {
       await lifecycle?.catch(() => undefined)
       this.#closed = true
+      this.#learner.close()
       await this.#closeProject(true)
       await this.#diagnosticLog.flush()
     })()

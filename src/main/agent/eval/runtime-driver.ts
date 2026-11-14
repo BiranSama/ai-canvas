@@ -271,7 +271,9 @@ export async function runRuntimeCase(
   const runtime = await GenerationRuntime.create(userData, {
     projectLibraryDirectory: join(userData, 'library'),
     ...options.runtimeOptions,
-    secretVault: vault
+    secretVault: vault,
+    // A case measures its turns: no naming or preference summaries beside them.
+    backgroundJobs: false
   })
   try {
     await runtime.setProviderConfig(context.llm)

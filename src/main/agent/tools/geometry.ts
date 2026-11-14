@@ -18,7 +18,12 @@ export const percentBoxSchema = z.array(z.number()).length(4).superRefine((box, 
   if (!(width! > 0) || width! > 400 || !(height! > 0) || height! > 400) context.addIssue({ code: 'custom', message: '宽、高要大于 0、不超过 400' })
 }).transform((box) => box as unknown as readonly [number, number, number, number]).describe('[x, y, 宽, 高]，单位是画布宽高的百分比，原点在左上角')
 
-export const colorSchema = z.string().trim().regex(/^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i, '颜色用 #RRGGBB')
+/*
+ * Checked here rather than sent as a JSON pattern: the pattern cost 54
+ * characters in each of nine tools, and a strict provider would have held
+ * the model to lower case, which #FFD2A1 in the light's own example breaks.
+ */
+export const colorSchema = z.string().trim().refine((value) => /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value), '颜色用 #RRGGBB').describe('#RRGGBB')
 
 const round1 = (value: number): number => Math.round(value * 10) / 10
 

@@ -11,11 +11,11 @@ export const MAIN_TEXT_MODEL_ID = 'openai-compatible-llm'
  * main model cannot, and one a request moves to when the main model is
  * rate limited or down.
  */
-export const TEXT_HELPER_IDS = { vision: 'text-model-vision', backup: 'text-model-backup' } as const
+export const TEXT_HELPER_IDS = { vision: 'text-model-vision', backup: 'text-model-backup', fast: 'text-model-fast' } as const
 export type TextHelperRole = keyof typeof TEXT_HELPER_IDS
 export const TEXT_HELPER_ROLES = Object.keys(TEXT_HELPER_IDS) as readonly TextHelperRole[]
-export const textHelperIdSchema = z.enum([TEXT_HELPER_IDS.vision, TEXT_HELPER_IDS.backup])
-export const textHelperRoleSchema = z.enum(['vision', 'backup'])
+export const textHelperIdSchema = z.enum([TEXT_HELPER_IDS.vision, TEXT_HELPER_IDS.backup, TEXT_HELPER_IDS.fast])
+export const textHelperRoleSchema = z.enum(['vision', 'backup', 'fast'])
 export const configurableProviderIdSchema = z.union([z.literal(MAIN_TEXT_MODEL_ID), textHelperIdSchema, imageProviderIdSchema])
 
 export const llmProtocolSchema = z.enum([
@@ -134,7 +134,7 @@ function transportWithinTimeout(value: { readonly timeoutMs: number; readonly tr
 
 export const llmProviderConfigSchema = llmProviderFieldsSchema.superRefine(transportWithinTimeout)
 
-/** A vision or backup text model: the same settings as the main one, under its own id and key. */
+/** A vision, backup or fast text model: the same settings as the main one, under its own id and key. */
 export const textHelperConfigSchema = llmProviderFieldsSchema.extend({ id: textHelperIdSchema }).superRefine(transportWithinTimeout)
 
 const legacyImageProviderConfigSchema = providerPublicFieldsSchema.extend({
@@ -173,9 +173,11 @@ export const providerCheckSchema = z.object({
 
 const textHelpersSchema = z.object({
   vision: textHelperConfigSchema.nullable().default(null),
-  backup: textHelperConfigSchema.nullable().default(null)
+  backup: textHelperConfigSchema.nullable().default(null),
+  /** For naming new projects and summing up preferences: a quicker, cheaper model; optional. */
+  fast: textHelperConfigSchema.nullable().default(null)
 }).superRefine((helpers, context) => {
-  for (const role of ['vision', 'backup'] as const) {
+  for (const role of TEXT_HELPER_ROLES) {
     const helper = helpers[role]
     if (helper !== null && helper.id !== TEXT_HELPER_IDS[role]) context.addIssue({ code: 'custom', path: [role, 'id'], message: 'A helper text model keeps its role\'s id.' })
   }
@@ -287,11 +289,11 @@ const providerConfigFileV6Schema = z.object({ version: z.literal(6), ...currentP
 /** Version 7 has the same shape; its time limits are at least the ones above. */
 const providerConfigFileV7Schema = z.object({ version: z.literal(7), ...currentProviderConfigFields }).superRefine(defaultImageIsSaved)
 
-/** Version 8 adds the vision and backup text models and each service's latest 测试. */
+/** Version 8 adds the vision and backup text models and each service's latest 测试; the fast model came later, absent until set. */
 const providerConfigFileV8Schema = z.object({
   version: z.literal(8),
   ...currentProviderConfigFields,
-  textHelpers: textHelpersSchema.default({ vision: null, backup: null }),
+  textHelpers: textHelpersSchema.default({ vision: null, backup: null, fast: null }),
   checks: z.record(configurableProviderIdSchema, providerCheckSchema).default({})
 }).superRefine(defaultImageIsSaved)
 
@@ -391,7 +393,7 @@ function asV7(file: z.infer<typeof providerConfigFileV6Schema>): z.infer<typeof 
 
 /** Settings saved before version 8 have no helper text models and no stored checks. */
 function asV8(file: z.infer<typeof providerConfigFileV7Schema>): z.infer<typeof providerConfigFileV8Schema> {
-  return { ...file, version: 8, textHelpers: { vision: null, backup: null }, checks: {} }
+  return { ...file, version: 8, textHelpers: { vision: null, backup: null, fast: null }, checks: {} }
 }
 
 export const providerConfigFileSchema = z.union([
@@ -417,7 +419,7 @@ export const providerSettingsSnapshotSchema = z.object({
   defaultImageProviderId: imageProviderIdSchema,
   realCallsAuthorized: z.boolean(),
   executionPolicy: providerExecutionPolicySchema,
-  textHelpers: z.object({ vision: textHelperSettingSchema.nullable(), backup: textHelperSettingSchema.nullable() }),
+  textHelpers: z.object({ vision: textHelperSettingSchema.nullable(), backup: textHelperSettingSchema.nullable(), fast: textHelperSettingSchema.nullable().default(null) }),
   checks: z.record(z.string(), providerCheckSchema)
 })
 
@@ -584,7 +586,7 @@ export const DEFAULT_PROVIDER_CONFIG: ProviderConfigFile = {
   ],
   defaultImageProviderId: PRIMARY_IMAGE_PROVIDER_ID,
   executionPolicy: DEFAULT_PROVIDER_EXECUTION_POLICY,
-  textHelpers: { vision: null, backup: null },
+  textHelpers: { vision: null, backup: null, fast: null },
   checks: {}
 }
 
@@ -615,7 +617,7 @@ export function newImageProviderConfig(id: string): ImageProviderConfig {
   })
 }
 
-const TEXT_HELPER_LABELS: Record<TextHelperRole, string> = { vision: '看图模型', backup: '备用模型' }
+const TEXT_HELPER_LABELS: Record<TextHelperRole, string> = { vision: '看图模型', backup: '备用模型', fast: '快模型' }
 
 /** An empty helper text model; it sends nothing until it has an address, a model and a key. */
 export function newTextHelperConfig(role: TextHelperRole): TextHelperConfig {
@@ -633,7 +635,7 @@ export function newTextHelperConfig(role: TextHelperRole): TextHelperConfig {
 }
 
 export function textHelperRoleOf(id: string): TextHelperRole | null {
-  return id === TEXT_HELPER_IDS.vision ? 'vision' : id === TEXT_HELPER_IDS.backup ? 'backup' : null
+  return id === TEXT_HELPER_IDS.vision ? 'vision' : id === TEXT_HELPER_IDS.backup ? 'backup' : id === TEXT_HELPER_IDS.fast ? 'fast' : null
 }
 
 /** A helper text model that can be called: an address, a model and a key. */

@@ -6,6 +6,7 @@ import { commitLayerStyle, isStylable, startingStyle, useStyleDialog, useStylePr
 import { useWorkspaceStore } from '../store/workspace-store'
 import { AdjustSlider } from './AdjustmentControls'
 import { BlendModeOptions } from './BlendModeOptions'
+import { BRAND_COLOR_LIST_ID } from '../store/brand-store'
 
 /*
  * Photoshop's 图层样式 dialog: the styles on the left, each with its switch,
@@ -19,7 +20,7 @@ function ColorField({ label, value, onChange }: { readonly label: string; readon
   return (
     <label className="adjust-row is-select">
       <span>{label}</span>
-      <input type="color" aria-label={label} value={value.toLowerCase()} onChange={(event) => onChange(event.currentTarget.value.toUpperCase())} />
+      <input type="color" list={BRAND_COLOR_LIST_ID} aria-label={label} value={value.toLowerCase()} onChange={(event) => onChange(event.currentTarget.value.toUpperCase())} />
     </label>
   )
 }
@@ -110,7 +111,7 @@ function StyleControls({ kind, style, onChange }: { readonly kind: LayerStyleKin
           <div className="gradient-preview" aria-hidden="true" style={{ background: `linear-gradient(90deg, ${stops.map((stop) => `${stop.color} ${percent(stop.offset)}%`).join(', ')})` }} />
           {stops.map((stop, index) => (
             <div className="gradient-stop" key={index}>
-              <input type="color" aria-label={`色标 ${index + 1} 颜色`} value={stop.color.toLowerCase()} onChange={(event) => setStop(index, { color: event.currentTarget.value.toUpperCase() })} />
+              <input type="color" list={BRAND_COLOR_LIST_ID} aria-label={`色标 ${index + 1} 颜色`} value={stop.color.toLowerCase()} onChange={(event) => setStop(index, { color: event.currentTarget.value.toUpperCase() })} />
               <AdjustSlider label={`色标 ${index + 1}（%）`} min={0} max={100} value={percent(stop.offset)} onChange={(value) => setStop(index, { offset: value / 100 })} />
               <button type="button" className="icon-button quiet" aria-label={`删除色标 ${index + 1}`} disabled={stops.length <= 2} onClick={() => set({ stops: stops.filter((_, at) => at !== index) })}>−</button>
             </div>

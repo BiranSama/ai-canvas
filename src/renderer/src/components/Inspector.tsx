@@ -21,6 +21,7 @@ import { UnifiedRenderSection } from './UnifiedRenderSection'
 import { ImeSafeInput, ImeSafeTextarea } from './ImeSafeTextField'
 import { BlendModeOptions } from './BlendModeOptions'
 import { simplePropertiesFor, type SimplePropertyDefinition } from '../inspector/property-schema'
+import { BRAND_COLOR_LIST_ID } from '../store/brand-store'
 
 const elementLabels: Record<SceneElement['type'], string> = {
   image: '图片',
@@ -60,7 +61,7 @@ function CanvasProperties({ canvas }: { canvas: Canvas }): React.JSX.Element {
     <div className="inspector-section canvas-properties">
       <p className="section-kicker">画布</p>
       <CanvasSizeControl key={`${canvas.aspectWidth}:${canvas.aspectHeight}:${canvas.outputWidth}:${canvas.outputHeight}`} inspector />
-      <label className="color-field"><span>背景颜色</span><input type="color" value={canvas.backgroundColor} onChange={(event) => update({ backgroundColor: event.currentTarget.value })} /></label>
+      <label className="color-field"><span>背景颜色</span><input type="color" list={BRAND_COLOR_LIST_ID} value={canvas.backgroundColor} onChange={(event) => update({ backgroundColor: event.currentTarget.value })} /></label>
       <label className="checkbox-field"><input type="checkbox" checked={canvas.transparent} onChange={(event) => update({ transparent: event.currentTarget.checked })} /><span>PNG / WebP 保留透明背景</span></label>
       <label className="wide-field">
         <span>整体风格</span>
@@ -214,7 +215,7 @@ function SimpleElementProperties({ element, canvas, horizontal }: { element: Sce
         if (property.kind === 'readonly') return <div key={property.id} className="simple-property-field is-readonly"><span>{property.label}</span><strong>{stringValue(property)}</strong></div>
         if (property.kind === 'toggle') return <label key={property.id} className="simple-property-field is-toggle"><span>{property.label}</span><input aria-label={property.label} type="checkbox" checked={booleanValue(property)} onChange={(event) => updateBoolean(property, event.currentTarget.checked)} /></label>
         if (property.kind === 'select') return <label key={property.id} className="simple-property-field"><span>{property.label}</span><select aria-label={property.label} value={stringValue(property)} onChange={(event) => updateString(property, event.currentTarget.value)}>{selectOptions[property.id]?.filter((option) => property.id !== 'shape' || option.value !== 'path' || (element.type === 'shape' && element.path !== undefined)).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-        if (property.kind === 'color') return <label key={property.id} className="simple-property-field is-color"><span>{property.label}</span><input aria-label={property.label} type="color" value={stringValue(property)} onInput={(event) => updateString(property, event.currentTarget.value)} /></label>
+        if (property.kind === 'color') return <label key={property.id} className="simple-property-field is-color"><span>{property.label}</span><input aria-label={property.label} type="color" list={BRAND_COLOR_LIST_ID} value={stringValue(property)} onInput={(event) => updateString(property, event.currentTarget.value)} /></label>
         if (property.kind === 'textarea') return <label key={property.id} className="simple-property-field is-textarea"><span>{property.label}</span><ImeSafeTextarea aria-label={property.label} rows={horizontal ? 1 : 2} value={stringValue(property)} onCommit={(value) => updateString(property, value)} /></label>
         if (property.kind === 'text') return <label key={property.id} className="simple-property-field"><span>{property.label}</span><ImeSafeInput aria-label={property.label} value={stringValue(property)} onCommit={(value) => updateString(property, value)} /></label>
         const value = numericValue(property)
@@ -331,15 +332,15 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
               <NumberField label="字距" value={element.letterSpacing} step={1} onChange={(value) => updateElement(element.id, { letterSpacing: value })} />
               <NumberField label="行距" value={element.lineHeight} onChange={(value) => updateElement(element.id, { lineHeight: value })} />
             </div>
-            <label className="color-field"><span>文字颜色</span><input type="color" value={element.fill} onInput={(event) => updateElement(element.id, { fill: event.currentTarget.value })} /></label>
+            <label className="color-field"><span>文字颜色</span><input type="color" list={BRAND_COLOR_LIST_ID} value={element.fill} onInput={(event) => updateElement(element.id, { fill: event.currentTarget.value })} /></label>
           </details>}
           {showSection('描边 阴影 模糊 effects stroke shadow blur') && <details className="inspector-section text-effects-section advanced-section">
             <summary>描边与阴影</summary>
             <p className="section-kicker">描边与阴影</p>
             <label className="checkbox-field"><input type="checkbox" checked={element.stroke !== null} onChange={(event) => updateElement(element.id, { stroke: event.currentTarget.checked ? '#202329' : null })} /><span>启用文字描边</span></label>
-            {element.stroke !== null && <><label className="color-field"><span>描边颜色</span><input type="color" value={element.stroke} onInput={(event) => updateElement(element.id, { stroke: event.currentTarget.value })} /></label><NumberField label="描边 px" value={element.strokeWidth} step={0.5} onChange={(value) => updateElement(element.id, { strokeWidth: Math.min(32, Math.max(0, value)) })} /></>}
+            {element.stroke !== null && <><label className="color-field"><span>描边颜色</span><input type="color" list={BRAND_COLOR_LIST_ID} value={element.stroke} onInput={(event) => updateElement(element.id, { stroke: event.currentTarget.value })} /></label><NumberField label="描边 px" value={element.strokeWidth} step={0.5} onChange={(value) => updateElement(element.id, { strokeWidth: Math.min(32, Math.max(0, value)) })} /></>}
             <label className="checkbox-field"><input type="checkbox" checked={element.shadowColor !== null} onChange={(event) => updateElement(element.id, { shadowColor: event.currentTarget.checked ? '#202329' : null })} /><span>启用柔和阴影</span></label>
-            {element.shadowColor !== null && <><label className="color-field"><span>阴影颜色</span><input type="color" value={element.shadowColor} onInput={(event) => updateElement(element.id, { shadowColor: event.currentTarget.value })} /></label><NumberField label="模糊 px" value={element.shadowBlur} step={1} onChange={(value) => updateElement(element.id, { shadowBlur: Math.min(128, Math.max(0, value)) })} /></>}
+            {element.shadowColor !== null && <><label className="color-field"><span>阴影颜色</span><input type="color" list={BRAND_COLOR_LIST_ID} value={element.shadowColor} onInput={(event) => updateElement(element.id, { shadowColor: event.currentTarget.value })} /></label><NumberField label="模糊 px" value={element.shadowBlur} step={1} onChange={(value) => updateElement(element.id, { shadowBlur: Math.min(128, Math.max(0, value)) })} /></>}
           </details>}
           {showSection('AI 文字风格 呈现方式 材质 style render strategy') && <details className="inspector-section text-ai-section advanced-section">
             <summary>AI 文字风格</summary>
@@ -365,7 +366,7 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
       {element.type === 'light' && showSection('光影 颜色 强度 柔和 方向 范围 light color intensity softness direction range') && (
         <div className="inspector-section">
           <p className="section-kicker">光影</p>
-          <label className="color-field"><span>颜色</span><input type="color" value={element.color} onChange={(event) => updateElement(element.id, { color: event.currentTarget.value })} /></label>
+          <label className="color-field"><span>颜色</span><input type="color" list={BRAND_COLOR_LIST_ID} value={element.color} onChange={(event) => updateElement(element.id, { color: event.currentTarget.value })} /></label>
           <div className="field-grid two-columns">
             <NumberField label="强度" value={element.intensity} onChange={(value) => updateElement(element.id, { intensity: Math.min(1, Math.max(0, value)) })} />
             <NumberField label="柔和" value={element.softness} onChange={(value) => updateElement(element.id, { softness: Math.min(1, Math.max(0, value)) })} />
@@ -377,10 +378,10 @@ function ElementProperties({ element, canvas, search = '' }: { element: SceneEle
       {element.type === 'shape' && showSection('形状 填充 形态 描边 圆角 shape fill stroke corner') && (
         <div className="inspector-section">
           <p className="section-kicker">形状</p>
-          <label className="color-field"><span>填充</span><input type="color" value={element.fill} onChange={(event) => updateElement(element.id, { fill: event.currentTarget.value })} /></label>
+          <label className="color-field"><span>填充</span><input type="color" list={BRAND_COLOR_LIST_ID} value={element.fill} onChange={(event) => updateElement(element.id, { fill: event.currentTarget.value })} /></label>
           <label className="wide-field"><span>形态</span><select value={element.shape} onChange={(event) => updateElement(element.id, { shape: event.currentTarget.value })}><option value="rectangle">矩形</option><option value="ellipse">椭圆</option><option value="line">线条</option>{element.path !== undefined && <option value="path">自由形状</option>}</select></label>
           <label className="checkbox-field"><input type="checkbox" checked={element.stroke !== null} onChange={(event) => updateElement(element.id, { stroke: event.currentTarget.checked ? '#7890AA' : null })} /><span>启用描边</span></label>
-          {element.stroke !== null && <><label className="color-field"><span>描边</span><input type="color" value={element.stroke} onChange={(event) => updateElement(element.id, { stroke: event.currentTarget.value })} /></label><NumberField label="描边比例" value={element.strokeWidth} onChange={(value) => updateElement(element.id, { strokeWidth: Math.min(1, Math.max(0, value)) })} /></>}
+          {element.stroke !== null && <><label className="color-field"><span>描边</span><input type="color" list={BRAND_COLOR_LIST_ID} value={element.stroke} onChange={(event) => updateElement(element.id, { stroke: event.currentTarget.value })} /></label><NumberField label="描边比例" value={element.strokeWidth} onChange={(value) => updateElement(element.id, { strokeWidth: Math.min(1, Math.max(0, value)) })} /></>}
           {element.shape === 'rectangle' && <NumberField label="圆角比例" value={element.cornerRadius} onChange={(value) => updateElement(element.id, { cornerRadius: Math.min(0.5, Math.max(0, value)) })} />}
         </div>
       )}

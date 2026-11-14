@@ -21,6 +21,7 @@ import {
 type TextModelConfig = MainTextModelConfig | TextHelperConfig
 import { createConfiguredLlmProtocol, createConfiguredTurnProtocol } from '../agent/llm-protocol-factory'
 import { turnText, turnToolCalls, type LlmAssistantTurn, type LlmTurnInput } from '../agent/llm/transcript'
+import { completeTextOnce } from '../llm/background-text-model'
 import { ArkHttpClient, ArkHttpError } from './ark-http-client'
 import type { ProviderUsageReservation } from './provider-usage-ledger'
 
@@ -141,7 +142,8 @@ export class ProviderConnectionValidator {
 
   /**
    * 测试 on a service's card: the main and backup models must call a tool,
-   * the vision model must say what colour a small square is, and an image
+   * the vision model must say what colour a small square is, the fast model
+   * must answer in words, and an image
    * service must accept its key on a request that cannot make a picture.
    */
   async check(idValue: string): Promise<ProviderCheck> {
@@ -167,10 +169,31 @@ export class ProviderConnectionValidator {
       const seen = await this.#validateVision(helper)
       return seen === null ? done(true, '连上了，能看图。') : done(false, seen)
     }
+    if (role === 'fast') {
+      const helper = config.textHelpers.fast
+      if (helper === null) return done(false, '还没有设置快模型。')
+      const problem = await this.#validateReply(helper)
+      return problem === null ? done(true, '连上了，能回答。') : done(false, problem)
+    }
     const image = imageProviderConfigs(config).find((candidate) => candidate.id === id)
     if (image === undefined) return done(false, '这个生图服务已经不存在。')
     const problem = await this.#validateImageKey(image)
     return problem === null ? done(true, '地址和 Key 可用。测试没有生成图片，也不收费。') : done(false, problem)
+  }
+
+  /** Null when the model answered a short question in words; otherwise what went wrong. */
+  async #validateReply(llm: TextHelperConfig): Promise<string | null> {
+    try {
+      if (llm.baseUrl === '' || llm.defaultModel === '') throw new ArkHttpError('PROVIDER_CONFIG_INCOMPLETE', '请先保存完整的地址、模型名和接口类型。')
+      const { text } = await completeTextOnce(llm, {
+        system: '你在帮 AI Canvas 验证连接。只回复「完成」两个字。',
+        prompt: '验证 AI Canvas 的连接。'
+      }, { ...this.#options, costCeilingCny: CONNECTION_COST_CEILING_CNY })
+      return text === '' ? '连上了，但模型没有回答文字。换一个模型再试。' : null
+    } catch (error) {
+      const failure = failurePresentation(error)
+      return `${failure.title}：${failure.detail} ${failure.nextAction}`
+    }
   }
 
   /** Null when the model named the colour of a small red square; otherwise what went wrong. */

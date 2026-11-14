@@ -32,7 +32,8 @@ import { createPortal } from 'react-dom'
 import { canBeClipped, clipStacks, pathInBox, type SceneElement } from '../../../domain'
 import { blendModeLabel, elementSupportsBlendMode, resolveBlendMode } from '../../../shared/blend-mode'
 import { getRuntimeAssetUrl, getRuntimeAssetVersion, subscribeRuntimeAssets } from '../assets/runtime-assets'
-import { mergeDown, mergeVisible, needsRasterizeToPaint, rasterizeLayer, toggleClippingMask } from '../canvas/layer-actions'
+import { insertBrandLogo, mergeDown, mergeVisible, needsRasterizeToPaint, rasterizeLayer, toggleClippingMask } from '../canvas/layer-actions'
+import { useBrandStore } from '../store/brand-store'
 import { transformSelection } from '../canvas/free-transform-store'
 import { ADJUSTMENT_LAYER_KINDS, createAdjustmentLayer } from '../adjustments/adjustment-actions'
 import { ADJUSTMENT_LABELS } from '../../../shared/adjustments'
@@ -239,6 +240,7 @@ export function LayerPanel(): React.JSX.Element {
   const [menu, setMenu] = useState<MenuState | null>(null)
   // Photoshop's 新建填充或调整图层 menu, opened from the panel's foot.
   const [adjustMenu, setAdjustMenu] = useState<{ readonly x: number; readonly y: number } | null>(null)
+  const brandHasLogo = useBrandStore((state) => state.hasLogo)
   const adjustMenuRef = useRef<HTMLDivElement>(null)
   const [styleMenu, setStyleMenu] = useState<{ readonly x: number; readonly y: number } | null>(null)
   const styleMenuRef = useRef<HTMLDivElement>(null)
@@ -603,7 +605,11 @@ export function LayerPanel(): React.JSX.Element {
         document.body
       )}
       {adjustMenu !== null && createPortal(
-        <div className="layer-menu" role="menu" aria-label="新建调整图层" ref={adjustMenuRef} style={{ left: Math.min(adjustMenu.x, window.innerWidth - 196), top: Math.max(8, adjustMenu.y - 8 - ADJUSTMENT_LAYER_KINDS.length * 30) }}>
+        <div className="layer-menu" role="menu" aria-label="新建调整图层" ref={adjustMenuRef} style={{ left: Math.min(adjustMenu.x, window.innerWidth - 196), top: Math.max(8, adjustMenu.y - 8 - (ADJUSTMENT_LAYER_KINDS.length + (brandHasLogo ? 1 : 0)) * 30 - (brandHasLogo ? 9 : 0)) }}>
+          {brandHasLogo && <>
+            <button type="button" role="menuitem" onClick={() => { setAdjustMenu(null); void insertBrandLogo() }}>插入 Logo</button>
+            <hr />
+          </>}
           {ADJUSTMENT_LAYER_KINDS.map((kind) => (
             <button key={kind} type="button" role="menuitem" onClick={() => { setAdjustMenu(null); void createAdjustmentLayer(kind) }}>{ADJUSTMENT_LABELS[kind]}…</button>
           ))}

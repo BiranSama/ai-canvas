@@ -2,6 +2,7 @@ import { canBeClipBase, canBeClipped, clipBases, clipStacks, cornersBendPaint, t
 import { MAX_EXPORT_EDGE } from '../../../shared/artwork-export'
 import { imageLayerSpace } from '../../../shared/layer-space'
 import { layerStyleReach } from '../../../shared/layer-styles'
+import { logoPlacement } from '../../../shared/user-memory'
 import type { GrayMask } from '../../../shared/mask-raster'
 import { showAppNotice } from '../components/app-notice'
 import { selectionClip, type SelectionClip } from '../selection/selection-clip'
@@ -67,11 +68,11 @@ async function drawnAsset(ids: readonly string[], summary: string, options: Laye
 }
 
 /** A new image layer directly above the topmost selected layer (or on top), selected; more commands go in the same step. */
-async function addImageLayer(assetId: string, transform: NormalizedTransform, summary: string, look: Partial<Pick<SceneElement, 'opacity' | 'blendMode'>> = {}, also: readonly SceneCommand[] = []): Promise<string | null> {
+async function addImageLayer(assetId: string, transform: NormalizedTransform, summary: string, look: Partial<Pick<SceneElement, 'opacity' | 'blendMode' | 'name'>> = {}, also: readonly SceneCommand[] = []): Promise<string | null> {
   const current = useWorkspaceStore.getState()
   const base = createElementForTool('image', current.scene, assetId)
   if (base?.type !== 'image') return null
-  const layer: SceneElement = { ...base, ...look, name: nextLayerName(current.scene.elements), transform, fit: 'fill', referenceRole: 'general' }
+  const layer: SceneElement = { ...base, ...look, name: look.name ?? nextLayerName(current.scene.elements), transform, fit: 'fill', referenceRole: 'general' }
   const above = Math.max(-1, ...current.scene.elements.filter((element) => current.selectedIds.includes(element.id)).map((element) => element.zIndex))
   const commands: SceneCommand[] = [{ kind: 'element.add', element: layer }]
   if (above >= 0 && above + 1 < current.scene.elements.length) commands.push({ kind: 'element.reorder', elementId: layer.id, toIndex: above + 1 })
@@ -90,6 +91,19 @@ export async function createBlankLayer(): Promise<string | null> {
   const asset = await window.desktop.importPixels({ projectId: scene.projectId, name: '空白图层.png', width: scene.canvas.outputWidth, height: scene.canvas.outputHeight })
   if (useWorkspaceStore.getState().scene.projectId !== scene.projectId) return null
   return addImageLayer(asset.id, FULL_CANVAS, '新建图层')
+}
+
+/** The brand logo as a new layer named Logo, a fifth of the width in the top-left corner, selected. */
+export async function insertBrandLogo(): Promise<string | null> {
+  const { scene } = useWorkspaceStore.getState()
+  const logo = await window.desktop.importBrandLogo(scene.projectId)
+  if (logo === null) {
+    showAppNotice('还没有品牌 Logo：在设置的「品牌与记忆」里上传。')
+    return null
+  }
+  const current = useWorkspaceStore.getState().scene
+  if (current.projectId !== scene.projectId) return null
+  return addImageLayer(logo.assetId, logoPlacement(undefined, logo, current.canvas), '插入 Logo', { name: 'Logo' })
 }
 
 type PixelLayer = Extract<SceneElement, { type: 'image' | 'text' | 'shape' }>

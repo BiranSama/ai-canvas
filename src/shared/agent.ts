@@ -255,7 +255,9 @@ export const memoryCandidateToolSchema = z.object({
   kind: z.literal('memory_candidate'),
   memoryKind: z.enum(['fact', 'choice', 'direction', 'constraint']),
   content: z.string().trim().min(1).max(4_000),
-  confidence: z.number().min(0).max(1)
+  confidence: z.number().min(0).max(1),
+  /** all: a preference for every project, kept on this computer; project (the default): this project's memory. */
+  scope: z.enum(['project', 'all']).optional()
 })
 
 export const directiveCreateToolSchema = z.object({

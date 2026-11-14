@@ -5,6 +5,7 @@ import { MAX_WEBP_EDGE, pdfLayout, pdfPageFits, pdfTooLarge, PRINT_WIDTHS, scale
 import { exportImage, exportPdf, exportPsd, exportSizes, sizePreview, softPrintImages, type ExportOutcome, type ExportProgress, type SoftImage } from '../export/export-artwork'
 import { useModalScope } from '../interaction/use-modal-scope'
 import { useWorkspaceStore } from '../store/workspace-store'
+import { BRAND_COLOR_LIST_ID } from '../store/brand-store'
 
 /*
  * 导出: the picture as an image, a layered PSD, a PDF to view or print, or
@@ -274,7 +275,7 @@ function ImageOptions({ options, transparent, width, height, disabled, onChange 
       {options.format === 'jpeg' && transparent && (
         <label className="export-color">
           <span>JPEG 没有透明，透明的地方填这个颜色</span>
-          <input type="color" aria-label="JPEG 背景色" value={options.jpegBackground} disabled={disabled} onChange={(event) => onChange({ jpegBackground: event.currentTarget.value })} />
+          <input type="color" list={BRAND_COLOR_LIST_ID} aria-label="JPEG 背景色" value={options.jpegBackground} disabled={disabled} onChange={(event) => onChange({ jpegBackground: event.currentTarget.value })} />
         </label>
       )}
       <ul className="export-notes">

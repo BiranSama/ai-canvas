@@ -281,7 +281,9 @@ describe('Provider and Agent P0 contracts without external calls', () => {
         goal: null,
         memories: [{ kind: 'preference', content: '偏好清晨的冷光' }],
         recentConversation: [{ role: 'assistant', text: '第一版用了暖色侧光。' }],
-        earlierSummary: null
+        earlierSummary: null,
+        brand: null,
+        userPreferences: []
       }
     })
     const body = postJson.mock.calls[0]?.[0].body as { input?: unknown; instructions?: unknown }

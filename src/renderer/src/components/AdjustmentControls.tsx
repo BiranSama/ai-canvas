@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import type { AdjustmentSettings, CurvePoints, LevelsChannel } from '../../../domain'
 import { autoCurves, autoLevels, curveTable, type Histogram } from '../../../shared/adjustments'
+import { BRAND_COLOR_LIST_ID } from '../store/brand-store'
 
 /*
  * The controls of each adjustment, as Photoshop's dialogs and properties
@@ -241,7 +242,7 @@ function BlackWhiteControls({ settings, onChange }: { readonly settings: Extract
       {weights.map(([key, label]) => <AdjustSlider key={key} label={label} min={-200} max={300} value={settings[key]} onChange={(value, final) => onChange({ ...settings, [key]: value }, final)} />)}
       <div className="adjust-row is-select">
         <label className="checkbox-field"><input type="checkbox" checked={settings.tint !== null} onChange={(event) => onChange({ ...settings, tint: event.currentTarget.checked ? DEFAULT_TINT : null }, true)} /><span>色调</span></label>
-        {settings.tint !== null && <input type="color" aria-label="色调颜色" value={settings.tint} onChange={(event) => onChange({ ...settings, tint: event.currentTarget.value.toUpperCase() }, false)} onBlur={(event) => onChange({ ...settings, tint: event.currentTarget.value.toUpperCase() }, true)} />}
+        {settings.tint !== null && <input type="color" list={BRAND_COLOR_LIST_ID} aria-label="色调颜色" value={settings.tint} onChange={(event) => onChange({ ...settings, tint: event.currentTarget.value.toUpperCase() }, false)} onBlur={(event) => onChange({ ...settings, tint: event.currentTarget.value.toUpperCase() }, true)} />}
       </div>
     </>
   )
