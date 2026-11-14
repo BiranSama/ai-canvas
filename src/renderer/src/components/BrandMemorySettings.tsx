@@ -200,7 +200,11 @@ export function BrandMemorySettings({ onStatus }: { readonly onStatus: (message:
       <label className="settings-switch-row">
         <input aria-label="从使用中学偏好" type="checkbox" checked={snapshot.learning.enabled} disabled={busy} onChange={(event) => {
           const enabled = event.currentTarget.checked
+          // The switch moves at once; a failed save puts it back.
+          const before = snapshot
+          setSnapshot({ ...snapshot, learning: { ...snapshot.learning, enabled } })
           void mutate(() => window.desktop.changeUserMemory({ action: 'learning', enabled }), enabled ? '会从使用中学偏好。' : '不再记新的信号。')
+            .then((saved) => { if (!saved) setSnapshot(before) })
         }} />
         <span>
           <strong>从使用中学偏好</strong>

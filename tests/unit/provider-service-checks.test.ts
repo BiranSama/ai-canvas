@@ -71,3 +71,18 @@ it('checks the backup model with its own key, the same way as the main one', asy
   await expect(check.check('text-model-backup')).resolves.toMatchObject({ ok: true, summary: '连上了，能调用工具。' })
   await expect(validator(config(), fetcher).validator.check('text-model-backup')).resolves.toMatchObject({ ok: false, summary: '还没有设置备用模型。' })
 })
+
+it('checks the fast model by asking for a short answer in words', async () => {
+  const fast = { ...newTextHelperConfig('fast'), baseUrl: 'https://fast.example.test/v1', defaultModel: 'fast-1' }
+  const fetcher = vi.fn<typeof fetch>(async (url, init) => {
+    expect(String(url)).toBe('https://fast.example.test/v1/chat/completions')
+    expect(new Headers(init?.headers).get('authorization')).toBe('Bearer fast-key-1234')
+    return json({ id: 'c4', choices: [{ finish_reason: 'stop', message: { content: '完成' } }] })
+  })
+  const keys = { 'text-model-fast': 'fast-key-1234' }
+  const { validator: check } = validator(config({ textHelpers: { vision: null, backup: null, fast } }), fetcher, keys)
+  await expect(check.check('text-model-fast')).resolves.toMatchObject({ ok: true, summary: '连上了，能回答。' })
+  const silent = validator(config({ textHelpers: { vision: null, backup: null, fast } }), async () => json({ id: 'c5', choices: [{ finish_reason: 'stop', message: { content: '' } }] }), keys)
+  await expect(silent.validator.check('text-model-fast')).resolves.toMatchObject({ ok: false, summary: expect.stringContaining('没有回答') })
+  await expect(validator(config(), fetcher, keys).validator.check('text-model-fast')).resolves.toMatchObject({ ok: false, summary: '还没有设置快模型。' })
+})

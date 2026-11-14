@@ -190,6 +190,12 @@ export interface GenerationRuntimeOptions {
   readonly agentEngine?: AgentEngine
   /** Select Subject's local model, for the agent's masks; the app passes its one service. */
   readonly subject?: () => Pick<SubjectSegmentation, 'status' | 'segment'>
+  /**
+   * Naming new projects and learning preferences, which call a text model
+   * outside any turn. On by default; the eval harness turns them off so a
+   * turn sees only its own model calls and writes nothing to user memory.
+   */
+  readonly backgroundJobs?: boolean
 }
 
 type ImageProviderConfig = Extract<ProviderPublicConfig, { kind: 'image' }>
@@ -371,6 +377,7 @@ export class GenerationRuntime {
   #learningScene: { readonly projectId: string; scene: Scene | null; readonly agentMade: Set<string> } | null = null
   /** Projects being named now, so one turn's end names a project once. */
   readonly #naming = new Set<string>()
+  #backgroundJobs = true
   readonly #sceneListeners = new Set<(event: SceneChangedEvent) => void>()
   readonly #agentListeners = new Set<(event: AgentEvent) => void>()
   #sceneService!: SceneService
@@ -480,6 +487,7 @@ export class GenerationRuntime {
       options.agentEngine ?? environmentAgentEngine()
     )
     runtime.#subject = options.subject
+    runtime.#backgroundJobs = options.backgroundJobs ?? true
     await runtime.#refreshConfiguredImageProvider()
     await runtime.#activate(project, openedRecent)
     return runtime
@@ -1555,7 +1563,7 @@ export class GenerationRuntime {
   }
 
   /** The brand logo copied into the open project, for 插入 Logo in the editor. */
-  importBrandLogo(projectId: string): Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null> {
+  async importBrandLogo(projectId: string): Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null> {
     this.#assertRequestedProject(projectId)
     return this.#brandLogoAsset(this.#project)
   }
@@ -1574,6 +1582,7 @@ export class GenerationRuntime {
 
   /** Records a preference signal unless the project keeps everything on this computer. */
   async #signal(kind: PreferenceSignalKind, text: string): Promise<void> {
+    if (!this.#backgroundJobs) return
     const policy = await this.#outboundPolicy().catch(() => 'local_only')
     if (policy === 'local_only') return
     await this.#learner.record(kind, text)
@@ -1616,7 +1625,7 @@ export class GenerationRuntime {
    */
   async #nameAfterFirstTurn(project: OpenProjectResult): Promise<void> {
     const projectId = project.workspace.metadata.id
-    if (!isAutoProjectName(project.workspace.metadata.name) || this.#naming.has(projectId)) return
+    if (!this.#backgroundJobs || !isAutoProjectName(project.workspace.metadata.name) || this.#naming.has(projectId)) return
     this.#naming.add(projectId)
     try {
       if (await this.#outboundPolicy().catch(() => 'local_only') === 'local_only') return

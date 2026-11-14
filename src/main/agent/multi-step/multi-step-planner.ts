@@ -10,6 +10,7 @@ import { LlmProtocolError } from '../llm-provider'
 import type { LlmStreamAccumulator } from '../llm-stream'
 import { turnText, turnToolCalls, type LlmAssistantTurn, type LlmImage, type LlmToolResult, type LlmTranscriptMessage, type LlmUsage } from '../llm/transcript'
 import type { LlmTurnProtocol } from '../llm/turn-protocol'
+import { plannerProjectContext } from '../context-builder'
 import type { AgentPlannerAttemptContext } from '../planner'
 import type { PlannerAdapter, PlannerInput, PlannerStepResult } from '../planner-adapter'
 import { availableAgentTools, llmToolDefinitions, prepareAgentToolCall } from '../tools/catalogue'
@@ -154,7 +155,13 @@ export class MultiStepPlannerAdapter implements PlannerAdapter {
     this.#options = options
   }
 
-  async next(input: PlannerInput, signal: AbortSignal, context?: AgentPlannerAttemptContext): Promise<PlannerStepResult> {
+  async next(input: PlannerInput, signal: AbortSignal, attempt?: AgentPlannerAttemptContext): Promise<PlannerStepResult> {
+    // The loop hands over the turn's context manifest, not its model-facing slice: project rules, memories,
+    // earlier conversation, the brand and the person's preferences are read from it here, as the plan-once adapter does.
+    const context = attempt === undefined ? undefined : {
+      ...attempt,
+      projectContext: attempt.projectContext ?? (input.contextManifest === null ? null : plannerProjectContext(input.contextManifest, input.request.text))
+    }
     const items = [...input.items].sort((left, right) => left.ordinal - right.ordinal)
     const resumed = this.#resumeApprovedCall(items)
     if (resumed !== null) return { step: resumed, modelTurns: 0 }

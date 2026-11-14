@@ -121,9 +121,12 @@ export function AgentContextSettings({ onStatus }: { readonly onStatus: (message
           <input aria-label="这个作品使用品牌" type="checkbox" checked={userMemory.projectUsesBrand} disabled={busy} onChange={(event) => {
             const enabled = event.currentTarget.checked
             const projectId = useWorkspaceStore.getState().scene.projectId
+            // The switch moves at once; a failed save puts it back.
+            const before = userMemory
+            setUserMemory({ ...userMemory, projectUsesBrand: enabled })
             void window.desktop.changeUserMemory({ action: 'project-brand', projectId, enabled })
               .then((next) => { setUserMemory(next); onStatus(enabled ? '这个作品会参考你的品牌。' : '这个作品不再参考品牌，偏好照常参考。') })
-              .catch((error: unknown) => onStatus(error instanceof Error ? error.message : '没有改动。'))
+              .catch((error: unknown) => { setUserMemory(before); onStatus(error instanceof Error ? error.message : '没有改动。') })
           }} />
           <span>
             <strong>使用品牌</strong>
