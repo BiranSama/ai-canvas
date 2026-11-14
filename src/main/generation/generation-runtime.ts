@@ -1570,11 +1570,10 @@ export class GenerationRuntime {
 
   /** The person's logo copied into this project as an asset, or null without one. */
   async #brandLogoAsset(project: OpenProjectResult): Promise<{ readonly assetId: string; readonly width: number; readonly height: number } | null> {
-    const path = await this.#userMemory.logoPath()
     const logo = (await this.#userMemory.read()).brand.logo
-    if (path === null || logo === null) return null
-    // Staged as PNG whatever it was saved as, transparency kept.
-    const bytes = await sharp(path).png().toBuffer().catch(() => null)
+    if (logo === null) return null
+    // Staged as PNG whatever it was saved as, transparency kept; read as bytes so no file handle outlives the call.
+    const bytes = await this.#userMemory.readLogo(logo.fileName).then((source) => sharp(source).png().toBuffer()).catch(() => null)
     if (bytes === null) return null
     const asset = await this.#importDerivedImage(project, bytes, 'imported', 'brand-logo')
     return { assetId: asset.id, width: logo.width, height: logo.height }

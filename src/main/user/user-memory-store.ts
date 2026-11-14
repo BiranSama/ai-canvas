@@ -78,12 +78,6 @@ export class UserMemoryStore {
     return !(await this.read()).projectsWithoutBrand.includes(projectId)
   }
 
-  /** The logo's file, or null without one. */
-  async logoPath(): Promise<string | null> {
-    const { brand } = await this.read()
-    return brand.logo === null ? null : join(this.#brandDirectory, brand.logo.fileName)
-  }
-
   async saveBrand(input: BrandKitInput): Promise<void> {
     const fields = brandKitInputSchema.parse(input)
     await this.#mutate((file) => ({ ...file, brand: { ...fields, logo: file.brand.logo } }))
@@ -101,7 +95,7 @@ export class UserMemoryStore {
       replaced.fileName = file.brand.logo?.fileName ?? null
       return { ...file, brand: { ...file.brand, logo: { fileName, mimeType, width: metadata.width!, height: metadata.height!, updatedAt: new Date().toISOString() } } }
     })
-    if (replaced.fileName !== null) await rm(join(this.#brandDirectory, replaced.fileName), { force: true })
+    if (replaced.fileName !== null) await this.#removeLogoFile(replaced.fileName)
   }
 
   async clearLogo(): Promise<void> {
@@ -110,7 +104,7 @@ export class UserMemoryStore {
       removed.fileName = file.brand.logo?.fileName ?? null
       return file.brand.logo === null ? file : { ...file, brand: { ...file.brand, logo: null } }
     })
-    if (removed.fileName !== null) await rm(join(this.#brandDirectory, removed.fileName), { force: true })
+    if (removed.fileName !== null) await this.#removeLogoFile(removed.fileName)
   }
 
   async change(input: UserMemoryChange): Promise<void> {
@@ -249,10 +243,24 @@ export class UserMemoryStore {
     return next
   }
 
+  /**
+   * A logo file's bytes. sharp is always given bytes, never the path: given a
+   * path, libvips keeps the file open in its cache, and on Windows an open
+   * file cannot be deleted, so replacing or removing the logo would fail.
+   */
+  readLogo(fileName: string): Promise<Buffer> {
+    return readFile(join(this.#brandDirectory, fileName))
+  }
+
+  /** The record no longer names this file; one that cannot go now is left behind rather than failing the change. */
+  async #removeLogoFile(fileName: string): Promise<void> {
+    await rm(join(this.#brandDirectory, fileName), { force: true, maxRetries: 3, retryDelay: 100 }).catch(() => undefined)
+  }
+
   async #logoPreview(brand: BrandKit): Promise<string | null> {
     if (brand.logo === null) return null
     try {
-      const bytes = await sharp(join(this.#brandDirectory, brand.logo.fileName)).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()
+      const bytes = await sharp(await this.readLogo(brand.logo.fileName)).resize(256, 256, { fit: 'inside', withoutEnlargement: true }).png().toBuffer()
       return `data:image/png;base64,${bytes.toString('base64')}`
     } catch {
       return null
